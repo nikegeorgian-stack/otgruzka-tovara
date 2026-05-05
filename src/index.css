@@ -76,10 +76,33 @@ body {
   cursor: pointer;
 }
 
+.action-btn.slim {
+  width: auto;
+  margin-top: 0;
+  padding: 10px 14px;
+  min-height: 40px;
+}
+
+.action-btn.ghost {
+  background: #e9eff8;
+  color: #0f172a;
+}
+
+.action-btn.active {
+  background: #ff5500;
+  color: #fff;
+}
+
 .error {
   margin-top: 10px;
   color: #b42318;
   font-size: 13px;
+}
+
+.error-banner {
+  border-color: #f8cccc;
+  color: #912018;
+  background: #fff7f7;
 }
 
 .hero {
@@ -205,8 +228,45 @@ h2 {
 
 .stage-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 10px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.view-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+
+.view-tabs .action-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.nav-board {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+}
+
+.lot-actions {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .hr-grid {
@@ -218,7 +278,7 @@ h2 {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 10px;
-  min-height: 260px;
+  min-height: 180px;
 }
 
 .stage-head {
@@ -273,6 +333,15 @@ h2 {
   color: #9a3412;
 }
 
+.product-image {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #dbe4f0;
+  margin: 8px 0;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
 @media (max-width: 1140px) {
   .stats,
   .stage-grid {
@@ -285,6 +354,10 @@ h2 {
 
   .flow-grid {
     grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -306,4 +379,68 @@ h2 {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doc-split {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 340px);
+  gap: 16px;
+  margin-top: 14px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  .doc-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doc-journal {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #dce4ef;
+  border-radius: 12px;
+}
+
+.doc-journal table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.doc-journal th,
+.doc-journal td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e8eef6;
+  vertical-align: top;
+}
+
+.doc-journal th {
+  text-align: left;
+  color: #475569;
+  font-weight: 600;
+}
+
+.doc-detail {
+  background: #fff;
+  border: 1px solid #dce4ef;
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 140px;
+}
+
+.doc-forms-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.doc-forms-grid .stage-card {
+  gap: 8px;
+  display: flex;
+  flex-direction: column;
 }

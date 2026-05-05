@@ -15,9 +15,80 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hr";
     }
 
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function canManageLots() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "line" ||
+        role() == "qc" ||
+        role() == "warehouse" ||
+        role() == "logistics"
+      );
+    }
+
+    function canManageOrders() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "warehouse" ||
+        role() == "logistics" ||
+        role() == "accounting"
+      );
+    }
+
+    function canManageRuns() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "line"
+      );
+    }
+
+    function canManageRolls() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "line" ||
+        role() == "warehouse" ||
+        role() == "logistics" ||
+        role() == "qc"
+      );
+    }
+
+    function canManageShipping() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "warehouse" ||
+        role() == "logistics"
+      );
+    }
+
+    function canManageSuppliers() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "warehouse"
+      );
+    }
+
+    function canManageReceipts() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "warehouse"
+      );
+    }
+
+    function canWriteErpDocuments() {
+      return signedIn() && (
+        role() == "admin" ||
+        role() == "warehouse" ||
+        role() == "logistics" ||
+        role() == "accounting"
+      );
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
-      allow create: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 
@@ -28,7 +99,64 @@ service cloud.firestore {
 
     match /lots/{lotId} {
       allow read: if signedIn();
-      allow write: if signedIn() && (isAdmin());
+      allow write: if canManageLots();
+    }
+
+    match /orders/{orderId} {
+      allow read: if signedIn();
+      allow write: if canManageOrders();
+    }
+
+    match /products/{productId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && role() == "admin";
+      allow update: if signedIn() && role() == "admin" &&
+        resource.data.internalId == request.resource.data.internalId;
+      allow delete: if signedIn() && role() == "admin";
+    }
+
+    match /productionRuns/{runId} {
+      allow read: if signedIn();
+      allow write: if canManageRuns();
+    }
+
+    match /rolls/{rollId} {
+      allow read: if signedIn();
+      allow write: if canManageRolls();
+    }
+
+    match /shipments/{shipmentId} {
+      allow read: if signedIn();
+      allow write: if canManageShipping();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if signedIn();
+      allow write: if canManageSuppliers();
+    }
+
+    match /receipts/{receiptId} {
+      allow read: if signedIn();
+      allow write: if canManageReceipts();
+    }
+
+    match /documents/{documentId} {
+      allow read: if signedIn();
+      allow create: if canWriteErpDocuments();
+      allow update: if canWriteErpDocuments();
+      allow delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if signedIn();
+      allow create: if canWriteErpDocuments();
+      allow update: if canWriteErpDocuments();
+    }
+
+    match /auditLogs/{logId} {
+      allow create: if signedIn();
+      allow read: if isAdmin();
+      allow update, delete: if false;
     }
   }
 }
