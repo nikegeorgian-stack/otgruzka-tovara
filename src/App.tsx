@@ -19,6 +19,7 @@ import {
   collection,
   doc,
   getDoc,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -38,6 +39,12 @@ import {
   type DocStatus,
   type ErpDocumentBase,
 } from './documentsLogic'
+import {
+  defaultWarehousesSeed,
+  ledgerEntry,
+  type StockLedgerEntry,
+  type WarehouseRecord,
+} from './warehouseTis'
 
 type Stage = 'raw' | 'impregnation' | 'qc' | 'warehouse' | 'shipment'
 type Role = 'admin' | 'line' | 'qc' | 'warehouse' | 'logistics' | 'accounting' | 'hr'
@@ -159,6 +166,8 @@ type ProducedRoll = {
   lengthM: number
   widthMm: number
   status: 'awaiting_qc' | 'approved' | 'reserved_for_shipment' | 'quarantine' | 'rejected' | 'shipped'
+  /** Склад / зона учёта готовой продукции (ТиС) */
+  warehouseLocation?: string
 }
 
 type Shipment = {
@@ -317,6 +326,12 @@ function App() {
   const [shipmentsState, setShipmentsState] = useState<Shipment[]>([])
   const [suppliersState, setSuppliersState] = useState<Supplier[]>([])
   const [receiptsState, setReceiptsState] = useState<Receipt[]>([])
+  const [warehousesState, setWarehousesState] = useState<WarehouseRecord[]>([])
+  const [stockLedgerState, setStockLedgerState] = useState<StockLedgerEntry[]>([])
+  const [inventorySubView, setInventorySubView] = useState<'balances' | 'movements' | 'warehouses'>('balances')
+  const [balancesWarehouseFilter, setBalancesWarehouseFilter] = useState<string>('__all__')
+  const [newWarehouse, setNewWarehouse] = useState({ code: '', name: '' })
+
   const [documentsState, setDocumentsState] = useState<ErpDocumentBase[]>([])
   const [docCategoryFilter, setDocCategoryFilter] = useState<DocJournalCategory>('all')
   const [docStatusFilter, setDocStatusFilter] = useState<'all' | DocStatus>('all')
@@ -327,14 +342,14 @@ function App() {
     productId: '',
     qtyRolls: 0,
     meters: 0,
-    warehouse: 'Склад сырья',
+    warehouse: defaultWarehousesSeed[0]?.name ?? 'СКЛ — Сырьё и материалы',
     docDate: new Date().toISOString().slice(0, 10),
     comment: '',
   })
   const [newDocPm, setNewDocPm] = useState({
     lotId: '',
-    warehouseFrom: '',
-    warehouseTo: '',
+    warehouseFrom: defaultWarehousesSeed[0]?.name ?? '',
+    warehouseTo: defaultWarehousesSeed[2]?.name ?? '',
     docDate: new Date().toISOString().slice(0, 10),
     comment: '',
   })
@@ -556,6 +571,32 @@ function App() {
       () => setError('Ошибка чтения поступлений'),
     )
 
+    const warehousesQuery = query(collection(db, 'warehouses'), orderBy('sortOrder', 'asc'))
+    const unsubWarehouses = onSnapshot(
+      warehousesQuery,
+      async (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WarehouseRecord, 'id'>) }))
+        if (!items.length && currentUser.role === 'admin') {
+          for (const w of defaultWarehousesSeed) {
+            await addDoc(collection(db, 'warehouses'), { ...w, createdAt: serverTimestamp() })
+          }
+        } else {
+          setWarehousesState(items as WarehouseRecord[])
+        }
+      },
+      () => setError('Ошибка чтения складов'),
+    )
+
+    const ledgerQuery = query(collection(db, 'stockLedger'), orderBy('createdAt', 'desc'), limit(400))
+    const unsubLedger = onSnapshot(
+      ledgerQuery,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<StockLedgerEntry, 'id'>) }))
+        setStockLedgerState(items as StockLedgerEntry[])
+      },
+      () => setError('Ошибка чтения движений ТМЦ'),
+    )
+
     const documentsQuery = query(collection(db, 'documents'), orderBy('createdAt', 'desc'))
     const unsubDocuments = onSnapshot(
       documentsQuery,
@@ -590,6 +631,8 @@ function App() {
       unsubShipments()
       unsubSuppliers()
       unsubReceipts()
+      unsubWarehouses()
+      unsubLedger()
       unsubDocuments()
       unsubUsers()
       unsubEmployees()
@@ -820,6 +863,66 @@ function App() {
     return map
   }, [effectiveLots, rollsState])
 
+  type TisBalanceRow = {
+    key: string
+    warehouse: string
+    register: string
+    productId: string
+    productName: string
+    internalId: string
+    qty: number
+    uom: string
+  }
+
+  const tisBalanceRows = useMemo(() => {
+    const rawDefault = warehousesState[0]?.name || defaultWarehousesSeed[0]?.name || '—'
+    const fgDefault =
+      warehousesState.find((w) => w.code === 'SKL-GP')?.name || defaultWarehousesSeed[2]?.name || '—'
+    type Agg = Omit<TisBalanceRow, 'key'>
+    const agg = new Map<string, Agg>()
+    function bump(
+      warehouse: string,
+      productId: string,
+      productName: string,
+      internalId: string,
+      register: string,
+      qty: number,
+      uom: string,
+    ) {
+      const bucket = `${warehouse}|${productId}|${register}`
+      const prev = agg.get(bucket)
+      if (prev) prev.qty += qty
+      else agg.set(bucket, { warehouse, register, productId, productName, internalId, qty, uom })
+    }
+    for (const lot of lotsState) {
+      const wh = (lot.warehouseLocation || '').trim() || rawDefault
+      const pid = lot.productId || '_'
+      const prod = productsState.find((p) => p.id === pid)
+      bump(wh, pid, lot.productName || lot.product, prod?.internalId || '—', 'Партии (сырьё / WIP)', lot.rolls, 'рул.')
+    }
+    for (const roll of rollsState) {
+      if (roll.status === 'shipped') continue
+      const wh = (roll.warehouseLocation || '').trim() || fgDefault
+      const pid = roll.productId || '_'
+      const prod = productsState.find((p) => p.id === pid)
+      bump(wh, pid, roll.productName, prod?.internalId || '—', 'Готовая продукция (рулоны)', 1, 'рул.')
+    }
+    let rows: TisBalanceRow[] = Array.from(agg.entries()).map(([bucket, r]) => ({
+      key: bucket,
+      warehouse: r.warehouse,
+      register: r.register,
+      productId: r.productId,
+      productName: r.productName,
+      internalId: r.internalId,
+      qty: r.qty,
+      uom: r.uom,
+    }))
+    rows.sort((a, b) => a.warehouse.localeCompare(b.warehouse) || a.productName.localeCompare(b.productName))
+    if (balancesWarehouseFilter !== '__all__')
+      rows = rows.filter((r) => r.warehouse === balancesWarehouseFilter)
+    return rows
+  }, [lotsState, rollsState, productsState, warehousesState, balancesWarehouseFilter])
+
   const filteredDocuments = useMemo(() => {
     return documentsState.filter((d) => {
       if (docStatusFilter !== 'all' && d.status !== docStatusFilter) return false
@@ -888,6 +991,7 @@ function App() {
     const run = runsState.find((r) => r.id === newRoll.runId)
     if (!run || newRoll.lengthM <= 0 || newRoll.widthMm <= 0) return
     const rollCode = nextRollCode()
+    const wipWh = warehousesState.find((w) => w.code === 'SKL-WIP')?.name || defaultWarehousesSeed[1]?.name || 'Цех / ожидание ОТК'
     await addDoc(collection(db, 'rolls'), {
       rollCode,
       runId: run.id,
@@ -896,6 +1000,7 @@ function App() {
       lengthM: newRoll.lengthM,
       widthMm: newRoll.widthMm,
       status: 'awaiting_qc',
+      warehouseLocation: wipWh,
       createdAt: serverTimestamp(),
     })
     await logAction('roll.create', { runId: run.id, rollCode, lengthM: newRoll.lengthM, widthMm: newRoll.widthMm })
@@ -904,8 +1009,32 @@ function App() {
 
   async function setRollQcStatus(rollId: string, status: ProducedRoll['status']) {
     if (!canManageQc && !canManageRuns) return
-    await updateDoc(doc(db, 'rolls', rollId), { status, updatedAt: serverTimestamp() })
+    const current = rollsState.find((r) => r.id === rollId)
+    const patch: Record<string, unknown> = { status, updatedAt: serverTimestamp() }
+    if (status === 'approved' && !current?.warehouseLocation) {
+      patch.warehouseLocation =
+        warehousesState.find((w) => w.code === 'SKL-GP')?.name ||
+        defaultWarehousesSeed[2]?.name ||
+        'СКЛ — Готовая продукция'
+    }
+    await updateDoc(doc(db, 'rolls', rollId), patch)
     await logAction('roll.qc.status', { rollId, status })
+  }
+
+  async function addWarehouseCatalog() {
+    if (!canManageReceipts || !firebaseUser) return
+    const code = newWarehouse.code.trim().toUpperCase()
+    const name = newWarehouse.name.trim()
+    if (!code || !name) return
+    await addDoc(collection(db, 'warehouses'), {
+      code,
+      name,
+      isActive: true,
+      sortOrder: (warehousesState.length + 1) * 10,
+      createdAt: serverTimestamp(),
+    })
+    await logAction('warehouse.create', { code, name })
+    setNewWarehouse({ code: '', name: '' })
   }
 
   async function createSupplier() {
@@ -1074,7 +1203,7 @@ function App() {
         status: 'draft',
         docDate: newDocOtg.docDate,
         contractorName: newDocOtg.customer.trim(),
-        warehouse: 'Склад ГП',
+        warehouse: defaultWarehousesSeed[2]?.name || 'СКЛ — Готовая продукция',
         shipmentRollIds: rolls.map((r) => r.id as string),
         lines: rolls.map((r) => ({
           productId: r.productId,
@@ -1137,7 +1266,7 @@ function App() {
         if (d.kind === 'incoming') {
           const lotIds: string[] = []
           const receiptIds: string[] = []
-          const wh = (d.warehouse || 'Склад сырья').trim()
+          const wh = (d.warehouse || '').trim() || defaultWarehousesSeed[0]?.name || 'СКЛ — Сырьё и материалы'
           for (const line of d.lines) {
             const receiptRef = doc(collection(db, 'receipts'))
             const lotRef = doc(collection(db, 'lots'))
@@ -1169,6 +1298,19 @@ function App() {
               createdBy: firebaseUser.uid,
             })
             lotIds.push(lotRef.id)
+            ledgerEntry(tx, db, {
+              docId: documentId,
+              docNumber: d.number,
+              docKind: 'incoming',
+              movementType: 'purchase_in',
+              warehouse: wh,
+              productId: line.productId || '',
+              productName: line.productName,
+              qtyDelta: line.qty,
+              uom: line.uom,
+              nomenclatureKind: 'raw_lot',
+              comment: line.note || '',
+            })
           }
           tx.update(dRef, {
             status: 'posted',
@@ -1189,6 +1331,37 @@ function App() {
             const lotRef = doc(db, 'lots', line.lotId)
             const ls = await tx.get(lotRef)
             if (!ls.exists()) throw new Error('lot_missing')
+            const ld = ls.data() as Lot
+            const qtyMv = ld.rolls
+            const fromWh =
+              ((d.warehouseFrom || '').trim() || ld.warehouseLocation || defaultWarehousesSeed[0]?.name || '').trim() ||
+              'СКЛ'
+            ledgerEntry(tx, db, {
+              docId: documentId,
+              docNumber: d.number,
+              docKind: 'movement',
+              movementType: 'transfer_out',
+              warehouse: fromWh,
+              productId: ld.productId || '',
+              productName: ld.productName || ld.product,
+              qtyDelta: -qtyMv,
+              uom: 'рул.',
+              nomenclatureKind: 'raw_lot',
+              comment: `На ${dest}`,
+            })
+            ledgerEntry(tx, db, {
+              docId: documentId,
+              docNumber: d.number,
+              docKind: 'movement',
+              movementType: 'transfer_in',
+              warehouse: dest,
+              productId: ld.productId || '',
+              productName: ld.productName || ld.product,
+              qtyDelta: qtyMv,
+              uom: 'рул.',
+              nomenclatureKind: 'raw_lot',
+              comment: `С ${fromWh}`,
+            })
             tx.update(lotRef, { warehouseLocation: dest, updatedAt: serverTimestamp() })
           }
           tx.update(dRef, {
@@ -1233,14 +1406,16 @@ function App() {
         if (d.kind === 'shipment_out') {
           const rollIds = d.shipmentRollIds || []
           if (!rollIds.length || !(d.contractorName || '').trim()) throw new Error('otg_invalid')
+          const rollsSnapshot: ProducedRoll[] = []
           const rollCodes: string[] = []
           for (const id of rollIds) {
             const rRef = doc(db, 'rolls', id)
             const rs = await tx.get(rRef)
             if (!rs.exists()) throw new Error('roll_missing')
-            const data = rs.data() as ProducedRoll
-            if (data.status !== 'approved') throw new Error('roll_not_available')
-            rollCodes.push(data.rollCode)
+            const pdata = rs.data() as ProducedRoll
+            if (pdata.status !== 'approved') throw new Error('roll_not_available')
+            rollsSnapshot.push(pdata)
+            rollCodes.push(pdata.rollCode)
           }
           const palletCode = `PAL-${new Date().getFullYear()}-${String(shipmentsState.length + 1).padStart(5, '0')}`
           const shipmentRef = doc(collection(db, 'shipments'))
@@ -1256,6 +1431,26 @@ function App() {
           for (const id of rollIds) {
             const rRef = doc(db, 'rolls', id)
             tx.update(rRef, { status: 'reserved_for_shipment', updatedAt: serverTimestamp() })
+          }
+          for (const pdata of rollsSnapshot) {
+            const fgWh =
+              pdata.warehouseLocation?.trim() ||
+              warehousesState.find((w) => w.code === 'SKL-GP')?.name ||
+              defaultWarehousesSeed[2]?.name ||
+              'СКЛ — Готовая продукция'
+            ledgerEntry(tx, db, {
+              docId: shipmentRef.id,
+              docNumber: `${d.number} / ${palletCode}`,
+              docKind: 'shipment_out',
+              movementType: 'shipment_out',
+              warehouse: fgWh,
+              productId: pdata.productId || '',
+              productName: pdata.productName,
+              qtyDelta: -1,
+              uom: 'рул.',
+              nomenclatureKind: 'finished_roll',
+              comment: `Отгрузка ${(d.contractorName || '').trim()}`,
+            })
           }
           tx.update(dRef, {
             status: 'posted',
@@ -1303,6 +1498,7 @@ ${lines}
     setError('')
     const year = new Date().getFullYear()
     try {
+      const whReceiving = defaultWarehousesSeed[0]?.name ?? 'СКЛ — Сырьё и материалы'
       await runTransaction(db, async (tx) => {
         const number = await allocateDocumentNumber(tx, db, 'incoming', year)
         const erpDocRef = doc(collection(db, 'documents'))
@@ -1329,10 +1525,23 @@ ${lines}
           rolls: newReceipt.qtyRolls,
           meters: 0,
           stage: 'raw',
-          warehouseLocation: 'Склад сырья',
+          warehouseLocation: whReceiving,
           note: `${newReceipt.note.trim() || 'Поступление'} | ${number}`,
           createdAt: serverTimestamp(),
           createdBy: firebaseUser.uid,
+        })
+        ledgerEntry(tx, db, {
+          docId: erpDocRef.id,
+          docNumber: number,
+          docKind: 'incoming',
+          movementType: 'purchase_in',
+          warehouse: whReceiving,
+          productId: product.id || '',
+          productName: product.name,
+          qtyDelta: newReceipt.qtyRolls,
+          uom: 'рул.',
+          nomenclatureKind: 'raw_lot',
+          comment: 'Быстрое поступление',
         })
         tx.set(erpDocRef, {
           kind: 'incoming',
@@ -1340,7 +1549,7 @@ ${lines}
           number,
           status: 'posted',
           docDate: new Date().toISOString().slice(0, 10),
-          warehouse: 'Склад сырья',
+          warehouse: whReceiving,
           contractorId: supplier.id,
           contractorName: supplier.name,
           basis: 'Поступление (форма быстрой приёмки)',
@@ -1381,16 +1590,19 @@ ${lines}
     const selectedRolls = rollsState.filter((r) => r.id && newShipment.selectedRollIds.includes(r.id))
     const palletCode = nextPalletCode()
     const shipmentRef = doc(collection(db, 'shipments'))
+    const customerName = newShipment.customer.trim()
     await runTransaction(db, async (tx) => {
+      const pdataArr: ProducedRoll[] = []
       for (const roll of selectedRolls) {
         const rollRef = doc(db, 'rolls', roll.id || '')
         const rollSnap = await tx.get(rollRef)
         if (!rollSnap.exists()) throw new Error('roll_missing')
         const data = rollSnap.data() as ProducedRoll
         if (data.status !== 'approved') throw new Error('roll_not_available')
+        pdataArr.push(data)
       }
       tx.set(shipmentRef, {
-        customer: newShipment.customer.trim(),
+        customer: customerName,
         palletCode,
         rollIds: selectedRolls.map((r) => r.id),
         rollCodes: selectedRolls.map((r) => r.rollCode),
@@ -1400,6 +1612,26 @@ ${lines}
       for (const roll of selectedRolls) {
         const rollRef = doc(db, 'rolls', roll.id || '')
         tx.update(rollRef, { status: 'reserved_for_shipment', updatedAt: serverTimestamp() })
+      }
+      for (const pdata of pdataArr) {
+        const fgWh =
+          pdata.warehouseLocation?.trim() ||
+          warehousesState.find((w) => w.code === 'SKL-GP')?.name ||
+          defaultWarehousesSeed[2]?.name ||
+          'СКЛ — Готовая продукция'
+        ledgerEntry(tx, db, {
+          docId: shipmentRef.id,
+          docNumber: palletCode,
+          docKind: 'shipment_quick',
+          movementType: 'shipment_out',
+          warehouse: fgWh,
+          productId: pdata.productId || '',
+          productName: pdata.productName,
+          qtyDelta: -1,
+          uom: 'рул.',
+          nomenclatureKind: 'finished_roll',
+          comment: `Отгрузка (${customerName})`,
+        })
       }
     })
     await logAction('shipment.create', { customer: newShipment.customer, palletCode, rolls: selectedRolls.length })
@@ -1619,7 +1851,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
               ['runs', 'Запуски MES', Factory],
               ['rolls', 'Рулоны', PackageCheck],
               ['qc', 'Контроль качества', CheckCircle2],
-              ['inventory', 'Остатки', Boxes],
+              ['inventory', 'ТиС / Склад', Boxes],
               ['suppliers', 'Поставщики', Users],
               ['receipts', 'Поступления', ClipboardList],
               ['orders', 'Заказы/резервы', ClipboardList],
@@ -1836,12 +2068,20 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     value={newDocPn.meters || ''}
                     onChange={(e) => setNewDocPn((s) => ({ ...s, meters: Number(e.target.value) }))}
                   />
-                  <input
+                  <select
                     className="field-input"
-                    placeholder="Склад приёмки"
                     value={newDocPn.warehouse}
                     onChange={(e) => setNewDocPn((s) => ({ ...s, warehouse: e.target.value }))}
-                  />
+                  >
+                    {(warehousesState.some((w) => w.isActive)
+                      ? warehousesState.filter((w) => w.isActive)
+                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
+                    ).map((w) => (
+                      <option key={w.id} value={w.name}>
+                        {w.code} — {w.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="date"
                     className="field-input"
@@ -1875,18 +2115,34 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       </option>
                     ))}
                   </select>
-                  <input
+                  <select
                     className="field-input"
-                    placeholder="Склад отправитель"
                     value={newDocPm.warehouseFrom}
                     onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseFrom: e.target.value }))}
-                  />
-                  <input
+                  >
+                    {(warehousesState.some((w) => w.isActive)
+                      ? warehousesState.filter((w) => w.isActive)
+                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
+                    ).map((w) => (
+                      <option key={`f-${w.id}`} value={w.name}>
+                        {w.code} — {w.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
                     className="field-input"
-                    placeholder="Склад получатель"
                     value={newDocPm.warehouseTo}
                     onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseTo: e.target.value }))}
-                  />
+                  >
+                    {(warehousesState.some((w) => w.isActive)
+                      ? warehousesState.filter((w) => w.isActive)
+                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
+                    ).map((w) => (
+                      <option key={`t-${w.id}`} value={w.name}>
+                        {w.code} — {w.name}
+                      </option>
+                    ))}
+                  </select>
                   <input type="date" className="field-input" value={newDocPm.docDate} onChange={(e) => setNewDocPm((s) => ({ ...s, docDate: e.target.value }))} />
                   <input className="field-input" placeholder="Комментарий" value={newDocPm.comment} onChange={(e) => setNewDocPm((s) => ({ ...s, comment: e.target.value }))} />
                   <button type="button" className="action-btn slim" onClick={() => createDraftPmDocument()}>
@@ -2570,26 +2826,165 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
       ) : null}
 
       {view === 'inventory' && (
-        <section className="board">
-          <h2>Интерфейс менеджера: остатки готовой продукции и резервы</h2>
-          <div className="stage-grid">
-            {productsState.map((product) => {
-              const ready = readyByProduct[product.id || ''] || 0
-              const reserved = reservationsByProduct[product.id || ''] || 0
-              const free = Math.max(0, ready - reserved)
-              return (
-                <article className="stage-card" key={product.id}>
-                  <div className="stage-head">
-                    <strong>{product.name}</strong>
-                    <span>{product.internalId}</span>
-                  </div>
-                  <div className="lot-line">Готово: {ready} рул.</div>
-                  <div className="lot-line">В резерве: {reserved} рул.</div>
-                  <div className="lot-line">Свободно: {free} рул.</div>
-                </article>
-              )
-            })}
+        <section className="board tis-board">
+          <h2>Складской учёт («1С: Торговля и склад» — упрощённо)</h2>
+          <p className="subtitle" style={{ marginTop: '-6px', color: '#475569', fontSize: '14px' }}>
+            Справочник складов, остатки по складам и регистрам, журнал движений после проведения документов (ПН / ПМ / отгрузка).
+            Полный функционал 1С здесь имитируется постепенно; числа по партиям и рулонам — отражение текущей модели Fibercell.
+          </p>
+          <div className="actions" style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              className={`action-btn slim ghost ${inventorySubView === 'balances' ? 'active' : ''}`}
+              onClick={() => setInventorySubView('balances')}
+            >
+              Остатки ТМЦ
+            </button>
+            <button
+              type="button"
+              className={`action-btn slim ghost ${inventorySubView === 'movements' ? 'active' : ''}`}
+              onClick={() => setInventorySubView('movements')}
+            >
+              Движение товаров
+            </button>
+            <button
+              type="button"
+              className={`action-btn slim ghost ${inventorySubView === 'warehouses' ? 'active' : ''}`}
+              onClick={() => setInventorySubView('warehouses')}
+            >
+              Справочник складов
+            </button>
           </div>
+
+          {inventorySubView === 'balances' ? (
+            <>
+              <div className="form-grid" style={{ marginBottom: 12 }}>
+                <select
+                  className="field-input"
+                  value={balancesWarehouseFilter}
+                  onChange={(e) => setBalancesWarehouseFilter(e.target.value)}
+                >
+                  <option value="__all__">Все склады</option>
+                  {warehousesState.map((w) => (
+                    <option key={w.id} value={w.name}>
+                      {w.code} — {w.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="doc-journal">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Склад</th>
+                      <th>Регистр</th>
+                      <th>Код</th>
+                      <th>Номенклатура</th>
+                      <th>Остаток</th>
+                      <th>Ед.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tisBalanceRows.map((row) => (
+                      <tr key={row.key}>
+                        <td>{row.warehouse}</td>
+                        <td>{row.register}</td>
+                        <td>{row.internalId}</td>
+                        <td>{row.productName}</td>
+                        <td>{row.qty.toLocaleString('ru-RU')}</td>
+                        <td>{row.uom}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!tisBalanceRows.length ? <div className="lot-line">Нет учётных остатков по правилам ТиС</div> : null}
+              </div>
+              <div className="stage-grid" style={{ marginTop: 18 }}>
+                {productsState.map((product) => {
+                  const ready = readyByProduct[product.id || ''] || 0
+                  const reserved = reservationsByProduct[product.id || ''] || 0
+                  const free = Math.max(0, ready - reserved)
+                  return (
+                    <article className="stage-card" key={product.id}>
+                      <div className="stage-head">
+                        <strong>Резервы по заказам</strong>
+                        <span>{product.internalId}</span>
+                      </div>
+                      <div className="lot-line">{product.name}</div>
+                      <div className="lot-line">ГП (все склады): {ready} рул.</div>
+                      <div className="lot-line">В резерве: {reserved} рул.</div>
+                      <div className="lot-line">Свободно: {free} рул.</div>
+                    </article>
+                  )
+                })}
+              </div>
+            </>
+          ) : null}
+
+          {inventorySubView === 'movements' ? (
+            <div className="doc-journal">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Документ</th>
+                    <th>Тип</th>
+                    <th>Склад</th>
+                    <th>Номенклатура</th>
+                    <th>Изм.</th>
+                    <th>Ед.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockLedgerState.map((e) => (
+                    <tr key={e.id}>
+                      <td>{e.docNumber}</td>
+                      <td>{e.movementType}</td>
+                      <td>{e.warehouse}</td>
+                      <td>{e.productName}</td>
+                      <td>{e.qtyDelta > 0 ? `+${e.qtyDelta}` : e.qtyDelta}</td>
+                      <td>{e.uom}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!stockLedgerState.length ? <div className="lot-line">Движений пока нет — проведите приход или отгрузку</div> : null}
+            </div>
+          ) : null}
+
+          {inventorySubView === 'warehouses' ? (
+            <>
+              {canManageReceipts ? (
+                <div className="form-grid" style={{ marginBottom: 14 }}>
+                  <input
+                    className="field-input"
+                    placeholder="Код (например SKL-NEW)"
+                    value={newWarehouse.code}
+                    onChange={(v) => setNewWarehouse((s) => ({ ...s, code: v.target.value }))}
+                  />
+                  <input
+                    className="field-input"
+                    placeholder="Наименование склада"
+                    value={newWarehouse.name}
+                    onChange={(v) => setNewWarehouse((s) => ({ ...s, name: v.target.value }))}
+                  />
+                  <button type="button" className="action-btn slim" onClick={() => addWarehouseCatalog()}>
+                    Добавить склад
+                  </button>
+                </div>
+              ) : null}
+              <div className="stage-grid">
+                {warehousesState.map((w) => (
+                  <article className="stage-card" key={w.id}>
+                    <div className="stage-head">
+                      <strong>{w.name}</strong>
+                      <span>{w.code}</span>
+                    </div>
+                    <div className="lot-line">{w.isActive ? 'Активен' : 'Не используется'}</div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : null}
         </section>
       )}
 
