@@ -16,7 +16,23 @@ export const defaultWarehousesSeed: Omit<WarehouseRecord, 'id'>[] = [
   { code: 'SKL-SHIP', name: 'Зона отгрузки', isActive: true, sortOrder: 40 },
 ]
 
-export type StockLedgerMovementType = 'purchase_in' | 'transfer_out' | 'transfer_in' | 'shipment_out'
+export type StockLedgerMovementType =
+  | 'purchase_in'
+  | 'transfer_out'
+  | 'transfer_in'
+  | 'shipment_out'
+  | 'writeoff'
+
+export function movementTypeRu(t: StockLedgerMovementType): string {
+  const m: Record<StockLedgerMovementType, string> = {
+    purchase_in: 'Приход',
+    transfer_out: 'Передача со склада',
+    transfer_in: 'Поступление на склад',
+    shipment_out: 'Отгрузка',
+    writeoff: 'Списание',
+  }
+  return m[t] || t
+}
 
 export type StockLedgerEntry = {
   id?: string

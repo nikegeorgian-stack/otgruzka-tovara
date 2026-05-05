@@ -42,6 +42,7 @@ import {
 import {
   defaultWarehousesSeed,
   ledgerEntry,
+  movementTypeRu,
   type StockLedgerEntry,
   type WarehouseRecord,
 } from './warehouseTis'
@@ -352,6 +353,13 @@ function App() {
     warehouseTo: defaultWarehousesSeed[2]?.name ?? '',
     docDate: new Date().toISOString().slice(0, 10),
     comment: '',
+  })
+  const [newDocSp, setNewDocSp] = useState({
+    lotId: '',
+    qtyRolls: 0,
+    warehouse: defaultWarehousesSeed[0]?.name ?? '',
+    docDate: new Date().toISOString().slice(0, 10),
+    reason: '',
   })
   const [newDocZk, setNewDocZk] = useState({
     customer: '',
@@ -1150,6 +1158,56 @@ function App() {
     }))
   }
 
+  async function createDraftSpDocument() {
+    if (!canWriteDocuments || !firebaseUser || !currentUser) return
+    const lot = lotsState.find((l) => l.id === newDocSp.lotId)
+    const qty = Number(newDocSp.qtyRolls) || 0
+    if (!lot || qty <= 0 || qty > (lot.rolls || 0)) {
+      setError('СП черновик: выберите партию с остатком и количество рулонов от 1 до остатка партии')
+      return
+    }
+    if (!newDocSp.warehouse.trim()) {
+      setError('СП: укажите склад списания')
+      return
+    }
+    setError('')
+    const year = Number(newDocSp.docDate.slice(0, 4)) || new Date().getFullYear()
+    await runTransaction(db, async (tx) => {
+      const number = await allocateDocumentNumber(tx, db, 'writeoff', year)
+      const docRef = doc(collection(db, 'documents'))
+      tx.set(docRef, {
+        kind: 'writeoff',
+        journalCategory: defaultJournalCategory('writeoff'),
+        number,
+        status: 'draft',
+        docDate: newDocSp.docDate,
+        warehouse: newDocSp.warehouse.trim(),
+        basis: `Списание партии ${lot.id}`,
+        lines: [
+          {
+            lotId: lot.id,
+            productId: lot.productId,
+            productName: lot.productName || lot.product,
+            qty,
+            uom: 'рул.',
+            note: newDocSp.reason.trim() || undefined,
+          },
+        ],
+        comment: newDocSp.reason.trim(),
+        authorUid: firebaseUser.uid,
+        authorName: currentUser.name,
+        createdAt: serverTimestamp(),
+      })
+    })
+    await logAction('document.create', { kind: 'writeoff' })
+    setNewDocSp((s) => ({
+      ...s,
+      lotId: '',
+      qtyRolls: 0,
+      reason: '',
+    }))
+  }
+
   async function createDraftZkDocument() {
     if (!canWriteDocuments || !firebaseUser || !currentUser) return
     const product = productsState.find((p) => p.id === newDocZk.productId)
@@ -1373,6 +1431,46 @@ function App() {
           return
         }
 
+        if (d.kind === 'writeoff') {
+          const docWh = (d.warehouse || '').trim() || defaultWarehousesSeed[0]?.name || 'СКЛ'
+          const linkedLotIds: string[] = []
+          for (const line of d.lines) {
+            if (!line.lotId || !line.qty || line.qty <= 0) throw new Error('sp_invalid_line')
+            const lotRef = doc(db, 'lots', line.lotId)
+            const ls = await tx.get(lotRef)
+            if (!ls.exists()) throw new Error('lot_missing')
+            const ld = ls.data() as Lot
+            const currentRolls = Number(ld.rolls) || 0
+            if (line.qty > currentRolls) throw new Error('sp_over_qty')
+            const lotWh = (ld.warehouseLocation || '').trim() || docWh
+            if (lotWh !== docWh) throw new Error('sp_warehouse_mismatch')
+            const newRolls = currentRolls - line.qty
+            ledgerEntry(tx, db, {
+              docId: documentId,
+              docNumber: d.number,
+              docKind: 'writeoff',
+              movementType: 'writeoff',
+              warehouse: lotWh,
+              productId: ld.productId || '',
+              productName: ld.productName || ld.product,
+              qtyDelta: -line.qty,
+              uom: line.uom || 'рул.',
+              nomenclatureKind: 'raw_lot',
+              comment: (line.note || d.comment || '').trim() || 'Списание ТМЦ',
+            })
+            tx.update(lotRef, { rolls: newRolls, updatedAt: serverTimestamp() })
+            linkedLotIds.push(line.lotId)
+          }
+          tx.update(dRef, {
+            status: 'posted',
+            postedAt: serverTimestamp(),
+            postedByUid: currentUser.uid,
+            postedByName: currentUser.name,
+            linkedLotIds,
+          })
+          return
+        }
+
         if (d.kind === 'customer_order') {
           const item = d.lines[0]
           if (!item?.productId) throw new Error('no_product')
@@ -1465,12 +1563,21 @@ function App() {
         throw new Error('unknown_kind')
       })
       await logAction('document.post', { documentId })
-    } catch {
+    } catch (e) {
+      const code = e instanceof Error ? e.message : ''
+      const hint =
+        code === 'sp_over_qty'
+          ? 'СП: нельзя списать больше остатка партии.'
+          : code === 'sp_warehouse_mismatch'
+            ? 'СП: склад документа должен совпадать со складом учёта партии.'
+            : code === 'sp_invalid_line'
+              ? 'СП: проверьте строки (партия и количество).'
+              : 'Проверьте статусы рулонов, остатки партий и заполнение полей.'
       await updateDoc(doc(db, 'documents', documentId), {
-        postingError: 'Проверьте статусы рулонов и заполнение полей',
+        postingError: hint,
         updatedAt: serverTimestamp(),
       }).catch(() => {})
-      setError('Не удалось провести документ. Для отгрузки нужны только approved рулоны.')
+      setError(`Не удалось провести документ. ${hint}`)
     }
   }
 
@@ -1963,8 +2070,9 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <td>{statusRu(d.status)}</td>
                       <td>{categoryRu((d.journalCategory || 'warehouse') as DocJournalCategory)}</td>
                       <td>
-                        {d.contractorName || '—'}{' '}
-                        {d.kind === 'movement' ? `(${d.warehouseFrom || '?'}→${d.warehouseTo || '?'})` : ''}
+                        {d.kind === 'writeoff'
+                          ? `Склад: ${d.warehouse || '—'}`
+                          : `${d.contractorName || '—'} ${d.kind === 'movement' ? `(${d.warehouseFrom || '?'}→${d.warehouseTo || '?'})` : ''}`}
                       </td>
                       <td>
                         <button type="button" className="action-btn slim ghost" onClick={() => setSelectedDocId(d.id || null)}>
@@ -1987,6 +2095,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   <div className="lot-line">Статус: {statusRu(selectedErpDoc.status)}</div>
                   <div className="lot-line">
                     Связь: склад/поставка {selectedErpDoc.linkedShipmentId || '—'}, заказ {selectedErpDoc.linkedOrderId || '—'}
+                    {selectedErpDoc.kind === 'writeoff' ? `, склад списания ${selectedErpDoc.warehouse || '—'}` : ''}
                   </div>
                   {selectedErpDoc.lines.map((ln, idx) => (
                     <div key={`${selectedErpDoc.id}-ln-${idx}`} className="lot-line">
@@ -2147,6 +2256,67 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   <input className="field-input" placeholder="Комментарий" value={newDocPm.comment} onChange={(e) => setNewDocPm((s) => ({ ...s, comment: e.target.value }))} />
                   <button type="button" className="action-btn slim" onClick={() => createDraftPmDocument()}>
                     Создать черновик ПМ
+                  </button>
+                </article>
+
+                <article className="stage-card">
+                  <div className="stage-head">
+                    <strong>Списание ТМЦ (СП)</strong>
+                  </div>
+                  <select
+                    className="field-input"
+                    value={newDocSp.lotId}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      const lot = lotsState.find((l) => l.id === id)
+                      setNewDocSp((s) => ({
+                        ...s,
+                        lotId: id,
+                        warehouse: lot?.warehouseLocation?.trim() || s.warehouse,
+                        qtyRolls: lot ? lot.rolls : 0,
+                      }))
+                    }}
+                  >
+                    <option value="">Партия (остаток &gt; 0)</option>
+                    {lotsState
+                      .filter((l) => (l.rolls || 0) > 0)
+                      .map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {(l.id || '').slice(0, 18)} • {l.product} • {l.rolls} рул.
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    className="field-input"
+                    placeholder="Рулонов к списанию"
+                    value={newDocSp.qtyRolls || ''}
+                    onChange={(e) => setNewDocSp((s) => ({ ...s, qtyRolls: Number(e.target.value) }))}
+                  />
+                  <select
+                    className="field-input"
+                    value={newDocSp.warehouse}
+                    onChange={(e) => setNewDocSp((s) => ({ ...s, warehouse: e.target.value }))}
+                  >
+                    {(warehousesState.some((w) => w.isActive)
+                      ? warehousesState.filter((w) => w.isActive)
+                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
+                    ).map((w) => (
+                      <option key={`sp-${w.id}`} value={w.name}>
+                        {w.code} — {w.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="date" className="field-input" value={newDocSp.docDate} onChange={(e) => setNewDocSp((s) => ({ ...s, docDate: e.target.value }))} />
+                  <input
+                    className="field-input"
+                    placeholder="Причина списания"
+                    value={newDocSp.reason}
+                    onChange={(e) => setNewDocSp((s) => ({ ...s, reason: e.target.value }))}
+                  />
+                  <button type="button" className="action-btn slim" onClick={() => createDraftSpDocument()}>
+                    Создать черновик СП
                   </button>
                 </article>
 
@@ -2938,7 +3108,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   {stockLedgerState.map((e) => (
                     <tr key={e.id}>
                       <td>{e.docNumber}</td>
-                      <td>{e.movementType}</td>
+                      <td>{movementTypeRu(e.movementType)}</td>
                       <td>{e.warehouse}</td>
                       <td>{e.productName}</td>
                       <td>{e.qtyDelta > 0 ? `+${e.qtyDelta}` : e.qtyDelta}</td>

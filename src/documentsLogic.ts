@@ -1,6 +1,6 @@
 import { doc, type Firestore, type Transaction } from 'firebase/firestore'
 
-export type DocKind = 'incoming' | 'movement' | 'customer_order' | 'shipment_out'
+export type DocKind = 'incoming' | 'movement' | 'writeoff' | 'customer_order' | 'shipment_out'
 
 /** Подбор разделов журнала (как в ТЗ модуль 36) */
 export type DocJournalCategory =
@@ -74,6 +74,7 @@ export type ErpDocumentBase = {
 const COUNTER_ascii: Record<DocKind, string> = {
   incoming: 'PN',
   movement: 'PM',
+  writeoff: 'SP',
   customer_order: 'ZK',
   shipment_out: 'OTG',
 }
@@ -81,6 +82,7 @@ const COUNTER_ascii: Record<DocKind, string> = {
 const PREFIX_human: Record<DocKind, string> = {
   incoming: 'ПН',
   movement: 'ПМ',
+  writeoff: 'СП',
   customer_order: 'ЗК',
   shipment_out: 'ОТГ',
 }
@@ -90,6 +92,7 @@ export function defaultJournalCategory(kind: DocKind): DocJournalCategory {
     case 'incoming':
       return 'purchasing'
     case 'movement':
+    case 'writeoff':
       return 'warehouse'
     case 'customer_order':
     case 'shipment_out':
@@ -105,6 +108,8 @@ export function docKindRu(kind: DocKind): string {
       return 'Приходная накладная'
     case 'movement':
       return 'Перемещение между складами'
+    case 'writeoff':
+      return 'Списание ТМЦ'
     case 'customer_order':
       return 'Заказ клиента'
     case 'shipment_out':
