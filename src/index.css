@@ -805,3 +805,55 @@ h3 {
   padding: 3px 8px;
   white-space: nowrap;
 }
+
+.add-btn {
+  background: #16a34a;
+}
+
+.add-btn:hover {
+  background: #15803d;
+  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.35);
+}
+
+.doc-create-actions {
+  margin-bottom: 0;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 120;
+  padding: 16px;
+}
+
+.doc-modal {
+  width: min(680px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.26);
+  padding: 14px;
+}
+
+.doc-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.doc-modal-grid .lot-line,
+.doc-modal-grid .actions,
+.doc-modal-grid button {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 680px) {
+  .doc-modal-grid {
+    grid-template-columns: 1fr;
+  }
+}

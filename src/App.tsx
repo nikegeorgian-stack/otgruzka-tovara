@@ -65,6 +65,7 @@ type ViewKey =
   | 'products'
   | 'hr'
   | 'users'
+type DocDialogKind = 'pn' | 'pm' | 'sp' | 'zk' | 'otg'
 
 type Lot = {
   id?: string
@@ -383,6 +384,7 @@ function App() {
   const [activeStageFilter, setActiveStageFilter] = useState<'all' | Stage>('all')
   const [view, setView] = useState<ViewKey>('dashboard')
   const [navMode, setNavMode] = useState<'workspace' | 'sections'>('workspace')
+  const [activeDocDialog, setActiveDocDialog] = useState<DocDialogKind | null>(null)
   const [newLot, setNewLot] = useState({
     productId: '',
     supplier: 'SIMO',
@@ -807,6 +809,13 @@ function App() {
     products: `${productsState.length} позиций`,
     hr: `${employeesState.length} сотрудников`,
   }
+  const docDialogTitle: Record<DocDialogKind, string> = {
+    pn: 'Новый документ: Приходная (ПН)',
+    pm: 'Новый документ: Перемещение (ПМ)',
+    sp: 'Новый документ: Списание ТМЦ (СП)',
+    zk: 'Новый документ: Заказ клиента (ЗК)',
+    otg: 'Новый документ: Отгрузка (ОТГ)',
+  }
 
   async function logAction(action: string, payload: Record<string, unknown>) {
     if (!currentUser) return
@@ -1225,6 +1234,7 @@ function App() {
       meters: 0,
       comment: '',
     }))
+    setActiveDocDialog(null)
   }
 
   async function createDraftPmDocument() {
@@ -1261,6 +1271,7 @@ function App() {
       lotId: '',
       comment: '',
     }))
+    setActiveDocDialog(null)
   }
 
   async function createDraftSpDocument() {
@@ -1311,6 +1322,7 @@ function App() {
       qtyRolls: 0,
       reason: '',
     }))
+    setActiveDocDialog(null)
   }
 
   async function createDraftZkDocument() {
@@ -1341,6 +1353,7 @@ function App() {
     })
     await logAction('document.create', { kind: 'customer_order' })
     setNewDocZk((s) => ({ ...s, customer: '', productId: '', qty: 0, comment: '' }))
+    setActiveDocDialog(null)
   }
 
   async function createDraftOtgDocument() {
@@ -1383,6 +1396,7 @@ function App() {
     })
     await logAction('document.create', { kind: 'shipment_out' })
     setNewDocOtg({ customer: '', selectedRollIds: [], docDate: new Date().toISOString().slice(0, 10), comment: '' })
+    setActiveDocDialog(null)
   }
 
   async function cancelErpDocument(documentId: string) {
@@ -2284,263 +2298,131 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
 
           {canWriteDocuments ? (
             <>
-              <h3 style={{ marginTop: 22 }}>Создание документов (черновик)</h3>
-              <div className="doc-forms-grid">
-                <article className="stage-card">
-                  <div className="stage-head">
-                    <strong>Приходная (ПН)</strong>
-                  </div>
-                  <select
-                    className="field-input"
-                    value={newDocPn.supplierId}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, supplierId: e.target.value }))}
-                  >
-                    <option value="">Поставщик</option>
-                    {suppliersState
-                      .filter((s) => s.status === 'active')
-                      .map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                  </select>
-                  <select
-                    className="field-input"
-                    value={newDocPn.productId}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, productId: e.target.value }))}
-                  >
-                    <option value="">Номенклатура</option>
-                    {productsState.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.internalId} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    className="field-input"
-                    placeholder="Рулоны"
-                    value={newDocPn.qtyRolls || ''}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, qtyRolls: Number(e.target.value) }))}
-                  />
-                  <input
-                    type="number"
-                    className="field-input"
-                    placeholder="Метры (учётный коммент.)"
-                    value={newDocPn.meters || ''}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, meters: Number(e.target.value) }))}
-                  />
-                  <select
-                    className="field-input"
-                    value={newDocPn.warehouse}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, warehouse: e.target.value }))}
-                  >
-                    {(warehousesState.some((w) => w.isActive)
-                      ? warehousesState.filter((w) => w.isActive)
-                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
-                    ).map((w) => (
-                      <option key={w.id} value={w.name}>
-                        {w.code} — {w.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="date"
-                    className="field-input"
-                    value={newDocPn.docDate}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, docDate: e.target.value }))}
-                  />
-                  <input
-                    className="field-input"
-                    placeholder="Комментарий"
-                    value={newDocPn.comment}
-                    onChange={(e) => setNewDocPn((s) => ({ ...s, comment: e.target.value }))}
-                  />
-                  <button type="button" className="action-btn slim" onClick={() => createDraftPnDocument()}>
-                    Создать черновик ПН
-                  </button>
-                </article>
-
-                <article className="stage-card">
-                  <div className="stage-head">
-                    <strong>Перемещение (ПМ)</strong>
-                  </div>
-                  <select
-                    className="field-input"
-                    value={newDocPm.lotId}
-                    onChange={(e) => setNewDocPm((s) => ({ ...s, lotId: e.target.value }))}
-                  >
-                    <option value="">Партия (lot)</option>
-                    {lotsState.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {(l.id || '').slice(0, 18)} • {l.product} • {l.rolls} рул.
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="field-input"
-                    value={newDocPm.warehouseFrom}
-                    onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseFrom: e.target.value }))}
-                  >
-                    {(warehousesState.some((w) => w.isActive)
-                      ? warehousesState.filter((w) => w.isActive)
-                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
-                    ).map((w) => (
-                      <option key={`f-${w.id}`} value={w.name}>
-                        {w.code} — {w.name}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="field-input"
-                    value={newDocPm.warehouseTo}
-                    onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseTo: e.target.value }))}
-                  >
-                    {(warehousesState.some((w) => w.isActive)
-                      ? warehousesState.filter((w) => w.isActive)
-                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
-                    ).map((w) => (
-                      <option key={`t-${w.id}`} value={w.name}>
-                        {w.code} — {w.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input type="date" className="field-input" value={newDocPm.docDate} onChange={(e) => setNewDocPm((s) => ({ ...s, docDate: e.target.value }))} />
-                  <input className="field-input" placeholder="Комментарий" value={newDocPm.comment} onChange={(e) => setNewDocPm((s) => ({ ...s, comment: e.target.value }))} />
-                  <button type="button" className="action-btn slim" onClick={() => createDraftPmDocument()}>
-                    Создать черновик ПМ
-                  </button>
-                </article>
-
-                <article className="stage-card">
-                  <div className="stage-head">
-                    <strong>Списание ТМЦ (СП)</strong>
-                  </div>
-                  <select
-                    className="field-input"
-                    value={newDocSp.lotId}
-                    onChange={(e) => {
-                      const id = e.target.value
-                      const lot = lotsState.find((l) => l.id === id)
-                      setNewDocSp((s) => ({
-                        ...s,
-                        lotId: id,
-                        warehouse: lot?.warehouseLocation?.trim() || s.warehouse,
-                        qtyRolls: lot ? lot.rolls : 0,
-                      }))
-                    }}
-                  >
-                    <option value="">Партия (остаток &gt; 0)</option>
-                    {lotsState
-                      .filter((l) => (l.rolls || 0) > 0)
-                      .map((l) => (
-                        <option key={l.id} value={l.id}>
-                          {(l.id || '').slice(0, 18)} • {l.product} • {l.rolls} рул.
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={1}
-                    className="field-input"
-                    placeholder="Рулонов к списанию"
-                    value={newDocSp.qtyRolls || ''}
-                    onChange={(e) => setNewDocSp((s) => ({ ...s, qtyRolls: Number(e.target.value) }))}
-                  />
-                  <select
-                    className="field-input"
-                    value={newDocSp.warehouse}
-                    onChange={(e) => setNewDocSp((s) => ({ ...s, warehouse: e.target.value }))}
-                  >
-                    {(warehousesState.some((w) => w.isActive)
-                      ? warehousesState.filter((w) => w.isActive)
-                      : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))
-                    ).map((w) => (
-                      <option key={`sp-${w.id}`} value={w.name}>
-                        {w.code} — {w.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input type="date" className="field-input" value={newDocSp.docDate} onChange={(e) => setNewDocSp((s) => ({ ...s, docDate: e.target.value }))} />
-                  <input
-                    className="field-input"
-                    placeholder="Причина списания"
-                    value={newDocSp.reason}
-                    onChange={(e) => setNewDocSp((s) => ({ ...s, reason: e.target.value }))}
-                  />
-                  <button type="button" className="action-btn slim" onClick={() => createDraftSpDocument()}>
-                    Создать черновик СП
-                  </button>
-                </article>
-
-                <article className="stage-card">
-                  <div className="stage-head">
-                    <strong>Заказ клиента (ЗК)</strong>
-                  </div>
-                  <input
-                    className="field-input"
-                    placeholder="Клиент"
-                    value={newDocZk.customer}
-                    onChange={(e) => setNewDocZk((s) => ({ ...s, customer: e.target.value }))}
-                  />
-                  <select
-                    className="field-input"
-                    value={newDocZk.productId}
-                    onChange={(e) => setNewDocZk((s) => ({ ...s, productId: e.target.value }))}
-                  >
-                    <option value="">Номенклатура</option>
-                    {productsState.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    className="field-input"
-                    placeholder="Количество, рул."
-                    value={newDocZk.qty || ''}
-                    onChange={(e) => setNewDocZk((s) => ({ ...s, qty: Number(e.target.value) }))}
-                  />
-                  <input type="date" className="field-input" value={newDocZk.docDate} onChange={(e) => setNewDocZk((s) => ({ ...s, docDate: e.target.value }))} />
-                  <input className="field-input" placeholder="Комментарий" value={newDocZk.comment} onChange={(e) => setNewDocZk((s) => ({ ...s, comment: e.target.value }))} />
-                  <button type="button" className="action-btn slim" onClick={() => createDraftZkDocument()}>
-                    Создать черновик ЗК
-                  </button>
-                </article>
-
-                <article className="stage-card">
-                  <div className="stage-head">
-                    <strong>Отгрузка (ОТГ)</strong>
-                  </div>
-                  <input
-                    className="field-input"
-                    placeholder="Клиент"
-                    value={newDocOtg.customer}
-                    onChange={(e) => setNewDocOtg((s) => ({ ...s, customer: e.target.value }))}
-                  />
-                  <input type="date" className="field-input" value={newDocOtg.docDate} onChange={(e) => setNewDocOtg((s) => ({ ...s, docDate: e.target.value }))} />
-                  <div className="lot-line">Выберите рулоны (только approved):</div>
-                  <div className="actions" style={{ flexWrap: 'wrap', maxHeight: 120, overflowY: 'auto' }}>
-                    {rollsState
-                      .filter((r) => r.status === 'approved')
-                      .map((roll) => (
-                        <button
-                          key={roll.id}
-                          type="button"
-                          className={`action-btn slim ghost ${newDocOtg.selectedRollIds.includes(roll.id || '') ? 'active' : ''}`}
-                          onClick={() => toggleDocOtgRoll(roll.id || '')}
-                        >
-                          {roll.rollCode}
-                        </button>
-                      ))}
-                  </div>
-                  <input className="field-input" placeholder="Комментарий" value={newDocOtg.comment} onChange={(e) => setNewDocOtg((s) => ({ ...s, comment: e.target.value }))} />
-                  <button type="button" className="action-btn slim" onClick={() => createDraftOtgDocument()}>
-                    Создать черновик ОТГ
-                  </button>
-                </article>
+              <h3 style={{ marginTop: 22 }}>Создание документов</h3>
+              <div className="actions doc-create-actions">
+                <button type="button" className="action-btn slim add-btn" onClick={() => setActiveDocDialog('pn')}>+ Поступление (ПН)</button>
+                <button type="button" className="action-btn slim add-btn" onClick={() => setActiveDocDialog('pm')}>+ Перемещение (ПМ)</button>
+                <button type="button" className="action-btn slim add-btn" onClick={() => setActiveDocDialog('sp')}>+ Списание ТМЦ (СП)</button>
+                <button type="button" className="action-btn slim add-btn" onClick={() => setActiveDocDialog('zk')}>+ Заказ клиента (ЗК)</button>
+                <button type="button" className="action-btn slim add-btn" onClick={() => setActiveDocDialog('otg')}>+ Отгрузка (ОТГ)</button>
               </div>
+              {activeDocDialog ? (
+                <div className="modal-backdrop" onClick={() => setActiveDocDialog(null)}>
+                  <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="stage-head">
+                      <strong>{docDialogTitle[activeDocDialog]}</strong>
+                      <button type="button" className="action-btn slim ghost" onClick={() => setActiveDocDialog(null)}>Закрыть</button>
+                    </div>
+
+                    {activeDocDialog === 'pn' ? (
+                      <div className="doc-modal-grid">
+                        <select className="field-input" value={newDocPn.supplierId} onChange={(e) => setNewDocPn((s) => ({ ...s, supplierId: e.target.value }))}>
+                          <option value="">Поставщик</option>
+                          {suppliersState.filter((s) => s.status === 'active').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <select className="field-input" value={newDocPn.productId} onChange={(e) => setNewDocPn((s) => ({ ...s, productId: e.target.value }))}>
+                          <option value="">Номенклатура</option>
+                          {productsState.map((p) => <option key={p.id} value={p.id}>{p.internalId} — {p.name}</option>)}
+                        </select>
+                        <input type="number" className="field-input" placeholder="Рулоны" value={newDocPn.qtyRolls || ''} onChange={(e) => setNewDocPn((s) => ({ ...s, qtyRolls: Number(e.target.value) }))} />
+                        <input type="number" className="field-input" placeholder="Метры (учётный коммент.)" value={newDocPn.meters || ''} onChange={(e) => setNewDocPn((s) => ({ ...s, meters: Number(e.target.value) }))} />
+                        <select className="field-input" value={newDocPn.warehouse} onChange={(e) => setNewDocPn((s) => ({ ...s, warehouse: e.target.value }))}>
+                          {(warehousesState.some((w) => w.isActive) ? warehousesState.filter((w) => w.isActive) : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))).map((w) => (
+                            <option key={w.id} value={w.name}>{w.code} — {w.name}</option>
+                          ))}
+                        </select>
+                        <input type="date" className="field-input" value={newDocPn.docDate} onChange={(e) => setNewDocPn((s) => ({ ...s, docDate: e.target.value }))} />
+                        <input className="field-input" placeholder="Комментарий" value={newDocPn.comment} onChange={(e) => setNewDocPn((s) => ({ ...s, comment: e.target.value }))} />
+                        <button type="button" className="action-btn slim" onClick={() => createDraftPnDocument()}>Создать черновик ПН</button>
+                      </div>
+                    ) : null}
+
+                    {activeDocDialog === 'pm' ? (
+                      <div className="doc-modal-grid">
+                        <select className="field-input" value={newDocPm.lotId} onChange={(e) => setNewDocPm((s) => ({ ...s, lotId: e.target.value }))}>
+                          <option value="">Партия (lot)</option>
+                          {lotsState.map((l) => <option key={l.id} value={l.id}>{(l.id || '').slice(0, 18)} • {l.product} • {l.rolls} рул.</option>)}
+                        </select>
+                        <select className="field-input" value={newDocPm.warehouseFrom} onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseFrom: e.target.value }))}>
+                          {(warehousesState.some((w) => w.isActive) ? warehousesState.filter((w) => w.isActive) : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))).map((w) => (
+                            <option key={`f-${w.id}`} value={w.name}>{w.code} — {w.name}</option>
+                          ))}
+                        </select>
+                        <select className="field-input" value={newDocPm.warehouseTo} onChange={(e) => setNewDocPm((s) => ({ ...s, warehouseTo: e.target.value }))}>
+                          {(warehousesState.some((w) => w.isActive) ? warehousesState.filter((w) => w.isActive) : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))).map((w) => (
+                            <option key={`t-${w.id}`} value={w.name}>{w.code} — {w.name}</option>
+                          ))}
+                        </select>
+                        <input type="date" className="field-input" value={newDocPm.docDate} onChange={(e) => setNewDocPm((s) => ({ ...s, docDate: e.target.value }))} />
+                        <input className="field-input" placeholder="Комментарий" value={newDocPm.comment} onChange={(e) => setNewDocPm((s) => ({ ...s, comment: e.target.value }))} />
+                        <button type="button" className="action-btn slim" onClick={() => createDraftPmDocument()}>Создать черновик ПМ</button>
+                      </div>
+                    ) : null}
+
+                    {activeDocDialog === 'sp' ? (
+                      <div className="doc-modal-grid">
+                        <select
+                          className="field-input"
+                          value={newDocSp.lotId}
+                          onChange={(e) => {
+                            const id = e.target.value
+                            const lot = lotsState.find((l) => l.id === id)
+                            setNewDocSp((s) => ({ ...s, lotId: id, warehouse: lot?.warehouseLocation?.trim() || s.warehouse, qtyRolls: lot ? lot.rolls : 0 }))
+                          }}
+                        >
+                          <option value="">Партия (остаток &gt; 0)</option>
+                          {lotsState.filter((l) => (l.rolls || 0) > 0).map((l) => <option key={l.id} value={l.id}>{(l.id || '').slice(0, 18)} • {l.product} • {l.rolls} рул.</option>)}
+                        </select>
+                        <input type="number" min={1} className="field-input" placeholder="Рулонов к списанию" value={newDocSp.qtyRolls || ''} onChange={(e) => setNewDocSp((s) => ({ ...s, qtyRolls: Number(e.target.value) }))} />
+                        <select className="field-input" value={newDocSp.warehouse} onChange={(e) => setNewDocSp((s) => ({ ...s, warehouse: e.target.value }))}>
+                          {(warehousesState.some((w) => w.isActive) ? warehousesState.filter((w) => w.isActive) : defaultWarehousesSeed.map((w, idx) => ({ ...w, id: `seed-${idx}` }))).map((w) => (
+                            <option key={`sp-${w.id}`} value={w.name}>{w.code} — {w.name}</option>
+                          ))}
+                        </select>
+                        <input type="date" className="field-input" value={newDocSp.docDate} onChange={(e) => setNewDocSp((s) => ({ ...s, docDate: e.target.value }))} />
+                        <input className="field-input" placeholder="Причина списания" value={newDocSp.reason} onChange={(e) => setNewDocSp((s) => ({ ...s, reason: e.target.value }))} />
+                        <button type="button" className="action-btn slim" onClick={() => createDraftSpDocument()}>Создать черновик СП</button>
+                      </div>
+                    ) : null}
+
+                    {activeDocDialog === 'zk' ? (
+                      <div className="doc-modal-grid">
+                        <input className="field-input" placeholder="Клиент" value={newDocZk.customer} onChange={(e) => setNewDocZk((s) => ({ ...s, customer: e.target.value }))} />
+                        <select className="field-input" value={newDocZk.productId} onChange={(e) => setNewDocZk((s) => ({ ...s, productId: e.target.value }))}>
+                          <option value="">Номенклатура</option>
+                          {productsState.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <input type="number" className="field-input" placeholder="Количество, рул." value={newDocZk.qty || ''} onChange={(e) => setNewDocZk((s) => ({ ...s, qty: Number(e.target.value) }))} />
+                        <input type="date" className="field-input" value={newDocZk.docDate} onChange={(e) => setNewDocZk((s) => ({ ...s, docDate: e.target.value }))} />
+                        <input className="field-input" placeholder="Комментарий" value={newDocZk.comment} onChange={(e) => setNewDocZk((s) => ({ ...s, comment: e.target.value }))} />
+                        <button type="button" className="action-btn slim" onClick={() => createDraftZkDocument()}>Создать черновик ЗК</button>
+                      </div>
+                    ) : null}
+
+                    {activeDocDialog === 'otg' ? (
+                      <div className="doc-modal-grid">
+                        <input className="field-input" placeholder="Клиент" value={newDocOtg.customer} onChange={(e) => setNewDocOtg((s) => ({ ...s, customer: e.target.value }))} />
+                        <input type="date" className="field-input" value={newDocOtg.docDate} onChange={(e) => setNewDocOtg((s) => ({ ...s, docDate: e.target.value }))} />
+                        <div className="lot-line">Выберите рулоны (только approved):</div>
+                        <div className="actions" style={{ flexWrap: 'wrap', maxHeight: 120, overflowY: 'auto' }}>
+                          {rollsState.filter((r) => r.status === 'approved').map((roll) => (
+                            <button
+                              key={roll.id}
+                              type="button"
+                              className={`action-btn slim ghost ${newDocOtg.selectedRollIds.includes(roll.id || '') ? 'active' : ''}`}
+                              onClick={() => toggleDocOtgRoll(roll.id || '')}
+                            >
+                              {roll.rollCode}
+                            </button>
+                          ))}
+                        </div>
+                        <input className="field-input" placeholder="Комментарий" value={newDocOtg.comment} onChange={(e) => setNewDocOtg((s) => ({ ...s, comment: e.target.value }))} />
+                        <button type="button" className="action-btn slim" onClick={() => createDraftOtgDocument()}>Создать черновик ОТГ</button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : null}
         </section>
