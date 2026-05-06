@@ -382,6 +382,7 @@ function App() {
   const [error, setError] = useState('')
   const [activeStageFilter, setActiveStageFilter] = useState<'all' | Stage>('all')
   const [view, setView] = useState<ViewKey>('dashboard')
+  const [navMode, setNavMode] = useState<'workspace' | 'sections'>('workspace')
   const [newLot, setNewLot] = useState({
     productId: '',
     supplier: 'SIMO',
@@ -702,6 +703,110 @@ function App() {
     !!currentUser &&
     currentUser.permissions.documents &&
     ['admin', 'warehouse', 'logistics', 'accounting'].includes(currentUser.role)
+  const draftDocsCount = documentsState.filter((d) => d.status === 'draft').length
+  const pendingShipmentsCount = shipmentsState.filter((s) => s.status === 'planned').length
+  const qcQueueCount = rollsState.filter((r) => r.status === 'awaiting_qc').length
+  const activeLotsCount = effectiveLots.length
+  const canAccessSection = (key: ViewKey): boolean => {
+    if (!currentUser) return false
+    if (key === 'dashboard') return true
+    if (key === 'documents') return canSeeDocuments
+    if (key === 'lots') return currentUser.permissions.lots
+    if (key === 'runs') return currentUser.permissions.runs
+    if (key === 'rolls') return currentUser.permissions.rolls
+    if (key === 'qc') return currentUser.permissions.qc
+    if (key === 'inventory') return currentUser.permissions.inventory
+    if (key === 'suppliers') return canManageSuppliers
+    if (key === 'receipts') return canManageReceipts
+    if (key === 'orders') return currentUser.permissions.orders
+    if (key === 'shipping') return canManageShipping
+    if (key === 'trace') return currentUser.permissions.dashboard
+    if (key === 'products') return currentUser.permissions.products
+    if (key === 'hr') return currentUser.permissions.hr
+    if (key === 'users') return currentUser.permissions.users
+    return false
+  }
+
+  const openSection = (key: ViewKey) => {
+    setView(key)
+    setNavMode('sections')
+  }
+
+  const navItems: Array<[ViewKey, string, typeof PackageCheck]> = [
+    ['dashboard', 'Дашборд', PackageCheck],
+    ['documents', 'Документы', FolderOpen],
+    ['lots', 'Партии', Factory],
+    ['runs', 'Запуски MES', Factory],
+    ['rolls', 'Рулоны', PackageCheck],
+    ['qc', 'Контроль качества', CheckCircle2],
+    ['inventory', 'ТиС / Склад', Boxes],
+    ['suppliers', 'Поставщики', Users],
+    ['receipts', 'Поступления', ClipboardList],
+    ['orders', 'Заказы/резервы', ClipboardList],
+    ['shipping', 'Паллеты/отгрузка', Truck],
+    ['trace', 'Traceability', Search],
+    ['products', 'Номенклатура', ImagePlus],
+    ['hr', 'HR', Users],
+    ['users', 'Пользователи', ShieldCheck],
+  ]
+
+  const workspaceCardsByRole: Record<Role, Array<{ title: string; description: string; view: ViewKey }>> = {
+    admin: [
+      { title: 'Документы', description: 'Проведение ПН/ПМ/СП/ОТГ и контроль статусов', view: 'documents' },
+      { title: 'ТиС / Склад', description: 'Остатки, движения, склады', view: 'inventory' },
+      { title: 'Отгрузка', description: 'Паллеты и статусы отгрузок', view: 'shipping' },
+      { title: 'Пользователи', description: 'Роли и доступы', view: 'users' },
+    ],
+    warehouse: [
+      { title: 'Документы склада', description: 'Создание и проведение ПН/ПМ/СП/ОТГ', view: 'documents' },
+      { title: 'Остатки и движения', description: 'Быстрый контроль складского регистра', view: 'inventory' },
+      { title: 'Поступления', description: 'Приёмка и оформление сырья', view: 'receipts' },
+      { title: 'Паллеты', description: 'Сборка и подготовка отгрузки', view: 'shipping' },
+    ],
+    logistics: [
+      { title: 'Отгрузка', description: 'Паллеты, статусы, клиент', view: 'shipping' },
+      { title: 'Заказы и резервы', description: 'Контроль резервов под отгрузку', view: 'orders' },
+      { title: 'Документы', description: 'ОТГ и связанные документы', view: 'documents' },
+      { title: 'ТиС / Склад', description: 'Проверка движений', view: 'inventory' },
+    ],
+    accounting: [
+      { title: 'Документы', description: 'Контроль проведённых документов', view: 'documents' },
+      { title: 'ТиС / Склад', description: 'Проверка движения товаров', view: 'inventory' },
+      { title: 'Заказы', description: 'Проверка резервов и статусов', view: 'orders' },
+      { title: 'Traceability', description: 'Поиск по рулону и истории', view: 'trace' },
+    ],
+    line: [
+      { title: 'Партии', description: 'Управление этапами сырья и производства', view: 'lots' },
+      { title: 'MES Запуски', description: 'Создание и контроль запусков', view: 'runs' },
+      { title: 'Рулоны', description: 'Выпуск рулонов для QC', view: 'rolls' },
+      { title: 'Дашборд', description: 'Обзор по производственной цепочке', view: 'dashboard' },
+    ],
+    qc: [
+      { title: 'QC контроль', description: 'Проверка рулонов и изменение статуса', view: 'qc' },
+      { title: 'Рулоны', description: 'Список выпущенных рулонов', view: 'rolls' },
+      { title: 'Партии', description: 'Контроль переходов между этапами', view: 'lots' },
+      { title: 'Traceability', description: 'Поиск по коду рулона', view: 'trace' },
+    ],
+    hr: [
+      { title: 'HR', description: 'Сотрудники, статусы и смены', view: 'hr' },
+      { title: 'Дашборд', description: 'Общий обзор состояния процесса', view: 'dashboard' },
+      { title: 'Пользователи', description: 'Проверка доступов (если разрешено)', view: 'users' },
+      { title: 'Документы', description: 'Просмотр журнала (если разрешено)', view: 'documents' },
+    ],
+  }
+
+  const workspaceMetricByView: Partial<Record<ViewKey, string>> = {
+    documents: `${draftDocsCount} черновиков`,
+    inventory: `${stockLedgerState.length} движений`,
+    shipping: `${pendingShipmentsCount} паллет в работе`,
+    qc: `${qcQueueCount} рулонов в очереди`,
+    lots: `${activeLotsCount} партий`,
+    orders: `${ordersState.length} заказов`,
+    receipts: `${receiptsState.length} поступлений`,
+    users: `${usersState.length} пользователей`,
+    products: `${productsState.length} позиций`,
+    hr: `${employeesState.length} сотрудников`,
+  }
 
   async function logAction(action: string, payload: Record<string, unknown>) {
     if (!currentUser) return
@@ -1949,58 +2054,106 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
       </section>
 
       <section className="board nav-board">
-        <div className="actions view-tabs">
-          {(
-            [
-              ['dashboard', 'Дашборд', PackageCheck],
-              ['documents', 'Документы', FolderOpen],
-              ['lots', 'Партии', Factory],
-              ['runs', 'Запуски MES', Factory],
-              ['rolls', 'Рулоны', PackageCheck],
-              ['qc', 'Контроль качества', CheckCircle2],
-              ['inventory', 'ТиС / Склад', Boxes],
-              ['suppliers', 'Поставщики', Users],
-              ['receipts', 'Поступления', ClipboardList],
-              ['orders', 'Заказы/резервы', ClipboardList],
-              ['shipping', 'Паллеты/отгрузка', Truck],
-              ['trace', 'Traceability', Search],
-              ['products', 'Номенклатура', ImagePlus],
-              ['hr', 'HR', Users],
-              ['users', 'Пользователи', ShieldCheck],
-            ] as Array<[ViewKey, string, typeof PackageCheck]>
-          ).map(([key, label, Icon]) => {
-            const allowed =
-              key === 'dashboard' ||
-              (key === 'documents' && canSeeDocuments) ||
-              (key === 'lots' && currentUser.permissions.lots) ||
-              (key === 'runs' && currentUser.permissions.runs) ||
-              (key === 'rolls' && currentUser.permissions.rolls) ||
-              (key === 'qc' && currentUser.permissions.qc) ||
-              (key === 'inventory' && currentUser.permissions.inventory) ||
-              (key === 'suppliers' && canManageSuppliers) ||
-              (key === 'receipts' && canManageReceipts) ||
-              (key === 'orders' && currentUser.permissions.orders) ||
-              (key === 'shipping' && canManageShipping && (currentUser.role === 'admin' || currentUser.role === 'warehouse' || currentUser.role === 'logistics')) ||
-              (key === 'trace' && currentUser.permissions.dashboard) ||
-              (key === 'products' && currentUser.permissions.products) ||
-              (key === 'hr' && currentUser.permissions.hr) ||
-              (key === 'users' && currentUser.permissions.users)
-            if (!allowed) return null
-            return (
-              <button
-                key={key}
-                className={`action-btn slim ghost ${view === key ? 'active' : ''}`}
-                type="button"
-                onClick={() => setView(key)}
-              >
-                <Icon size={15} /> {label}
-              </button>
-            )
-          })}
+        <div className="actions workspace-mode-tabs">
+          <button
+            type="button"
+            className={`action-btn slim ghost ${navMode === 'workspace' ? 'active' : ''}`}
+            onClick={() => setNavMode('workspace')}
+          >
+            Рабочее место роли
+          </button>
+          <button
+            type="button"
+            className={`action-btn slim ghost ${navMode === 'sections' ? 'active' : ''}`}
+            onClick={() => setNavMode('sections')}
+          >
+            Все разделы
+          </button>
         </div>
+        {navMode === 'sections' ? (
+          <div className="actions view-tabs">
+            {navItems.map(([key, label, Icon]) => {
+              if (!canAccessSection(key)) return null
+              return (
+                <button
+                  key={key}
+                  className={`action-btn slim ghost ${view === key ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setView(key)}
+                >
+                  <Icon size={15} /> {label}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
       </section>
 
-      {view === 'documents' && canSeeDocuments ? (
+      {navMode === 'workspace' ? (
+        <section className="board workspace-board">
+          <h2>Рабочее место: {roleLabels[currentUser.role]}</h2>
+          <p className="lot-line workspace-subtitle">Короткий путь к ежедневным операциям вашей роли.</p>
+          <div className="workspace-actions">
+            {canWriteDocuments ? (
+              <>
+                <button type="button" className="action-btn slim" onClick={() => openSection('documents')}>
+                  Создать/провести документ
+                </button>
+                <button
+                  type="button"
+                  className="action-btn slim ghost"
+                  onClick={() => {
+                    setDocStatusFilter('draft')
+                    openSection('documents')
+                  }}
+                >
+                  Черновики документов
+                </button>
+              </>
+            ) : null}
+            {currentUser.permissions.inventory ? (
+              <button
+                type="button"
+                className="action-btn slim ghost"
+                onClick={() => {
+                  setInventorySubView('balances')
+                  openSection('inventory')
+                }}
+              >
+                Остатки ТМЦ
+              </button>
+            ) : null}
+            {canManageShipping ? (
+              <button type="button" className="action-btn slim ghost" onClick={() => openSection('shipping')}>
+                Отгрузка и паллеты
+              </button>
+            ) : null}
+            {canManageQc ? (
+              <button type="button" className="action-btn slim ghost" onClick={() => openSection('qc')}>
+                Очередь QC
+              </button>
+            ) : null}
+          </div>
+          <div className="workspace-grid">
+            {workspaceCardsByRole[currentUser.role]
+              .filter((card) => canAccessSection(card.view))
+              .map((card) => (
+                <article key={`${currentUser.role}-${card.view}`} className="workspace-card">
+                  <div className="workspace-card-top">
+                    <strong>{card.title}</strong>
+                    <span>{workspaceMetricByView[card.view] || 'Открыть рабочий блок'}</span>
+                  </div>
+                  <div className="lot-line">{card.description}</div>
+                  <button type="button" className="action-btn slim ghost" onClick={() => openSection(card.view)}>
+                    Открыть раздел
+                  </button>
+                </article>
+              ))}
+          </div>
+        </section>
+      ) : null}
+
+      {navMode === 'sections' && view === 'documents' && canSeeDocuments ? (
         <section className="board documents-board">
           <h2>
             <FolderOpen size={22} style={{ verticalAlign: 'middle', marginRight: 8 }} />
@@ -2393,7 +2546,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'lots' && canCreateLots ? (
+      {navMode === 'sections' && view === 'lots' && canCreateLots ? (
         <section className="board">
           <h2>Создать новую партию</h2>
           <div className="form-grid">
@@ -2469,7 +2622,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'dashboard' && canSeeFlow ? (
+      {navMode === 'sections' && view === 'dashboard' && canSeeFlow ? (
         <section className="flow">
           <h2>Логическая цепочка</h2>
           <div className="flow-grid">
@@ -2497,7 +2650,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'lots' && canSeeLots ? (
+      {navMode === 'sections' && view === 'lots' && canSeeLots ? (
         <section className="board">
           <h2>Партии по этапам ({roleLabels[currentUser.role]})</h2>
           <div className="actions">
@@ -2569,7 +2722,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'runs' && canManageRuns ? (
+      {navMode === 'sections' && view === 'runs' && canManageRuns ? (
         <section className="board">
           <h2>MES: производственные запуски</h2>
           <div className="form-grid">
@@ -2645,7 +2798,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'rolls' && canManageRolls ? (
+      {navMode === 'sections' && view === 'rolls' && canManageRolls ? (
         <section className="board">
           <h2>Рулонный учет (traceability)</h2>
           <div className="form-grid">
@@ -2696,7 +2849,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'qc' && canManageQc ? (
+      {navMode === 'sections' && view === 'qc' && canManageQc ? (
         <section className="board">
           <h2>QC лаборатория: решение по рулонам</h2>
           {rollsState.map((roll) => (
@@ -2733,7 +2886,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'orders' && canManageOrders ? (
+      {navMode === 'sections' && view === 'orders' && canManageOrders ? (
         <section className="board">
           <h2>Формирование заказа и резервы</h2>
           <div className="form-grid">
@@ -2800,7 +2953,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'suppliers' && canManageSuppliers ? (
+      {navMode === 'sections' && view === 'suppliers' && canManageSuppliers ? (
         <section className="board">
           <h2>Поставщики</h2>
           <div className="form-grid">
@@ -2850,7 +3003,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'receipts' && canManageReceipts ? (
+      {navMode === 'sections' && view === 'receipts' && canManageReceipts ? (
         <section className="board">
           <h2>Поступление товара / сырья</h2>
           <div className="form-grid">
@@ -2912,7 +3065,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'shipping' && canManageShipping ? (
+      {navMode === 'sections' && view === 'shipping' && canManageShipping ? (
         <section className="board">
           <h2>Паллеты и отгрузка</h2>
           <div className="form-grid">
@@ -2968,7 +3121,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'trace' ? (
+      {navMode === 'sections' && view === 'trace' ? (
         <section className="board">
           <h2>Traceability рулона</h2>
           <div className="form-grid">
@@ -2995,7 +3148,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'inventory' && (
+      {navMode === 'sections' && view === 'inventory' && (
         <section className="board tis-board">
           <h2>Складской учёт («1С: Торговля и склад» — упрощённо)</h2>
           <p className="subtitle" style={{ marginTop: '-6px', color: '#475569', fontSize: '14px' }}>
@@ -3158,7 +3311,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       )}
 
-      {view === 'products' && canManageProducts ? (
+      {navMode === 'sections' && view === 'products' && canManageProducts ? (
         <section className="board">
           <h2>Номенклатура (ID неизменяемый)</h2>
           <div className="form-grid">
@@ -3226,7 +3379,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'hr' && canSeeHr ? (
+      {navMode === 'sections' && view === 'hr' && canSeeHr ? (
         <section className="board">
           <h2>
             <Users size={18} style={{ verticalAlign: 'middle', marginRight: 6 }} />
@@ -3288,7 +3441,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         </section>
       ) : null}
 
-      {view === 'users' && canManageUsers ? (
+      {navMode === 'sections' && view === 'users' && canManageUsers ? (
         <section className="board">
           <h2>Админ: пользователи и разрешения (как в 1С)</h2>
           <div className="form-grid">
