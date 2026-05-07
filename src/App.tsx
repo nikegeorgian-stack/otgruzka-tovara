@@ -237,6 +237,37 @@ type ProductionRequestRecord = {
   createdAt: string
 }
 
+type UnpackedOutputRecord = {
+  id: string
+  sourceRequestId: string
+  date: string
+  lineNumber: string
+  lineName: string
+  productName: string
+  qtyRolls: number
+  status: 'unpacked' | 'packaged'
+}
+
+type PackagingRequestRecord = {
+  id: string
+  outputId: string
+  date: string
+  sourceDate: string
+  lineNumber: string
+  lineName: string
+  productName: string
+  planRolls: number
+  factRolls: number
+  factBoxes: number
+  factPallets: number
+  labelItem: string
+  labelQty: number
+  stretchQty: number
+  thermoQty: number
+  comment: string
+  status: 'draft' | 'posted'
+}
+
 const stageLabels: Record<Stage, string> = {
   raw: 'Сырьё',
   impregnation: 'Пропитка',
@@ -414,9 +445,20 @@ function App() {
     comment: '',
   })
   const [productionRequests, setProductionRequests] = useState<ProductionRequestRecord[]>([])
+  const [unpackedOutputs, setUnpackedOutputs] = useState<UnpackedOutputRecord[]>([])
+  const [packagingRequests, setPackagingRequests] = useState<PackagingRequestRecord[]>([])
+  const [packagedStock, setPackagedStock] = useState<Record<string, number>>({})
+  const [consumablesStock, setConsumablesStock] = useState<Record<string, number>>({
+    'Этикетка 160 сетка': 4000,
+    'Этикетка 145 сетка': 3000,
+    'Этикетка 130 сетка': 2500,
+    Стрейч: 600,
+    Термопленка: 420,
+  })
   const [selectedProductionRequestId, setSelectedProductionRequestId] = useState<string | null>(null)
   const [isProductionDialogOpen, setIsProductionDialogOpen] = useState(false)
   const [isBrigadierDialogOpen, setIsBrigadierDialogOpen] = useState(false)
+  const [isPackagingDialogOpen, setIsPackagingDialogOpen] = useState(false)
   const [brigadierIds, setBrigadierIds] = useState<string[]>([])
   const [newRawLine, setNewRawLine] = useState({ lotId: '', qty: 0, note: '' })
   const [productionForm, setProductionForm] = useState({
@@ -440,6 +482,23 @@ function App() {
     packedRolls: 0,
     packedBoxes: 0,
     packedPallets: 0,
+    comment: '',
+  })
+  const [packagingForm, setPackagingForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    sourceDate: new Date().toISOString().slice(0, 10),
+    outputId: '',
+    lineNumber: '',
+    lineName: '',
+    productName: '',
+    planRolls: 0,
+    factRolls: 0,
+    factBoxes: 0,
+    factPallets: 0,
+    labelItem: 'Этикетка 160 сетка',
+    labelQty: 0,
+    stretchQty: 0,
+    thermoQty: 0,
     comment: '',
   })
 
@@ -918,6 +977,7 @@ function App() {
 
   const selectedProductionRequest = productionRequests.find((r) => r.id === selectedProductionRequestId) || null
   const productionReadonly = selectedProductionRequest?.status === 'posted'
+  const packagingReadonly = false
   const getProductionPlanStatus = (planned: number, actual: number): ProductionRequestRecord['planStatus'] => {
     if (actual > planned) return 'Перевыполнен'
     if (actual < planned) return 'Недовыполнен'
@@ -927,6 +987,31 @@ function App() {
   const openNewProductionRequestDialog = () => {
     resetProductionForm()
     setIsProductionDialogOpen(true)
+  }
+
+  const resetPackagingForm = () => {
+    setPackagingForm({
+      date: new Date().toISOString().slice(0, 10),
+      sourceDate: new Date().toISOString().slice(0, 10),
+      outputId: '',
+      lineNumber: '',
+      lineName: '',
+      productName: '',
+      planRolls: 0,
+      factRolls: 0,
+      factBoxes: 0,
+      factPallets: 0,
+      labelItem: 'Этикетка 160 сетка',
+      labelQty: 0,
+      stretchQty: 0,
+      thermoQty: 0,
+      comment: '',
+    })
+  }
+
+  const openNewPackagingDialog = () => {
+    resetPackagingForm()
+    setIsPackagingDialogOpen(true)
   }
 
   const openExistingProductionRequest = (id: string) => {
@@ -1038,11 +1123,91 @@ function App() {
     setIsProductionDialogOpen(false)
   }
 
-  const postProductionRequest = (id: string) => {
+  const postProductionRequest = async (id: string) => {
+    const req = productionRequests.find((r) => r.id === id)
+    if (!req || req.status === 'posted') return
+    for (const row of req.rawLines) {
+      const lot = lotsState.find((l) => l.id === row.lotId)
+      if (!lot || !lot.id) continue
+      const nextRolls = Math.max(0, (lot.rolls || 0) - (row.qty || 0))
+      await updateDoc(doc(db, 'lots', lot.id), { rolls: nextRolls, updatedAt: serverTimestamp() }).catch(() => {})
+    }
+    const outputQty = Math.max(0, req.actualC1 + req.actualC2 + req.actualC3 + req.actualC4 - req.defectQty)
+    const output: UnpackedOutputRecord = {
+      id: `UO-${Date.now()}`,
+      sourceRequestId: req.id,
+      date: req.date,
+      lineNumber: req.lineNumber,
+      lineName: req.lineName,
+      productName: req.lineName || req.categoryLabel || 'Готовая продукция',
+      qtyRolls: outputQty,
+      status: 'unpacked',
+    }
+    setUnpackedOutputs((s) => [output, ...s])
     setProductionRequests((rows) => rows.map((r) => (r.id === id ? { ...r, status: 'posted' } : r)))
+    await logAction('production_request.post', { requestId: id, outputQty })
     if (selectedProductionRequestId === id) {
       setSelectedProductionRequestId(id)
     }
+  }
+
+  const selectOutputForPackaging = (outputId: string) => {
+    const out = unpackedOutputs.find((o) => o.id === outputId && o.status === 'unpacked')
+    if (!out) return
+    setPackagingForm((s) => ({
+      ...s,
+      outputId,
+      sourceDate: out.date,
+      lineNumber: out.lineNumber,
+      lineName: out.lineName,
+      productName: out.productName,
+      planRolls: out.qtyRolls,
+      factRolls: out.qtyRolls,
+    }))
+  }
+
+  const savePackagingDraft = () => {
+    if (!packagingForm.outputId || !packagingForm.lineName.trim()) {
+      setError('Упаковка: выберите выработку предыдущего дня')
+      return
+    }
+    const payload: PackagingRequestRecord = {
+      id: `PKG-${Date.now()}`,
+      outputId: packagingForm.outputId,
+      date: packagingForm.date,
+      sourceDate: packagingForm.sourceDate,
+      lineNumber: packagingForm.lineNumber.trim(),
+      lineName: packagingForm.lineName.trim(),
+      productName: packagingForm.productName.trim(),
+      planRolls: Number(packagingForm.planRolls) || 0,
+      factRolls: Number(packagingForm.factRolls) || 0,
+      factBoxes: Number(packagingForm.factBoxes) || 0,
+      factPallets: Number(packagingForm.factPallets) || 0,
+      labelItem: packagingForm.labelItem,
+      labelQty: Number(packagingForm.labelQty) || 0,
+      stretchQty: Number(packagingForm.stretchQty) || 0,
+      thermoQty: Number(packagingForm.thermoQty) || 0,
+      comment: packagingForm.comment.trim(),
+      status: 'draft',
+    }
+    setPackagingRequests((rows) => [payload, ...rows])
+    setIsPackagingDialogOpen(false)
+    setError('')
+  }
+
+  const postPackagingRequest = async (id: string) => {
+    const req = packagingRequests.find((r) => r.id === id)
+    if (!req || req.status === 'posted') return
+    setConsumablesStock((s) => ({
+      ...s,
+      [req.labelItem]: Math.max(0, (s[req.labelItem] || 0) - req.labelQty),
+      Стрейч: Math.max(0, (s.Стрейч || 0) - req.stretchQty),
+      Термопленка: Math.max(0, (s.Термопленка || 0) - req.thermoQty),
+    }))
+    setPackagedStock((s) => ({ ...s, [req.productName]: (s[req.productName] || 0) + req.factRolls }))
+    setUnpackedOutputs((rows) => rows.map((o) => (o.id === req.outputId ? { ...o, status: 'packaged' } : o)))
+    setPackagingRequests((rows) => rows.map((r) => (r.id === id ? { ...r, status: 'posted' } : r)))
+    await logAction('packaging_request.post', { requestId: id, factRolls: req.factRolls })
   }
   const docDialogTitle: Record<DocDialogKind, string> = {
     pn: 'Новый документ: Приходная (ПН)',
@@ -1264,6 +1429,16 @@ function App() {
       const prod = productsState.find((p) => p.id === pid)
       bump(wh, pid, roll.productName, prod?.internalId || '—', 'Готовая продукция (рулоны)', 1, 'рул.')
     }
+    for (const output of unpackedOutputs) {
+      if (output.status !== 'unpacked') continue
+      bump(fgDefault, `UNPK-${output.productName}`, output.productName, '—', 'ГП неупакованная (выработка)', output.qtyRolls, 'рул.')
+    }
+    for (const [productName, qty] of Object.entries(packagedStock)) {
+      bump(fgDefault, `PKG-${productName}`, productName, '—', 'ГП упакованная (рулоны)', qty, 'рул.')
+    }
+    for (const [item, qty] of Object.entries(consumablesStock)) {
+      bump(rawDefault, `CONS-${item}`, item, '—', 'Расходные материалы', qty, 'шт.')
+    }
     let rows: TisBalanceRow[] = Array.from(agg.entries()).map(([bucket, r]) => ({
       key: bucket,
       warehouse: r.warehouse,
@@ -1278,7 +1453,7 @@ function App() {
     if (balancesWarehouseFilter !== '__all__')
       rows = rows.filter((r) => r.warehouse === balancesWarehouseFilter)
     return rows
-  }, [lotsState, rollsState, productsState, warehousesState, balancesWarehouseFilter])
+  }, [lotsState, rollsState, productsState, warehousesState, balancesWarehouseFilter, unpackedOutputs, packagedStock, consumablesStock])
 
   const filteredDocuments = useMemo(() => {
     return documentsState.filter((d) => {
@@ -2728,6 +2903,101 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
             {!productionRequests.length ? <div className="lot-line">Заявок пока нет</div> : null}
           </div>
 
+          <h3 style={{ marginTop: 18 }}>Линия упаковки (на основании выработки предыдущего дня)</h3>
+          <div className="actions">
+            <button type="button" className="action-btn slim add-btn" onClick={openNewPackagingDialog}>
+              + Документ упаковки
+            </button>
+          </div>
+          <div className="stage-grid">
+            <article className="stage-card">
+              <div className="stage-head">
+                <strong>Неупакованная выработка</strong>
+                <span>{unpackedOutputs.filter((o) => o.status === 'unpacked').length}</span>
+              </div>
+              {unpackedOutputs
+                .filter((o) => o.status === 'unpacked')
+                .map((o) => (
+                  <div className="lot" key={o.id}>
+                    <div className="lot-top">
+                      <b>{o.lineName}</b>
+                      <span>{o.date}</span>
+                    </div>
+                    <div className="lot-line">{o.productName}</div>
+                    <div className="lot-line">{o.qtyRolls} рул. (не упаковано)</div>
+                  </div>
+                ))}
+            </article>
+            <article className="stage-card">
+              <div className="stage-head">
+                <strong>Расходники упаковки</strong>
+                <span>остаток</span>
+              </div>
+              {Object.entries(consumablesStock).map(([k, v]) => (
+                <div key={k} className="lot-line">
+                  {k}: {v} шт.
+                </div>
+              ))}
+            </article>
+            <article className="stage-card">
+              <div className="stage-head">
+                <strong>Упакованный остаток</strong>
+                <span>рулоны</span>
+              </div>
+              {Object.entries(packagedStock).map(([k, v]) => (
+                <div key={k} className="lot-line">
+                  {k}: {v}
+                </div>
+              ))}
+              {!Object.keys(packagedStock).length ? <div className="lot-line">Пока пусто</div> : null}
+            </article>
+          </div>
+          <div className="doc-journal" style={{ marginTop: 12 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Основание (дата)</th>
+                  <th>Линия</th>
+                  <th>Продукция</th>
+                  <th>План / факт рул.</th>
+                  <th>Коробки / поддоны</th>
+                  <th>Списание расходников</th>
+                  <th>Статус</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {packagingRequests.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.date}</td>
+                    <td>{r.sourceDate}</td>
+                    <td>{r.lineNumber}</td>
+                    <td>{r.productName}</td>
+                    <td>
+                      {r.planRolls} / {r.factRolls}
+                    </td>
+                    <td>
+                      {r.factBoxes} / {r.factPallets}
+                    </td>
+                    <td>
+                      {r.labelItem}: {r.labelQty}, Стрейч: {r.stretchQty}, Термо: {r.thermoQty}
+                    </td>
+                    <td>{r.status === 'posted' ? 'Проведен' : 'Черновик'}</td>
+                    <td>
+                      {r.status === 'draft' ? (
+                        <button type="button" className="action-btn slim" onClick={() => postPackagingRequest(r.id)}>
+                          Провести
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!packagingRequests.length ? <div className="lot-line">Документов упаковки пока нет</div> : null}
+          </div>
+
           {isProductionDialogOpen ? (
             <div className="modal-backdrop" onClick={() => setIsProductionDialogOpen(false)}>
               <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
@@ -2870,6 +3140,57 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       </button>
                     </article>
                   ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {isPackagingDialogOpen ? (
+            <div className="modal-backdrop" onClick={() => setIsPackagingDialogOpen(false)}>
+              <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head">
+                  <strong>Документ линии упаковки</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsPackagingDialogOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                {packagingReadonly ? <div className="lot-line"> </div> : null}
+                <div className="doc-modal-grid">
+                  <input className="field-input" type="date" value={packagingForm.date} onChange={(e) => setPackagingForm((s) => ({ ...s, date: e.target.value }))} />
+                  <select className="field-input" value={packagingForm.outputId} onChange={(e) => selectOutputForPackaging(e.target.value)}>
+                    <option value="">Выработка предыдущего дня</option>
+                    {unpackedOutputs
+                      .filter((o) => o.status === 'unpacked')
+                      .map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.date} • {o.lineNumber} • {o.productName} • {o.qtyRolls} рул.
+                        </option>
+                      ))}
+                  </select>
+                  <input className="field-input" type="date" value={packagingForm.sourceDate} onChange={(e) => setPackagingForm((s) => ({ ...s, sourceDate: e.target.value }))} />
+                  <input className="field-input" placeholder="№ линии упаковки" value={packagingForm.lineNumber} onChange={(e) => setPackagingForm((s) => ({ ...s, lineNumber: e.target.value }))} />
+                  <input className="field-input" placeholder="Наименование" value={packagingForm.lineName} onChange={(e) => setPackagingForm((s) => ({ ...s, lineName: e.target.value }))} />
+                  <input className="field-input" placeholder="Продукция" value={packagingForm.productName} onChange={(e) => setPackagingForm((s) => ({ ...s, productName: e.target.value }))} />
+                  <input type="number" className="field-input" placeholder="План рулонов" value={packagingForm.planRolls || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, planRolls: Number(e.target.value) }))} />
+                  <input type="number" className="field-input" placeholder="Факт рулонов" value={packagingForm.factRolls || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, factRolls: Number(e.target.value) }))} />
+                  <input type="number" className="field-input" placeholder="Факт коробок" value={packagingForm.factBoxes || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, factBoxes: Number(e.target.value) }))} />
+                  <input type="number" className="field-input" placeholder="Факт поддонов" value={packagingForm.factPallets || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, factPallets: Number(e.target.value) }))} />
+                  <select className="field-input" value={packagingForm.labelItem} onChange={(e) => setPackagingForm((s) => ({ ...s, labelItem: e.target.value }))}>
+                    {Object.keys(consumablesStock)
+                      .filter((k) => k.startsWith('Этикетка'))
+                      .map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                  </select>
+                  <input type="number" className="field-input" placeholder="Списание этикеток" value={packagingForm.labelQty || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, labelQty: Number(e.target.value) }))} />
+                  <input type="number" className="field-input" placeholder="Списание стрейча" value={packagingForm.stretchQty || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, stretchQty: Number(e.target.value) }))} />
+                  <input type="number" className="field-input" placeholder="Списание термопленки" value={packagingForm.thermoQty || ''} onChange={(e) => setPackagingForm((s) => ({ ...s, thermoQty: Number(e.target.value) }))} />
+                  <input className="field-input" placeholder="Примечание" value={packagingForm.comment} onChange={(e) => setPackagingForm((s) => ({ ...s, comment: e.target.value }))} />
+                  <button type="button" className="action-btn slim" onClick={savePackagingDraft}>
+                    Сохранить документ упаковки
+                  </button>
                 </div>
               </div>
             </div>
