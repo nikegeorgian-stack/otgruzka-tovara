@@ -52,6 +52,7 @@ type Role = 'admin' | 'line' | 'qc' | 'warehouse' | 'logistics' | 'accounting' |
 type ViewKey =
   | 'dashboard'
   | 'documents'
+  | 'production_request'
   | 'lots'
   | 'runs'
   | 'rolls'
@@ -197,6 +198,43 @@ type Receipt = {
   productName: string
   qtyRolls: number
   note?: string
+}
+
+type ProductionRequestRawLine = {
+  lotId: string
+  lotLabel: string
+  qty: number
+  note?: string
+}
+
+type ProductionRequestRecord = {
+  id: string
+  date: string
+  lineNumber: string
+  lineName: string
+  customer: string
+  packaging: string
+  density: string
+  categoryLabel: string
+  color: string
+  plannedQty: number
+  foremanId: string
+  foremanName: string
+  brigadeIds: string[]
+  brigadeNames: string[]
+  rawLines: ProductionRequestRawLine[]
+  actualC1: number
+  actualC2: number
+  actualC3: number
+  actualC4: number
+  defectQty: number
+  packedRolls: number
+  packedBoxes: number
+  packedPallets: number
+  comment: string
+  planStatus: 'Недовыполнен' | 'Выполнен' | 'Перевыполнен'
+  status: 'draft' | 'posted'
+  createdAt: string
 }
 
 const stageLabels: Record<Stage, string> = {
@@ -373,6 +411,35 @@ function App() {
     customer: '',
     selectedRollIds: [] as string[],
     docDate: new Date().toISOString().slice(0, 10),
+    comment: '',
+  })
+  const [productionRequests, setProductionRequests] = useState<ProductionRequestRecord[]>([])
+  const [selectedProductionRequestId, setSelectedProductionRequestId] = useState<string | null>(null)
+  const [isProductionDialogOpen, setIsProductionDialogOpen] = useState(false)
+  const [isBrigadierDialogOpen, setIsBrigadierDialogOpen] = useState(false)
+  const [brigadierIds, setBrigadierIds] = useState<string[]>([])
+  const [newRawLine, setNewRawLine] = useState({ lotId: '', qty: 0, note: '' })
+  const [productionForm, setProductionForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    lineNumber: '',
+    lineName: '',
+    customer: '',
+    packaging: '',
+    density: '',
+    categoryLabel: '',
+    color: '',
+    plannedQty: 0,
+    foremanId: '',
+    brigadeIds: [] as string[],
+    rawLines: [] as ProductionRequestRawLine[],
+    actualC1: 0,
+    actualC2: 0,
+    actualC3: 0,
+    actualC4: 0,
+    defectQty: 0,
+    packedRolls: 0,
+    packedBoxes: 0,
+    packedPallets: 0,
     comment: '',
   })
 
@@ -700,6 +767,7 @@ function App() {
     (currentUser.role === 'admin' || currentUser.role === 'warehouse' || currentUser.role === 'logistics')
   const canManageSuppliers = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'warehouse')
   const canManageReceipts = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'warehouse')
+  const canManageProductionRequest = !!currentUser && ['admin', 'warehouse', 'line', 'logistics'].includes(currentUser.role)
   const canSeeDocuments = !!currentUser && currentUser.permissions.documents
   const canWriteDocuments =
     !!currentUser &&
@@ -713,6 +781,7 @@ function App() {
     if (!currentUser) return false
     if (key === 'dashboard') return true
     if (key === 'documents') return canSeeDocuments
+    if (key === 'production_request') return canManageProductionRequest
     if (key === 'lots') return currentUser.permissions.lots
     if (key === 'runs') return currentUser.permissions.runs
     if (key === 'rolls') return currentUser.permissions.rolls
@@ -737,6 +806,7 @@ function App() {
   const navItems: Array<[ViewKey, string, typeof PackageCheck]> = [
     ['dashboard', 'Дашборд', PackageCheck],
     ['documents', 'Документы', FolderOpen],
+    ['production_request', 'Заявка линии', ClipboardList],
     ['lots', 'Партии', Factory],
     ['runs', 'Запуски MES', Factory],
     ['rolls', 'Рулоны', PackageCheck],
@@ -761,6 +831,7 @@ function App() {
     ],
     warehouse: [
       { title: 'Документы склада', description: 'Создание и проведение ПН/ПМ/СП/ОТГ', view: 'documents' },
+      { title: 'Заявка линии', description: 'Приемка выработки и списание сырья по смене', view: 'production_request' },
       { title: 'Остатки и движения', description: 'Быстрый контроль складского регистра', view: 'inventory' },
       { title: 'Поступления', description: 'Приёмка и оформление сырья', view: 'receipts' },
       { title: 'Паллеты', description: 'Сборка и подготовка отгрузки', view: 'shipping' },
@@ -778,6 +849,7 @@ function App() {
       { title: 'Traceability', description: 'Поиск по рулону и истории', view: 'trace' },
     ],
     line: [
+      { title: 'Заявка линии', description: 'План / факт по категориям и брак за смену', view: 'production_request' },
       { title: 'Партии', description: 'Управление этапами сырья и производства', view: 'lots' },
       { title: 'MES Запуски', description: 'Создание и контроль запусков', view: 'runs' },
       { title: 'Рулоны', description: 'Выпуск рулонов для QC', view: 'rolls' },
@@ -808,6 +880,169 @@ function App() {
     users: `${usersState.length} пользователей`,
     products: `${productsState.length} позиций`,
     hr: `${employeesState.length} сотрудников`,
+  }
+  const effectiveEmployees = employeesState.length ? employeesState : employees
+  const activeEmployees = effectiveEmployees.filter((e) => e.status === 'active')
+  const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
+  const productionRequestCount = productionRequests.length
+  const postedProductionRequestCount = productionRequests.filter((r) => r.status === 'posted').length
+  workspaceMetricByView.production_request = `${postedProductionRequestCount}/${productionRequestCount} проведено`
+
+  const resetProductionForm = () => {
+    setProductionForm({
+      date: new Date().toISOString().slice(0, 10),
+      lineNumber: '',
+      lineName: '',
+      customer: '',
+      packaging: '',
+      density: '',
+      categoryLabel: '',
+      color: '',
+      plannedQty: 0,
+      foremanId: '',
+      brigadeIds: [],
+      rawLines: [],
+      actualC1: 0,
+      actualC2: 0,
+      actualC3: 0,
+      actualC4: 0,
+      defectQty: 0,
+      packedRolls: 0,
+      packedBoxes: 0,
+      packedPallets: 0,
+      comment: '',
+    })
+    setNewRawLine({ lotId: '', qty: 0, note: '' })
+    setSelectedProductionRequestId(null)
+  }
+
+  const selectedProductionRequest = productionRequests.find((r) => r.id === selectedProductionRequestId) || null
+  const productionReadonly = selectedProductionRequest?.status === 'posted'
+  const getProductionPlanStatus = (planned: number, actual: number): ProductionRequestRecord['planStatus'] => {
+    if (actual > planned) return 'Перевыполнен'
+    if (actual < planned) return 'Недовыполнен'
+    return 'Выполнен'
+  }
+
+  const openNewProductionRequestDialog = () => {
+    resetProductionForm()
+    setIsProductionDialogOpen(true)
+  }
+
+  const openExistingProductionRequest = (id: string) => {
+    const req = productionRequests.find((r) => r.id === id)
+    if (!req) return
+    setSelectedProductionRequestId(id)
+    setProductionForm({
+      date: req.date,
+      lineNumber: req.lineNumber,
+      lineName: req.lineName,
+      customer: req.customer,
+      packaging: req.packaging,
+      density: req.density,
+      categoryLabel: req.categoryLabel,
+      color: req.color,
+      plannedQty: req.plannedQty,
+      foremanId: req.foremanId,
+      brigadeIds: req.brigadeIds,
+      rawLines: req.rawLines,
+      actualC1: req.actualC1,
+      actualC2: req.actualC2,
+      actualC3: req.actualC3,
+      actualC4: req.actualC4,
+      defectQty: req.defectQty,
+      packedRolls: req.packedRolls,
+      packedBoxes: req.packedBoxes,
+      packedPallets: req.packedPallets,
+      comment: req.comment,
+    })
+    setIsProductionDialogOpen(true)
+  }
+
+  const addBrigadier = (employeeId: string) => {
+    if (!employeeId || brigadierIds.includes(employeeId)) return
+    setBrigadierIds((s) => [...s, employeeId])
+    if (!productionForm.foremanId) {
+      setProductionForm((s) => ({ ...s, foremanId: employeeId }))
+    }
+  }
+
+  const toggleBrigadeMember = (employeeId: string) => {
+    setProductionForm((s) => ({
+      ...s,
+      brigadeIds: s.brigadeIds.includes(employeeId) ? s.brigadeIds.filter((id) => id !== employeeId) : [...s.brigadeIds, employeeId],
+    }))
+  }
+
+  const addRawLineToProduction = () => {
+    const lot = availableRawLots.find((l) => l.id === newRawLine.lotId)
+    if (!lot || !newRawLine.qty || newRawLine.qty <= 0) return
+    const label = `${lot.product} • ${(lot.id || '').slice(0, 18)}`
+    setProductionForm((s) => ({
+      ...s,
+      rawLines: [...s.rawLines, { lotId: lot.id || '', lotLabel: label, qty: newRawLine.qty, note: newRawLine.note.trim() }],
+    }))
+    setNewRawLine({ lotId: '', qty: 0, note: '' })
+  }
+
+  const removeRawLineFromProduction = (idx: number) => {
+    setProductionForm((s) => ({ ...s, rawLines: s.rawLines.filter((_, i) => i !== idx) }))
+  }
+
+  const saveProductionRequestDraft = () => {
+    const foreman = activeEmployees.find((e) => e.id === productionForm.foremanId)
+    if (!productionForm.lineNumber.trim() || !productionForm.lineName.trim() || !foreman) {
+      setError('Заявка: заполните номер линии, наименование и выберите бригадира')
+      return
+    }
+    const actualTotal = productionForm.actualC1 + productionForm.actualC2 + productionForm.actualC3 + productionForm.actualC4
+    const planStatus = getProductionPlanStatus(productionForm.plannedQty || 0, actualTotal)
+    const brigade = activeEmployees.filter((e) => productionForm.brigadeIds.includes(e.id))
+    const payload: ProductionRequestRecord = {
+      id: selectedProductionRequestId || `REQ-${Date.now()}`,
+      date: productionForm.date,
+      lineNumber: productionForm.lineNumber.trim(),
+      lineName: productionForm.lineName.trim(),
+      customer: productionForm.customer.trim(),
+      packaging: productionForm.packaging.trim(),
+      density: productionForm.density.trim(),
+      categoryLabel: productionForm.categoryLabel.trim(),
+      color: productionForm.color.trim(),
+      plannedQty: Number(productionForm.plannedQty) || 0,
+      foremanId: foreman.id,
+      foremanName: foreman.name,
+      brigadeIds: productionForm.brigadeIds,
+      brigadeNames: brigade.map((b) => b.name),
+      rawLines: productionForm.rawLines,
+      actualC1: Number(productionForm.actualC1) || 0,
+      actualC2: Number(productionForm.actualC2) || 0,
+      actualC3: Number(productionForm.actualC3) || 0,
+      actualC4: Number(productionForm.actualC4) || 0,
+      defectQty: Number(productionForm.defectQty) || 0,
+      packedRolls: Number(productionForm.packedRolls) || 0,
+      packedBoxes: Number(productionForm.packedBoxes) || 0,
+      packedPallets: Number(productionForm.packedPallets) || 0,
+      comment: productionForm.comment.trim(),
+      planStatus,
+      status: selectedProductionRequest?.status === 'posted' ? 'posted' : 'draft',
+      createdAt: selectedProductionRequest?.createdAt || new Date().toISOString(),
+    }
+    setProductionRequests((rows) => {
+      const i = rows.findIndex((r) => r.id === payload.id)
+      if (i < 0) return [payload, ...rows]
+      const copy = [...rows]
+      copy[i] = payload
+      return copy
+    })
+    setError('')
+    setIsProductionDialogOpen(false)
+  }
+
+  const postProductionRequest = (id: string) => {
+    setProductionRequests((rows) => rows.map((r) => (r.id === id ? { ...r, status: 'posted' } : r)))
+    if (selectedProductionRequestId === id) {
+      setSelectedProductionRequestId(id)
+    }
   }
   const docDialogTitle: Record<DocDialogKind, string> = {
     pn: 'Новый документ: Приходная (ПН)',
@@ -2147,6 +2382,11 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                 Очередь QC
               </button>
             ) : null}
+            {canManageProductionRequest ? (
+              <button type="button" className="action-btn slim ghost" onClick={() => openSection('production_request')}>
+                Заявка по линии
+              </button>
+            ) : null}
           </div>
           <div className="workspace-grid">
             {workspaceCardsByRole[currentUser.role]
@@ -2424,6 +2664,215 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                 </div>
               ) : null}
             </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {navMode === 'sections' && view === 'production_request' && canManageProductionRequest ? (
+        <section className="board">
+          <h2>Заявка на производство (симуляция)</h2>
+          <p className="lot-line" style={{ marginBottom: 12 }}>
+            Дата редактируется, но после проведения заявка становится только для чтения. Бригадир и бригада выбираются из сотрудников.
+          </p>
+          <div className="actions">
+            <button type="button" className="action-btn slim add-btn" onClick={openNewProductionRequestDialog}>
+              + Добавить заявку
+            </button>
+          </div>
+
+          <div className="doc-journal">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Линия</th>
+                  <th>Наименование</th>
+                  <th>Бригадир</th>
+                  <th>План</th>
+                  <th>Факт</th>
+                  <th>Статус плана</th>
+                  <th>Документ</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {productionRequests.map((r) => {
+                  const fact = r.actualC1 + r.actualC2 + r.actualC3 + r.actualC4
+                  return (
+                    <tr key={r.id}>
+                      <td>{r.date}</td>
+                      <td>{r.lineNumber}</td>
+                      <td>{r.lineName}</td>
+                      <td>{r.foremanName}</td>
+                      <td>{r.plannedQty}</td>
+                      <td>{fact}</td>
+                      <td>{r.planStatus}</td>
+                      <td>{r.status === 'posted' ? 'Проведен' : 'Черновик'}</td>
+                      <td>
+                        <div className="actions" style={{ marginBottom: 0 }}>
+                          <button type="button" className="action-btn slim ghost" onClick={() => openExistingProductionRequest(r.id)}>
+                            Открыть
+                          </button>
+                          {r.status === 'draft' ? (
+                            <button type="button" className="action-btn slim" onClick={() => postProductionRequest(r.id)}>
+                              Провести
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {!productionRequests.length ? <div className="lot-line">Заявок пока нет</div> : null}
+          </div>
+
+          {isProductionDialogOpen ? (
+            <div className="modal-backdrop" onClick={() => setIsProductionDialogOpen(false)}>
+              <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head">
+                  <strong>{selectedProductionRequestId ? 'Редактирование заявки' : 'Новая заявка'}</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsProductionDialogOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                {productionReadonly ? <div className="error">Документ проведен и недоступен для редактирования.</div> : null}
+                <div className="doc-modal-grid">
+                  <input className="field-input" type="date" value={productionForm.date} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, date: e.target.value }))} />
+                  <input className="field-input" placeholder="№ линии" value={productionForm.lineNumber} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, lineNumber: e.target.value }))} />
+                  <input className="field-input" placeholder="Наименование" value={productionForm.lineName} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, lineName: e.target.value }))} />
+                  <input className="field-input" placeholder="Заказчик" value={productionForm.customer} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, customer: e.target.value }))} />
+                  <input className="field-input" placeholder="Упаковка" value={productionForm.packaging} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, packaging: e.target.value }))} />
+                  <input className="field-input" placeholder="Плотность" value={productionForm.density} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, density: e.target.value }))} />
+                  <input className="field-input" placeholder="Категория" value={productionForm.categoryLabel} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, categoryLabel: e.target.value }))} />
+                  <input className="field-input" placeholder="Цвет" value={productionForm.color} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, color: e.target.value }))} />
+                  <input type="number" className="field-input" placeholder="План (кол-во)" value={productionForm.plannedQty || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, plannedQty: Number(e.target.value) }))} />
+                  <div className="actions" style={{ marginBottom: 0 }}>
+                    <select className="field-input" value={productionForm.foremanId} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, foremanId: e.target.value }))}>
+                      <option value="">Бригадир</option>
+                      {activeEmployees.filter((e) => brigadierIds.includes(e.id)).map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} ({e.role})
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="action-btn slim ghost" disabled={productionReadonly} onClick={() => setIsBrigadierDialogOpen(true)}>
+                      + Добавить бригадира
+                    </button>
+                  </div>
+
+                  <div className="stage-card">
+                    <div className="stage-head">
+                      <strong>Бригада</strong>
+                    </div>
+                    <div className="actions" style={{ marginBottom: 0 }}>
+                      {activeEmployees.map((e) => (
+                        <button key={e.id} type="button" disabled={productionReadonly} className={`action-btn slim ghost ${productionForm.brigadeIds.includes(e.id) ? 'active' : ''}`} onClick={() => toggleBrigadeMember(e.id)}>
+                          {e.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="stage-card">
+                    <div className="stage-head">
+                      <strong>Сырьё (из остатков)</strong>
+                    </div>
+                    <div className="form-grid" style={{ marginBottom: 8 }}>
+                      <select className="field-input" value={newRawLine.lotId} disabled={productionReadonly} onChange={(e) => setNewRawLine((s) => ({ ...s, lotId: e.target.value }))}>
+                        <option value="">Партия сырья</option>
+                        {availableRawLots.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {(l.id || '').slice(0, 16)} • {l.product} • остаток {l.rolls}
+                          </option>
+                        ))}
+                      </select>
+                      <input type="number" className="field-input" placeholder="Кол-во (рул.)" value={newRawLine.qty || ''} disabled={productionReadonly} onChange={(e) => setNewRawLine((s) => ({ ...s, qty: Number(e.target.value) }))} />
+                      <input className="field-input" placeholder="Примечание" value={newRawLine.note} disabled={productionReadonly} onChange={(e) => setNewRawLine((s) => ({ ...s, note: e.target.value }))} />
+                      <button type="button" className="action-btn slim ghost" disabled={productionReadonly} onClick={addRawLineToProduction}>
+                        + Добавить сырьё
+                      </button>
+                    </div>
+                    {productionForm.rawLines.map((row, idx) => (
+                      <div key={`${row.lotId}-${idx}`} className="lot">
+                        <div className="lot-top">
+                          <b>{row.lotLabel}</b>
+                          <span>{row.qty} рул.</span>
+                        </div>
+                        <div className="lot-line">{row.note || '—'}</div>
+                        {!productionReadonly ? (
+                          <button type="button" className="action-btn slim ghost" onClick={() => removeRawLineFromProduction(idx)}>
+                            Удалить
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="stage-card">
+                    <div className="stage-head">
+                      <strong>Факт по категориям</strong>
+                    </div>
+                    <div className="form-grid">
+                      <input type="number" className="field-input" placeholder="Категория 1" value={productionForm.actualC1 || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, actualC1: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Категория 2" value={productionForm.actualC2 || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, actualC2: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Категория 3" value={productionForm.actualC3 || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, actualC3: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Категория 4" value={productionForm.actualC4 || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, actualC4: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Брак" value={productionForm.defectQty || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, defectQty: Number(e.target.value) }))} />
+                    </div>
+                  </div>
+
+                  <div className="stage-card">
+                    <div className="stage-head">
+                      <strong>Упаковка</strong>
+                    </div>
+                    <div className="form-grid">
+                      <input type="number" className="field-input" placeholder="Рулоны" value={productionForm.packedRolls || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, packedRolls: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Коробки" value={productionForm.packedBoxes || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, packedBoxes: Number(e.target.value) }))} />
+                      <input type="number" className="field-input" placeholder="Поддоны" value={productionForm.packedPallets || ''} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, packedPallets: Number(e.target.value) }))} />
+                    </div>
+                  </div>
+
+                  <input className="field-input" placeholder="Примечание" value={productionForm.comment} disabled={productionReadonly} onChange={(e) => setProductionForm((s) => ({ ...s, comment: e.target.value }))} />
+                  {!productionReadonly ? (
+                    <button type="button" className="action-btn slim" onClick={saveProductionRequestDraft}>
+                      Сохранить заявку
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {isBrigadierDialogOpen ? (
+            <div className="modal-backdrop" onClick={() => setIsBrigadierDialogOpen(false)}>
+              <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head">
+                  <strong>Добавить бригадира</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsBrigadierDialogOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                <div className="stage-grid">
+                  {activeEmployees.map((emp) => (
+                    <article className="stage-card" key={`brigadier-${emp.id}`}>
+                      <div className="stage-head">
+                        <strong>{emp.name}</strong>
+                        <span>{emp.role}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`action-btn slim ghost ${brigadierIds.includes(emp.id) ? 'active' : ''}`}
+                        onClick={() => addBrigadier(emp.id)}
+                      >
+                        {brigadierIds.includes(emp.id) ? 'Уже в списке' : 'Добавить в список бригадиров'}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
           ) : null}
         </section>
       ) : null}
