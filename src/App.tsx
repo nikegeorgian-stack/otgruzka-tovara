@@ -2513,6 +2513,55 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         ) : null}
       </section>
 
+      <section className="board quick-nav-board">
+        <h3 style={{ marginBottom: 10 }}>Быстрые переходы</h3>
+        <div className="quick-nav-grid">
+          {canSeeDocuments ? (
+            <button type="button" className="quick-nav-btn" onClick={() => openSection('documents')}>
+              <span>Документы</span>
+              <small>ПН / ПМ / СП / ОТГ</small>
+            </button>
+          ) : null}
+          {canManageProductionRequest ? (
+            <button type="button" className="quick-nav-btn" onClick={() => openSection('production_request')}>
+              <span>Заявка линии</span>
+              <small>Выработка и упаковка</small>
+            </button>
+          ) : null}
+          {currentUser.permissions.inventory ? (
+            <button
+              type="button"
+              className="quick-nav-btn"
+              onClick={() => {
+                setInventorySubView('balances')
+                openSection('inventory')
+              }}
+            >
+              <span>Склад</span>
+              <small>Остатки и движения</small>
+            </button>
+          ) : null}
+          {canManageReceipts ? (
+            <button type="button" className="quick-nav-btn" onClick={() => openSection('receipts')}>
+              <span>Поступления</span>
+              <small>Приемка сырья</small>
+            </button>
+          ) : null}
+          {canManageShipping ? (
+            <button type="button" className="quick-nav-btn" onClick={() => openSection('shipping')}>
+              <span>Паллеты/Отгрузка</span>
+              <small>Упаковка и отгрузка</small>
+            </button>
+          ) : null}
+          {canManageOrders ? (
+            <button type="button" className="quick-nav-btn" onClick={() => openSection('orders')}>
+              <span>Заказы/Резервы</span>
+              <small>Распределение по заказам</small>
+            </button>
+          ) : null}
+        </div>
+      </section>
+
       {navMode === 'workspace' ? (
         <section className="board workspace-board">
           <h2>Рабочее место: {roleLabels[currentUser.role]}</h2>
