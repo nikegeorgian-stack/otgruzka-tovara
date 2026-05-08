@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Boxes,
@@ -597,6 +597,8 @@ function App() {
   const [newHrNote, setNewHrNote] = useState('')
   const [newHrDoc, setNewHrDoc] = useState({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
   const [newHrDocFile, setNewHrDocFile] = useState<File | null>(null)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
   const [newHrAbsence, setNewHrAbsence] = useState({ type: 'vacation' as HrAbsenceType, startDate: '', endDate: '', reason: '' })
   const [newHrTraining, setNewHrTraining] = useState({
     title: '',
@@ -608,6 +610,8 @@ function App() {
   const [isHrAddModalOpen, setIsHrAddModalOpen] = useState(false)
   const [isHrEmployeeModalOpen, setIsHrEmployeeModalOpen] = useState(false)
   const [hrEmployeeModalTab, setHrEmployeeModalTab] = useState<HrEmployeeModalTab>('overview')
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
+  const cameraStreamRef = useRef<MediaStream | null>(null)
   const [newOrder, setNewOrder] = useState({ customer: '', productId: '', qty: 0 })
   const [newRun, setNewRun] = useState({
     productId: '',
@@ -884,6 +888,15 @@ function App() {
       unsubEmployees()
     }
   }, [firebaseUser, currentUser])
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+        cameraStreamRef.current = null
+      }
+    }
+  }, [])
 
   const allowedStages = useMemo(() => {
     if (!currentUser) return [] as Stage[]
@@ -1544,6 +1557,47 @@ function App() {
       reader.onerror = () => reject(new Error('photo_read_failed'))
       reader.readAsDataURL(file)
     })
+  }
+
+  function stopCamera() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current = null
+    }
+    setIsCameraOpen(false)
+  }
+
+  async function openCamera() {
+    setCameraError('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+      cameraStreamRef.current = stream
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream
+        await cameraVideoRef.current.play()
+      }
+      setIsCameraOpen(true)
+    } catch {
+      setCameraError('Не удалось открыть камеру. Проверь разрешение в браузере.')
+      setIsCameraOpen(false)
+    }
+  }
+
+  async function capturePhotoFromCamera(employeeId: string) {
+    const video = cameraVideoRef.current
+    if (!video || !currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 1280
+    canvas.height = video.videoHeight || 720
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+    await updateDoc(doc(db, 'employees', employeeId), { photoUrl: dataUrl, updatedAt: serverTimestamp() })
+    stopCamera()
   }
 
   async function saveEmployeeNote(employee: HrEmployee) {
@@ -4581,6 +4635,24 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   />
                   <label className="field-label">Загрузить фото</label>
                   <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                  <div className="actions lot-actions">
+                    {!isCameraOpen ? (
+                      <button className="action-btn slim ghost" type="button" onClick={openCamera}>
+                        Сделать фото (камера)
+                      </button>
+                    ) : (
+                      <>
+                        <button className="action-btn slim" type="button" onClick={() => capturePhotoFromCamera(selectedEmployee.id)}>
+                          Снять и сохранить
+                        </button>
+                        <button className="action-btn slim ghost" type="button" onClick={stopCamera}>
+                          Отмена
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {cameraError ? <div className="error">{cameraError}</div> : null}
+                  {isCameraOpen ? <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted /> : null}
                 </div>
 
                 <div>
@@ -4625,7 +4697,9 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
                     <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
                     <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                    <label className="field-label">Файл документа (обязательно)</label>
                     <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
+                    <div className="lot-line">Выбран файл: {newHrDocFile?.name || 'не выбран'}</div>
                   </div>
                   <div className="actions">
                     <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>
@@ -4862,11 +4936,24 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
           ) : null}
 
           {isHrEmployeeModalOpen && selectedEmployee ? (
-            <div className="modal-backdrop" onClick={() => setIsHrEmployeeModalOpen(false)}>
+            <div
+              className="modal-backdrop"
+              onClick={() => {
+                stopCamera()
+                setIsHrEmployeeModalOpen(false)
+              }}
+            >
               <div className="doc-modal hr-employee-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="stage-head">
                   <strong>{selectedEmployee.name} • {selectedEmployee.position || 'Сотрудник'}</strong>
-                  <button type="button" className="action-btn slim ghost" onClick={() => setIsHrEmployeeModalOpen(false)}>
+                  <button
+                    type="button"
+                    className="action-btn slim ghost"
+                    onClick={() => {
+                      stopCamera()
+                      setIsHrEmployeeModalOpen(false)
+                    }}
+                  >
                     Закрыть
                   </button>
                 </div>
@@ -4884,6 +4971,24 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <img className="product-image" src={selectedEmployee.photoUrl || 'https://placehold.co/480x320?text=Employee+Photo'} alt={selectedEmployee.name} />
                       <label className="field-label">Загрузить фото</label>
                       <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                      <div className="actions lot-actions">
+                        {!isCameraOpen ? (
+                          <button className="action-btn slim ghost" type="button" onClick={openCamera}>
+                            Сделать фото (камера)
+                          </button>
+                        ) : (
+                          <>
+                            <button className="action-btn slim" type="button" onClick={() => capturePhotoFromCamera(selectedEmployee.id)}>
+                              Снять и сохранить
+                            </button>
+                            <button className="action-btn slim ghost" type="button" onClick={stopCamera}>
+                              Отмена
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {cameraError ? <div className="error">{cameraError}</div> : null}
+                      {isCameraOpen ? <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted /> : null}
                     </div>
                     <div>
                       <h3>Основная информация</h3>
@@ -4917,7 +5022,9 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
                       <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
                       <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                      <label className="field-label">Файл документа (обязательно)</label>
                       <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
+                      <div className="lot-line">Выбран файл: {newHrDocFile?.name || 'не выбран'}</div>
                     </div>
                     <div className="actions">
                       <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>Добавить документ</button>

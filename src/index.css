@@ -387,6 +387,16 @@ h2 {
   padding: 10px;
 }
 
+.hr-camera-preview {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #dbe4f0;
+  margin-top: 8px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #000;
+}
+
 .hr-subsection-grid {
   margin-top: 12px;
   display: grid;
