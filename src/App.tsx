@@ -596,6 +596,7 @@ function App() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [newHrNote, setNewHrNote] = useState('')
   const [newHrDoc, setNewHrDoc] = useState({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
+  const [newHrDocFile, setNewHrDocFile] = useState<File | null>(null)
   const [newHrAbsence, setNewHrAbsence] = useState({ type: 'vacation' as HrAbsenceType, startDate: '', endDate: '', reason: '' })
   const [newHrTraining, setNewHrTraining] = useState({
     title: '',
@@ -1532,13 +1533,17 @@ function App() {
 
   async function updateEmployeePhoto(id: string, file?: File) {
     if (!file || !currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
-    const photoDataUrl = await new Promise<string>((resolve, reject) => {
+    const photoDataUrl = await fileToDataUrl(file)
+    await updateDoc(doc(db, 'employees', id), { photoUrl: photoDataUrl, updatedAt: serverTimestamp() })
+  }
+
+  async function fileToDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve(String(reader.result || ''))
       reader.onerror = () => reject(new Error('photo_read_failed'))
       reader.readAsDataURL(file)
     })
-    await updateDoc(doc(db, 'employees', id), { photoUrl: photoDataUrl, updatedAt: serverTimestamp() })
   }
 
   async function saveEmployeeNote(employee: HrEmployee) {
@@ -1549,7 +1554,8 @@ function App() {
 
   async function addEmployeeDocument(employee: HrEmployee) {
     if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
-    if (!newHrDoc.title.trim() || !newHrDoc.docType.trim()) return
+    if (!newHrDoc.title.trim() || !newHrDoc.docType.trim() || !newHrDocFile) return
+    const fileDataUrl = await fileToDataUrl(newHrDocFile)
     const nextDocs: HrEmployeeDocument[] = [
       ...(employee.documents || []),
       {
@@ -1559,10 +1565,13 @@ function App() {
         uploadedAt: new Date().toISOString().slice(0, 10),
         expiresAt: newHrDoc.expiresAt || undefined,
         uploadedBy: newHrDoc.uploadedBy.trim() || currentUser.name,
+        fileName: newHrDocFile.name,
+        fileUrl: fileDataUrl,
       },
     ]
     await updateDoc(doc(db, 'employees', employee.id), { documents: nextDocs, updatedAt: serverTimestamp() })
     setNewHrDoc({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
+    setNewHrDocFile(null)
   }
 
   async function addEmployeeAbsence(employee: HrEmployee) {
@@ -4571,7 +4580,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     alt={selectedEmployee.name}
                   />
                   <label className="field-label">Загрузить фото</label>
-                  <input className="field-input" type="file" accept="image/*" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                  <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
                 </div>
 
                 <div>
@@ -4616,6 +4625,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
                     <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
                     <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                    <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
                   </div>
                   <div className="actions">
                     <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>
@@ -4630,6 +4640,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <div className="lot-line">
                         Загружен: {docItem.uploadedAt} • Срок: {docItem.expiresAt || '—'} • Кто: {docItem.uploadedBy}
                       </div>
+                      <div className="lot-line">Файл: {docItem.fileName || '—'}</div>
                     </div>
                   ))}
                 </div>
@@ -4872,7 +4883,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     <div className="hr-photo-box">
                       <img className="product-image" src={selectedEmployee.photoUrl || 'https://placehold.co/480x320?text=Employee+Photo'} alt={selectedEmployee.name} />
                       <label className="field-label">Загрузить фото</label>
-                      <input className="field-input" type="file" accept="image/*" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                      <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
                     </div>
                     <div>
                       <h3>Основная информация</h3>
@@ -4906,6 +4917,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
                       <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
                       <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                      <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
                     </div>
                     <div className="actions">
                       <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>Добавить документ</button>
@@ -4914,9 +4926,22 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <div className="lot" key={docItem.id}>
                         <div className="lot-line"><b>{docItem.title}</b> ({docItem.docType})</div>
                         <div className="lot-line">Загружен: {docItem.uploadedAt} • Срок: {docItem.expiresAt || '—'} • Кто: {docItem.uploadedBy}</div>
+                        <div className="lot-line">Файл: {docItem.fileName || '—'}</div>
                         <div className="actions lot-actions">
-                          <button className="action-btn slim ghost" type="button" onClick={() => window.alert(`Документ: ${docItem.title}`)}>Посмотреть</button>
-                          <button className="action-btn slim ghost" type="button" onClick={() => window.alert('Скачивание добавьте через Storage URL')}>Скачать</button>
+                          <button className="action-btn slim ghost" type="button" onClick={() => docItem.fileUrl && window.open(docItem.fileUrl, '_blank')}>Посмотреть</button>
+                          <button
+                            className="action-btn slim ghost"
+                            type="button"
+                            onClick={() => {
+                              if (!docItem.fileUrl) return
+                              const link = document.createElement('a')
+                              link.href = docItem.fileUrl
+                              link.download = docItem.fileName || `${docItem.title}.bin`
+                              link.click()
+                            }}
+                          >
+                            Скачать
+                          </button>
                           <button className="action-btn slim ghost" type="button" onClick={() => setNewHrDoc((s) => ({ ...s, title: docItem.title, docType: docItem.docType, expiresAt: docItem.expiresAt || '', uploadedBy: docItem.uploadedBy }))}>Заменить</button>
                           <button className="action-btn slim ghost" type="button" onClick={() => deleteEmployeeDocument(selectedEmployee, docItem.id)}>Удалить</button>
                         </div>
