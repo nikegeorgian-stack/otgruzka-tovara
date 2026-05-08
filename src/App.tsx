@@ -85,12 +85,59 @@ type Lot = {
   warehouseLocation?: string
 }
 
+type HrEmployeeStatus = 'active' | 'vacation' | 'sick' | 'fired'
+type HrAbsenceType = 'vacation' | 'sick' | 'business_trip' | 'absence'
+
+type HrEmployeeDocument = {
+  id: string
+  title: string
+  docType: string
+  uploadedAt: string
+  expiresAt?: string
+  uploadedBy: string
+  fileUrl?: string
+}
+
+type HrEmployeeAbsence = {
+  id: string
+  type: HrAbsenceType
+  startDate: string
+  endDate: string
+  reason?: string
+}
+
+type HrEmployeeTraining = {
+  id: string
+  title: string
+  category: 'instruction' | 'training' | 'certificate' | 'admission'
+  validUntil?: string
+  note?: string
+}
+
 type HrEmployee = {
   id: string
+  employeeNo: string
   name: string
-  role: string
+  phone: string
+  position: string
+  department: string
+  line: string
   shift: string
-  status: 'active' | 'vacation' | 'sick'
+  status: HrEmployeeStatus
+  photoUrl?: string
+  birthDate?: string
+  address?: string
+  hireDate?: string
+  grade?: string
+  manager?: string
+  schedule?: string
+  probationUntil?: string
+  transferDate?: string
+  history?: string
+  notes?: string
+  documents?: HrEmployeeDocument[]
+  absences?: HrEmployeeAbsence[]
+  trainings?: HrEmployeeTraining[]
 }
 
 type Product = {
@@ -286,6 +333,20 @@ const roleLabels: Record<Role, string> = {
   hr: 'HR',
 }
 
+const hrStatusLabel: Record<HrEmployeeStatus, string> = {
+  active: 'Работает',
+  vacation: 'Отпуск',
+  sick: 'Больничный',
+  fired: 'Уволен',
+}
+
+const hrAbsenceLabel: Record<HrAbsenceType, string> = {
+  vacation: 'Отпуск',
+  sick: 'Больничный',
+  business_trip: 'Командировка',
+  absence: 'Прогул',
+}
+
 const defaultPermissionsByRole: Record<Role, PermissionSet> = {
   admin: { dashboard: true, documents: true, lots: true, runs: true, rolls: true, qc: true, inventory: true, orders: true, products: true, hr: true, users: true },
   line: { dashboard: true, documents: true, lots: true, runs: true, rolls: true, qc: false, inventory: false, orders: false, products: false, hr: false, users: false },
@@ -375,13 +436,6 @@ const initialProducts: Omit<Product, 'id'>[] = [
   { internalId: 'FC-EI-7637', name: '7637', category: 'Electrical insulation glass fabric', uom: 'roll', isActive: true },
   { internalId: 'FC-CI-TG430', name: 'TG-430', category: 'Glass fabric for coating/impregnation', uom: 'roll', isActive: true },
   { internalId: 'FC-CI-7628LS', name: '7628 loomstate', category: 'Glass fabric for coating/impregnation', uom: 'roll', isActive: true },
-]
-
-const employees: HrEmployee[] = [
-  { id: 'EMP-001', name: 'Георгий Л.', role: 'Оператор линии', shift: 'День', status: 'active' },
-  { id: 'EMP-002', name: 'Ника Ч.', role: 'ОТК', shift: 'День', status: 'vacation' },
-  { id: 'EMP-003', name: 'Ираклий С.', role: 'Склад', shift: 'Ночь', status: 'active' },
-  { id: 'EMP-004', name: 'Мариам Д.', role: 'Логистика', shift: 'День', status: 'sick' },
 ]
 
 function App() {
@@ -523,8 +577,28 @@ function App() {
   })
   const [newEmployee, setNewEmployee] = useState({
     name: '',
-    role: 'Оператор линии',
+    employeeNo: '',
+    phone: '',
+    position: '',
+    department: '',
+    line: '',
     shift: 'День',
+    status: 'active' as HrEmployeeStatus,
+  })
+  const [hrSearch, setHrSearch] = useState('')
+  const [hrDepartmentFilter, setHrDepartmentFilter] = useState('__all__')
+  const [hrLineFilter, setHrLineFilter] = useState('__all__')
+  const [hrStatusFilter, setHrStatusFilter] = useState<'__all__' | HrEmployeeStatus>('__all__')
+  const [hrPositionFilter, setHrPositionFilter] = useState('__all__')
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+  const [newHrNote, setNewHrNote] = useState('')
+  const [newHrDoc, setNewHrDoc] = useState({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
+  const [newHrAbsence, setNewHrAbsence] = useState({ type: 'vacation' as HrAbsenceType, startDate: '', endDate: '', reason: '' })
+  const [newHrTraining, setNewHrTraining] = useState({
+    title: '',
+    category: 'training' as HrEmployeeTraining['category'],
+    validUntil: '',
+    note: '',
   })
   const [newOrder, setNewOrder] = useState({ customer: '', productId: '', qty: 0 })
   const [newRun, setNewRun] = useState({
@@ -754,7 +828,34 @@ function App() {
     if (currentUser.role === 'admin' || currentUser.role === 'hr') {
       const empQuery = query(collection(db, 'employees'), orderBy('name', 'asc'))
       unsubEmployees = onSnapshot(empQuery, (snap) => {
-        const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<HrEmployee, 'id'>) }))
+        const items = snap.docs.map((d) => {
+          const raw = d.data() as Partial<HrEmployee> & { role?: string }
+          return {
+            id: d.id,
+            employeeNo: raw.employeeNo || '',
+            name: raw.name || '',
+            phone: raw.phone || '',
+            position: raw.position || raw.role || '',
+            department: raw.department || '',
+            line: raw.line || '',
+            shift: raw.shift || 'День',
+            status: (raw.status as HrEmployeeStatus) || 'active',
+            photoUrl: raw.photoUrl,
+            birthDate: raw.birthDate,
+            address: raw.address,
+            hireDate: raw.hireDate,
+            grade: raw.grade,
+            manager: raw.manager,
+            schedule: raw.schedule,
+            probationUntil: raw.probationUntil,
+            transferDate: raw.transferDate,
+            history: raw.history,
+            notes: raw.notes,
+            documents: raw.documents || [],
+            absences: raw.absences || [],
+            trainings: raw.trainings || [],
+          } as HrEmployee
+        })
         setEmployeesState(items)
       })
     }
@@ -940,8 +1041,21 @@ function App() {
     products: `${productsState.length} позиций`,
     hr: `${employeesState.length} сотрудников`,
   }
-  const effectiveEmployees = employeesState.length ? employeesState : employees
+  const effectiveEmployees = employeesState
   const activeEmployees = effectiveEmployees.filter((e) => e.status === 'active')
+  const hrDepartments = Array.from(new Set(effectiveEmployees.map((e) => e.department).filter(Boolean))).sort()
+  const hrLines = Array.from(new Set(effectiveEmployees.map((e) => e.line).filter(Boolean))).sort()
+  const hrPositions = Array.from(new Set(effectiveEmployees.map((e) => e.position).filter(Boolean))).sort()
+  const filteredEmployees = effectiveEmployees.filter((emp) => {
+    const queryText = `${emp.name} ${emp.employeeNo} ${emp.position}`.toLowerCase()
+    const searchHit = !hrSearch.trim() || queryText.includes(hrSearch.trim().toLowerCase())
+    const depHit = hrDepartmentFilter === '__all__' || emp.department === hrDepartmentFilter
+    const lineHit = hrLineFilter === '__all__' || emp.line === hrLineFilter
+    const statusHit = hrStatusFilter === '__all__' || emp.status === hrStatusFilter
+    const positionHit = hrPositionFilter === '__all__' || emp.position === hrPositionFilter
+    return searchHit && depHit && lineHit && statusHit && positionHit
+  })
+  const selectedEmployee = filteredEmployees.find((emp) => emp.id === selectedEmployeeId) || effectiveEmployees.find((emp) => emp.id === selectedEmployeeId) || null
   const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
   const productionRequestCount = productionRequests.length
   const postedProductionRequestCount = productionRequests.filter((r) => r.status === 'posted').length
@@ -1338,22 +1452,108 @@ function App() {
 
   async function addEmployee() {
     if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
-    if (!newEmployee.name.trim()) return
+    if (!newEmployee.name.trim() || !newEmployee.employeeNo.trim() || !newEmployee.position.trim()) return
     await addDoc(collection(db, 'employees'), {
       name: newEmployee.name.trim(),
-      role: newEmployee.role,
+      employeeNo: newEmployee.employeeNo.trim(),
+      phone: newEmployee.phone.trim(),
+      position: newEmployee.position.trim(),
+      department: newEmployee.department.trim() || 'Без отдела',
+      line: newEmployee.line.trim() || 'Без линии',
       shift: newEmployee.shift,
-      status: 'active',
+      status: newEmployee.status,
+      documents: [],
+      absences: [],
+      trainings: [],
+      notes: '',
       createdAt: serverTimestamp(),
     })
-    await logAction('employee.create', { name: newEmployee.name.trim(), role: newEmployee.role })
-    setNewEmployee({ name: '', role: 'Оператор линии', shift: 'День' })
+    await logAction('employee.create', { name: newEmployee.name.trim(), position: newEmployee.position })
+    setNewEmployee({
+      name: '',
+      employeeNo: '',
+      phone: '',
+      position: '',
+      department: '',
+      line: '',
+      shift: 'День',
+      status: 'active',
+    })
   }
 
-  async function setEmployeeStatus(id: string, status: HrEmployee['status']) {
+  async function setEmployeeStatus(id: string, status: HrEmployeeStatus) {
     if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
     await updateDoc(doc(db, 'employees', id), { status, updatedAt: serverTimestamp() })
     await logAction('employee.status', { employeeId: id, status })
+  }
+
+  async function updateEmployeePhoto(id: string, file?: File) {
+    if (!file || !currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    const photoDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('photo_read_failed'))
+      reader.readAsDataURL(file)
+    })
+    await updateDoc(doc(db, 'employees', id), { photoUrl: photoDataUrl, updatedAt: serverTimestamp() })
+  }
+
+  async function saveEmployeeNote(employee: HrEmployee) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    await updateDoc(doc(db, 'employees', employee.id), { notes: newHrNote.trim(), updatedAt: serverTimestamp() })
+    setNewHrNote(newHrNote.trim())
+  }
+
+  async function addEmployeeDocument(employee: HrEmployee) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    if (!newHrDoc.title.trim() || !newHrDoc.docType.trim()) return
+    const nextDocs: HrEmployeeDocument[] = [
+      ...(employee.documents || []),
+      {
+        id: `doc-${Date.now()}`,
+        title: newHrDoc.title.trim(),
+        docType: newHrDoc.docType.trim(),
+        uploadedAt: new Date().toISOString().slice(0, 10),
+        expiresAt: newHrDoc.expiresAt || undefined,
+        uploadedBy: newHrDoc.uploadedBy.trim() || currentUser.name,
+      },
+    ]
+    await updateDoc(doc(db, 'employees', employee.id), { documents: nextDocs, updatedAt: serverTimestamp() })
+    setNewHrDoc({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
+  }
+
+  async function addEmployeeAbsence(employee: HrEmployee) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    if (!newHrAbsence.startDate || !newHrAbsence.endDate) return
+    const nextAbsences: HrEmployeeAbsence[] = [
+      ...(employee.absences || []),
+      {
+        id: `abs-${Date.now()}`,
+        type: newHrAbsence.type,
+        startDate: newHrAbsence.startDate,
+        endDate: newHrAbsence.endDate,
+        reason: newHrAbsence.reason.trim() || undefined,
+      },
+    ]
+    await updateDoc(doc(db, 'employees', employee.id), { absences: nextAbsences, updatedAt: serverTimestamp() })
+    setNewHrAbsence({ type: 'vacation', startDate: '', endDate: '', reason: '' })
+  }
+
+  async function addEmployeeTraining(employee: HrEmployee) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    if (!newHrTraining.title.trim()) return
+    const nextTrainings: HrEmployeeTraining[] = [
+      ...(employee.trainings || []),
+      {
+        id: `trn-${Date.now()}`,
+        title: newHrTraining.title.trim(),
+        category: newHrTraining.category,
+        validUntil: newHrTraining.validUntil || undefined,
+        note: newHrTraining.note.trim() || undefined,
+      },
+    ]
+    await updateDoc(doc(db, 'employees', employee.id), { trainings: nextTrainings, updatedAt: serverTimestamp() })
+    setNewHrTraining({ title: '', category: 'training', validUntil: '', note: '' })
   }
 
   const reservationsByProduct = useMemo(() => {
@@ -3072,7 +3272,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <option value="">Бригадир</option>
                       {activeEmployees.filter((e) => brigadierIds.includes(e.id)).map((e) => (
                         <option key={e.id} value={e.id}>
-                          {e.name} ({e.role})
+                          {e.name} ({e.position || 'Сотрудник'})
                         </option>
                       ))}
                     </select>
@@ -3178,7 +3378,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     <article className="stage-card" key={`brigadier-${emp.id}`}>
                       <div className="stage-head">
                         <strong>{emp.name}</strong>
-                        <span>{emp.role}</span>
+                        <span>{emp.position || 'Сотрудник'}</span>
                       </div>
                       <button
                         type="button"
@@ -4084,9 +4284,51 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         <section className="board">
           <h2>
             <Users size={18} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            HR модуль
+            HR / Персонал
           </h2>
-          <div className="form-grid">
+          <p className="lot-line">База сотрудников: поиск, фильтры, карточки и детальная личная карточка.</p>
+          <div className="hr-filters">
+            <input
+              className="field-input"
+              placeholder="Поиск: ФИО / табельный номер / должность"
+              value={hrSearch}
+              onChange={(e) => setHrSearch(e.target.value)}
+            />
+            <select className="field-input" value={hrDepartmentFilter} onChange={(e) => setHrDepartmentFilter(e.target.value)}>
+              <option value="__all__">Все отделы</option>
+              {hrDepartments.map((dep) => (
+                <option key={dep} value={dep}>
+                  {dep}
+                </option>
+              ))}
+            </select>
+            <select className="field-input" value={hrLineFilter} onChange={(e) => setHrLineFilter(e.target.value)}>
+              <option value="__all__">Все линии/участки</option>
+              {hrLines.map((line) => (
+                <option key={line} value={line}>
+                  {line}
+                </option>
+              ))}
+            </select>
+            <select className="field-input" value={hrStatusFilter} onChange={(e) => setHrStatusFilter(e.target.value as '__all__' | HrEmployeeStatus)}>
+              <option value="__all__">Все статусы</option>
+              {Object.entries(hrStatusLabel).map(([status, label]) => (
+                <option key={status} value={status}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select className="field-input" value={hrPositionFilter} onChange={(e) => setHrPositionFilter(e.target.value)}>
+              <option value="__all__">Все должности</option>
+              {hrPositions.map((position) => (
+                <option key={position} value={position}>
+                  {position}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="hr-new-employee">
             <input
               className="field-input"
               placeholder="ФИО"
@@ -4095,9 +4337,33 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
             />
             <input
               className="field-input"
+              placeholder="Табельный номер"
+              value={newEmployee.employeeNo}
+              onChange={(e) => setNewEmployee((s) => ({ ...s, employeeNo: e.target.value }))}
+            />
+            <input
+              className="field-input"
               placeholder="Должность"
-              value={newEmployee.role}
-              onChange={(e) => setNewEmployee((s) => ({ ...s, role: e.target.value }))}
+              value={newEmployee.position}
+              onChange={(e) => setNewEmployee((s) => ({ ...s, position: e.target.value }))}
+            />
+            <input
+              className="field-input"
+              placeholder="Отдел"
+              value={newEmployee.department}
+              onChange={(e) => setNewEmployee((s) => ({ ...s, department: e.target.value }))}
+            />
+            <input
+              className="field-input"
+              placeholder="Линия/участок"
+              value={newEmployee.line}
+              onChange={(e) => setNewEmployee((s) => ({ ...s, line: e.target.value }))}
+            />
+            <input
+              className="field-input"
+              placeholder="Телефон"
+              value={newEmployee.phone}
+              onChange={(e) => setNewEmployee((s) => ({ ...s, phone: e.target.value }))}
             />
             <select
               className="field-input"
@@ -4107,38 +4373,192 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
               <option>День</option>
               <option>Ночь</option>
             </select>
+            <select className="field-input" value={newEmployee.status} onChange={(e) => setNewEmployee((s) => ({ ...s, status: e.target.value as HrEmployeeStatus }))}>
+              {Object.entries(hrStatusLabel).map(([status, label]) => (
+                <option key={status} value={status}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="actions">
             <button className="action-btn slim" type="button" onClick={addEmployee}>
               Добавить сотрудника
             </button>
           </div>
+
           <div className="stage-grid hr-grid">
-            {(employeesState.length ? employeesState : employees).map((emp) => (
-              <article className="stage-card" key={emp.id}>
+            {filteredEmployees.map((emp) => (
+              <article className="stage-card hr-card" key={emp.id} onClick={() => { setSelectedEmployeeId(emp.id); setNewHrNote(emp.notes || '') }}>
                 <div className="stage-head">
                   <strong>{emp.name}</strong>
-                  <span>{emp.id}</span>
+                  <span>{hrStatusLabel[emp.status]}</span>
                 </div>
-                <div className="lot-line">Роль: {emp.role}</div>
+                <div className="lot-line">Таб. №: {emp.employeeNo || '—'}</div>
+                <div className="lot-line">Должность: {emp.position || '—'}</div>
+                <div className="lot-line">
+                  {emp.department || '—'} / {emp.line || '—'}
+                </div>
+                <div className="lot-line">Телефон: {emp.phone || '—'}</div>
                 <div className="lot-line">Смена: {emp.shift}</div>
-                <div className="lot-line">Статус: {emp.status}</div>
-                {emp.id ? (
-                  <div className="actions lot-actions">
-                    <button className="action-btn slim ghost" type="button" onClick={() => setEmployeeStatus(emp.id, 'active')}>
-                      active
-                    </button>
-                    <button className="action-btn slim ghost" type="button" onClick={() => setEmployeeStatus(emp.id, 'vacation')}>
-                      vacation
-                    </button>
-                    <button className="action-btn slim ghost" type="button" onClick={() => setEmployeeStatus(emp.id, 'sick')}>
-                      sick
-                    </button>
-                  </div>
-                ) : null}
               </article>
             ))}
           </div>
+
+          {!filteredEmployees.length ? <p className="lot-line">Сотрудники по фильтрам не найдены.</p> : null}
+
+          {selectedEmployee ? (
+            <article className="board hr-detail">
+              <div className="stage-head">
+                <strong>Карточка сотрудника: {selectedEmployee.name}</strong>
+                <button className="action-btn slim ghost" type="button" onClick={() => setSelectedEmployeeId(null)}>
+                  Закрыть
+                </button>
+              </div>
+
+              <div className="hr-detail-grid">
+                <div className="hr-photo-box">
+                  <img
+                    className="product-image"
+                    src={selectedEmployee.photoUrl || 'https://placehold.co/480x320?text=Employee+Photo'}
+                    alt={selectedEmployee.name}
+                  />
+                  <label className="field-label">Загрузить фото</label>
+                  <input className="field-input" type="file" accept="image/*" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                </div>
+
+                <div>
+                  <h3>Основная информация</h3>
+                  <div className="lot-line">ФИО: {selectedEmployee.name}</div>
+                  <div className="lot-line">Табельный номер: {selectedEmployee.employeeNo || '—'}</div>
+                  <div className="lot-line">Дата рождения: {selectedEmployee.birthDate || '—'}</div>
+                  <div className="lot-line">Телефон: {selectedEmployee.phone || '—'}</div>
+                  <div className="lot-line">Адрес: {selectedEmployee.address || '—'}</div>
+                  <div className="lot-line">Должность: {selectedEmployee.position || '—'}</div>
+                  <div className="lot-line">Отдел: {selectedEmployee.department || '—'}</div>
+                  <div className="lot-line">Линия/участок: {selectedEmployee.line || '—'}</div>
+                  <div className="lot-line">Дата приема: {selectedEmployee.hireDate || '—'}</div>
+                  <div className="lot-line">Статус: {hrStatusLabel[selectedEmployee.status]}</div>
+                </div>
+
+                <div>
+                  <h3>Рабочая информация</h3>
+                  <div className="lot-line">Должность: {selectedEmployee.position || '—'}</div>
+                  <div className="lot-line">Разряд/категория: {selectedEmployee.grade || '—'}</div>
+                  <div className="lot-line">Руководитель: {selectedEmployee.manager || '—'}</div>
+                  <div className="lot-line">Смена: {selectedEmployee.shift || '—'}</div>
+                  <div className="lot-line">График работы: {selectedEmployee.schedule || '—'}</div>
+                  <div className="lot-line">Испытательный срок: {selectedEmployee.probationUntil || '—'}</div>
+                  <div className="lot-line">Дата перевода: {selectedEmployee.transferDate || '—'}</div>
+                  <div className="lot-line">История: {selectedEmployee.history || '—'}</div>
+                  <div className="actions lot-actions">
+                    {(Object.keys(hrStatusLabel) as HrEmployeeStatus[]).map((status) => (
+                      <button key={status} className={`action-btn slim ghost ${selectedEmployee.status === status ? 'active' : ''}`} type="button" onClick={() => setEmployeeStatus(selectedEmployee.id, status)}>
+                        {hrStatusLabel[status]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="hr-subsection-grid">
+                <div className="stage-card">
+                  <h3>Документы сотрудника</h3>
+                  <div className="form-grid">
+                    <input className="field-input" placeholder="Название" value={newHrDoc.title} onChange={(e) => setNewHrDoc((s) => ({ ...s, title: e.target.value }))} />
+                    <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
+                    <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
+                    <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                  </div>
+                  <div className="actions">
+                    <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>
+                      Добавить документ
+                    </button>
+                  </div>
+                  {(selectedEmployee.documents || []).map((docItem) => (
+                    <div className="lot" key={docItem.id}>
+                      <div className="lot-line">
+                        <b>{docItem.title}</b> ({docItem.docType})
+                      </div>
+                      <div className="lot-line">
+                        Загружен: {docItem.uploadedAt} • Срок: {docItem.expiresAt || '—'} • Кто: {docItem.uploadedBy}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="stage-card">
+                  <h3>Отпуска, больничные, отсутствия</h3>
+                  <div className="form-grid">
+                    <select className="field-input" value={newHrAbsence.type} onChange={(e) => setNewHrAbsence((s) => ({ ...s, type: e.target.value as HrAbsenceType }))}>
+                      {Object.entries(hrAbsenceLabel).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="field-input" type="date" value={newHrAbsence.startDate} onChange={(e) => setNewHrAbsence((s) => ({ ...s, startDate: e.target.value }))} />
+                    <input className="field-input" type="date" value={newHrAbsence.endDate} onChange={(e) => setNewHrAbsence((s) => ({ ...s, endDate: e.target.value }))} />
+                    <input className="field-input" placeholder="Причина/комментарий" value={newHrAbsence.reason} onChange={(e) => setNewHrAbsence((s) => ({ ...s, reason: e.target.value }))} />
+                  </div>
+                  <div className="actions">
+                    <button className="action-btn slim" type="button" onClick={() => addEmployeeAbsence(selectedEmployee)}>
+                      Добавить период
+                    </button>
+                  </div>
+                  {(selectedEmployee.absences || []).map((item) => (
+                    <div className="lot" key={item.id}>
+                      <div className="lot-line">
+                        {hrAbsenceLabel[item.type]}: {item.startDate} - {item.endDate}
+                      </div>
+                      {item.reason ? <div className="lot-line">Комментарий: {item.reason}</div> : null}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="stage-card">
+                  <h3>Обучение и допуски</h3>
+                  <div className="form-grid">
+                    <input className="field-input" placeholder="Название обучения/допуска" value={newHrTraining.title} onChange={(e) => setNewHrTraining((s) => ({ ...s, title: e.target.value }))} />
+                    <select className="field-input" value={newHrTraining.category} onChange={(e) => setNewHrTraining((s) => ({ ...s, category: e.target.value as HrEmployeeTraining['category'] }))}>
+                      <option value="instruction">Инструктаж</option>
+                      <option value="training">Обучение</option>
+                      <option value="certificate">Сертификат</option>
+                      <option value="admission">Допуск</option>
+                    </select>
+                    <input className="field-input" type="date" value={newHrTraining.validUntil} onChange={(e) => setNewHrTraining((s) => ({ ...s, validUntil: e.target.value }))} />
+                    <input className="field-input" placeholder="Комментарий" value={newHrTraining.note} onChange={(e) => setNewHrTraining((s) => ({ ...s, note: e.target.value }))} />
+                  </div>
+                  <div className="actions">
+                    <button className="action-btn slim" type="button" onClick={() => addEmployeeTraining(selectedEmployee)}>
+                      Добавить обучение/допуск
+                    </button>
+                  </div>
+                  {(selectedEmployee.trainings || []).map((item) => {
+                    const warning = item.validUntil && new Date(item.validUntil).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30
+                    return (
+                      <div className="lot" key={item.id}>
+                        <div className="lot-line">
+                          <b>{item.title}</b> ({item.category})
+                        </div>
+                        <div className={`lot-line ${warning ? 'warn-text' : ''}`}>Срок: {item.validUntil || '—'}{warning ? ' • скоро истекает' : ''}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="stage-card">
+                  <h3>Заметки HR</h3>
+                  <textarea className="field-input hr-notes" placeholder="Замечания, особенности, рекомендации, внутренняя информация" value={newHrNote} onChange={(e) => setNewHrNote(e.target.value)} />
+                  <div className="actions">
+                    <button className="action-btn slim" type="button" onClick={() => saveEmployeeNote(selectedEmployee)}>
+                      Сохранить заметки
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ) : null}
         </section>
       ) : null}
 

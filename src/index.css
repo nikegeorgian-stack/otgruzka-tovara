@@ -327,6 +327,11 @@ h2 {
   color: #334155;
 }
 
+.warn-text {
+  color: #b54708;
+  font-weight: 700;
+}
+
 .lot-note {
   margin-top: 5px;
   font-size: 12px;
@@ -340,6 +345,58 @@ h2 {
   margin: 8px 0;
   aspect-ratio: 3 / 2;
   object-fit: cover;
+}
+
+.hr-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.hr-new-employee {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.hr-card {
+  cursor: pointer;
+}
+
+.hr-card:hover {
+  border-color: #93c5fd;
+}
+
+.hr-detail {
+  margin-top: 14px;
+}
+
+.hr-detail-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.hr-photo-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.hr-subsection-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.hr-notes {
+  min-height: 120px;
+  resize: vertical;
 }
 
 @media (max-width: 1140px) {
@@ -358,6 +415,19 @@ h2 {
 
   .form-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hr-filters,
+  .hr-new-employee {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hr-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hr-subsection-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -381,6 +451,11 @@ h2 {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hr-filters,
+  .hr-new-employee {
     grid-template-columns: 1fr;
   }
 }
