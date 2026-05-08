@@ -87,6 +87,7 @@ type Lot = {
 
 type HrEmployeeStatus = 'active' | 'vacation' | 'sick' | 'fired'
 type HrAbsenceType = 'vacation' | 'sick' | 'business_trip' | 'absence'
+type HrSection = 'employees' | 'cards' | 'documents' | 'absences' | 'trainings' | 'reports' | 'settings'
 
 type HrEmployeeDocument = {
   id: string
@@ -600,6 +601,7 @@ function App() {
     validUntil: '',
     note: '',
   })
+  const [hrSection, setHrSection] = useState<HrSection>('employees')
   const [newOrder, setNewOrder] = useState({ customer: '', productId: '', qty: 0 })
   const [newRun, setNewRun] = useState({
     productId: '',
@@ -1056,6 +1058,36 @@ function App() {
     return searchHit && depHit && lineHit && statusHit && positionHit
   })
   const selectedEmployee = filteredEmployees.find((emp) => emp.id === selectedEmployeeId) || effectiveEmployees.find((emp) => emp.id === selectedEmployeeId) || null
+  const allEmployeeDocuments = effectiveEmployees.flatMap((emp) =>
+    (emp.documents || []).map((docItem) => ({
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeNo: emp.employeeNo,
+      ...docItem,
+    })),
+  )
+  const allEmployeeAbsences = effectiveEmployees.flatMap((emp) =>
+    (emp.absences || []).map((absence) => ({
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeNo: emp.employeeNo,
+      ...absence,
+    })),
+  )
+  const allEmployeeTrainings = effectiveEmployees.flatMap((emp) =>
+    (emp.trainings || []).map((training) => ({
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeNo: emp.employeeNo,
+      ...training,
+    })),
+  )
+  const expiringDocsCount = allEmployeeDocuments.filter(
+    (d) => d.expiresAt && new Date(d.expiresAt).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30,
+  ).length
+  const expiringTrainingsCount = allEmployeeTrainings.filter(
+    (t) => t.validUntil && new Date(t.validUntil).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30,
+  ).length
   const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
   const productionRequestCount = productionRequests.length
   const postedProductionRequestCount = productionRequests.filter((r) => r.status === 'posted').length
@@ -1554,6 +1586,53 @@ function App() {
     ]
     await updateDoc(doc(db, 'employees', employee.id), { trainings: nextTrainings, updatedAt: serverTimestamp() })
     setNewHrTraining({ title: '', category: 'training', validUntil: '', note: '' })
+  }
+
+  async function seedHrEmployees() {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    if (employeesState.length) return
+    const seed: Array<Omit<HrEmployee, 'id'>> = [
+      {
+        employeeNo: '0001',
+        name: 'Георгий Л.',
+        phone: '+995 555 10 10 10',
+        position: 'Оператор линии',
+        department: 'Производство',
+        line: 'Линия 1',
+        shift: 'День',
+        status: 'active',
+      },
+      {
+        employeeNo: '0002',
+        name: 'Ника Ч.',
+        phone: '+995 555 20 20 20',
+        position: 'Инженер ОТК',
+        department: 'Качество',
+        line: 'Лаборатория',
+        shift: 'День',
+        status: 'vacation',
+      },
+      {
+        employeeNo: '0003',
+        name: 'Ираклий С.',
+        phone: '+995 555 30 30 30',
+        position: 'Кладовщик',
+        department: 'Склад',
+        line: 'Склад ГП',
+        shift: 'Ночь',
+        status: 'sick',
+      },
+    ]
+    for (const emp of seed) {
+      await addDoc(collection(db, 'employees'), {
+        ...emp,
+        documents: [],
+        absences: [],
+        trainings: [],
+        notes: '',
+        createdAt: serverTimestamp(),
+      })
+    }
   }
 
   const reservationsByProduct = useMemo(() => {
@@ -4287,6 +4366,17 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
             HR / Персонал
           </h2>
           <p className="lot-line">База сотрудников: поиск, фильтры, карточки и детальная личная карточка.</p>
+          <div className="actions view-tabs">
+            <button className={`action-btn slim ghost ${hrSection === 'employees' ? 'active' : ''}`} type="button" onClick={() => setHrSection('employees')}>Сотрудники</button>
+            <button className={`action-btn slim ghost ${hrSection === 'cards' ? 'active' : ''}`} type="button" onClick={() => setHrSection('cards')}>Карточки сотрудников</button>
+            <button className={`action-btn slim ghost ${hrSection === 'documents' ? 'active' : ''}`} type="button" onClick={() => setHrSection('documents')}>Документы</button>
+            <button className={`action-btn slim ghost ${hrSection === 'absences' ? 'active' : ''}`} type="button" onClick={() => setHrSection('absences')}>Отпуска и больничные</button>
+            <button className={`action-btn slim ghost ${hrSection === 'trainings' ? 'active' : ''}`} type="button" onClick={() => setHrSection('trainings')}>Обучение и допуски</button>
+            <button className={`action-btn slim ghost ${hrSection === 'reports' ? 'active' : ''}`} type="button" onClick={() => setHrSection('reports')}>Отчеты</button>
+            <button className={`action-btn slim ghost ${hrSection === 'settings' ? 'active' : ''}`} type="button" onClick={() => setHrSection('settings')}>Настройки</button>
+          </div>
+          {hrSection === 'employees' || hrSection === 'cards' ? (
+          <>
           <div className="hr-filters">
             <input
               className="field-input"
@@ -4558,6 +4648,105 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                 </div>
               </div>
             </article>
+          ) : null}
+          </>
+          ) : null}
+
+          {hrSection === 'documents' ? (
+            <div className="stage-card">
+              <h3>Документы сотрудников (архив)</h3>
+              {allEmployeeDocuments.length ? (
+                allEmployeeDocuments.map((d) => (
+                  <div className="lot" key={`${d.employeeId}-${d.id}`}>
+                    <div className="lot-line">
+                      <b>{d.title}</b> ({d.docType}) • {d.employeeName} / {d.employeeNo || '—'}
+                    </div>
+                    <div className="lot-line">Загрузка: {d.uploadedAt} • Срок: {d.expiresAt || '—'} • Кто загрузил: {d.uploadedBy}</div>
+                  </div>
+                ))
+              ) : (
+                <p className="lot-line">Пока нет документов. Открой карточку сотрудника и добавь документ.</p>
+              )}
+            </div>
+          ) : null}
+
+          {hrSection === 'absences' ? (
+            <div className="stage-card">
+              <h3>Отпуска и больничные</h3>
+              {allEmployeeAbsences.length ? (
+                allEmployeeAbsences.map((a) => (
+                  <div className="lot" key={`${a.employeeId}-${a.id}`}>
+                    <div className="lot-line">
+                      <b>{a.employeeName}</b> ({a.employeeNo || '—'}) • {hrAbsenceLabel[a.type]}: {a.startDate} - {a.endDate}
+                    </div>
+                    {a.reason ? <div className="lot-line">Причина: {a.reason}</div> : null}
+                  </div>
+                ))
+              ) : (
+                <p className="lot-line">Нет периодов отсутствия. Добавь их в карточке сотрудника.</p>
+              )}
+            </div>
+          ) : null}
+
+          {hrSection === 'trainings' ? (
+            <div className="stage-card">
+              <h3>Обучение и допуски</h3>
+              {allEmployeeTrainings.length ? (
+                allEmployeeTrainings.map((t) => {
+                  const warning = t.validUntil && new Date(t.validUntil).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30
+                  return (
+                    <div className="lot" key={`${t.employeeId}-${t.id}`}>
+                      <div className="lot-line">
+                        <b>{t.employeeName}</b> ({t.employeeNo || '—'}) • {t.title} ({t.category})
+                      </div>
+                      <div className={`lot-line ${warning ? 'warn-text' : ''}`}>Срок действия: {t.validUntil || '—'}{warning ? ' • скоро истекает' : ''}</div>
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="lot-line">Нет обучений/допусков. Добавь их в карточке сотрудника.</p>
+              )}
+            </div>
+          ) : null}
+
+          {hrSection === 'reports' ? (
+            <div className="stats">
+              <div className="card">
+                <div className="card-title">Всего сотрудников</div>
+                <div className="card-value">{effectiveEmployees.length}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">Новые/активные</div>
+                <div className="card-value good">{effectiveEmployees.filter((e) => e.status === 'active').length}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">Уволенные</div>
+                <div className="card-value">{effectiveEmployees.filter((e) => e.status === 'fired').length}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">Истекающие документы</div>
+                <div className="card-value warn">{expiringDocsCount + expiringTrainingsCount}</div>
+              </div>
+            </div>
+          ) : null}
+
+          {hrSection === 'settings' ? (
+            <div className="stage-card">
+              <h3>Настройки HR</h3>
+              <p className="lot-line">Справочники берутся из данных сотрудников и обновляются автоматически.</p>
+              <div className="lot-line">Должности: {hrPositions.join(', ') || '—'}</div>
+              <div className="lot-line">Отделы: {hrDepartments.join(', ') || '—'}</div>
+              <div className="lot-line">Линии/участки: {hrLines.join(', ') || '—'}</div>
+              <div className="lot-line">Статусы: {Object.values(hrStatusLabel).join(', ')}</div>
+            </div>
+          ) : null}
+
+          {!effectiveEmployees.length ? (
+            <div className="actions">
+              <button className="action-btn slim ghost" type="button" onClick={seedHrEmployees}>
+                Заполнить тестовыми сотрудниками
+              </button>
+            </div>
           ) : null}
         </section>
       ) : null}
