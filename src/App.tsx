@@ -4656,7 +4656,18 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     )}
                   </div>
                   {cameraError ? <div className="error">{cameraError}</div> : null}
-                  {isCameraOpen ? <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted /> : null}
+                  {isCameraOpen ? (
+                    <div className="hr-camera-wrap">
+                      <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
+                      <div className="hr-camera-overlay" aria-hidden="true">
+                        <div className="hr-camera-frame">
+                          <div className="hr-camera-head-guide" />
+                          <div className="hr-camera-shoulders-guide" />
+                        </div>
+                        <div className="hr-camera-hint">Расположите голову в овале, плечи по линии. Камера на уровне глаз.</div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -4992,7 +5003,18 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                         )}
                       </div>
                       {cameraError ? <div className="error">{cameraError}</div> : null}
-                      {isCameraOpen ? <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted /> : null}
+                      {isCameraOpen ? (
+                        <div className="hr-camera-wrap">
+                          <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
+                          <div className="hr-camera-overlay" aria-hidden="true">
+                            <div className="hr-camera-frame">
+                              <div className="hr-camera-head-guide" />
+                              <div className="hr-camera-shoulders-guide" />
+                            </div>
+                            <div className="hr-camera-hint">Смотрите прямо, без наклона головы. Плечи в кадре, фон однотонный.</div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     <div>
                       <h3>Основная информация</h3>
