@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { deleteApp, initializeApp } from 'firebase/app'
+import { createUserWithEmailAndPassword, getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
@@ -15,3 +15,15 @@ const app = initializeApp(firebaseConfig)
 
 export const auth = getAuth(app)
 export const db = getFirestore(app)
+
+export async function createAuthUserByAdmin(email: string, password: string) {
+  const tempApp = initializeApp(firebaseConfig, `temp-${Date.now()}`)
+  try {
+    const tempAuth = getAuth(tempApp)
+    const cred = await createUserWithEmailAndPassword(tempAuth, email, password)
+    await tempAuth.signOut()
+    return { uid: cred.user.uid }
+  } finally {
+    await deleteApp(tempApp)
+  }
+}

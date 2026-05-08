@@ -34,17 +34,10 @@ cp .env.example .env
 
 Все значения уже внесены в `.env.example`, можно скопировать как есть.
 
-## Боевые учетные записи (Auth)
+## Учетные записи (Auth)
 
-- `admin@otgruzka.local` / `Admin2026!`
-- `line@otgruzka.local` / `Line2026!`
-- `qc@otgruzka.local` / `Qc2026!`
-- `warehouse@otgruzka.local` / `Warehouse2026!`
-- `logistics@otgruzka.local` / `Log2026!`
-- `accounting@otgruzka.local` / `Acc2026!`
-- `hr@otgruzka.local` / `Hr2026!`
-
-При первом входе профиль роли создается в Firestore автоматически.
+Боевые пароли и списки пользователей не хранятся в репозитории.
+Создание пользователя выполняется через админ-интерфейс, а роль и permissions сохраняются в `users/{uid}`.
 
 ## Безопасность
 
@@ -72,3 +65,7 @@ firebase deploy --only firestore:rules --project otgruzka-tovara
 - Акты списания/брака
 - Отгрузочные документы и себестоимость
 - Ролевой доступ: склад, технолог, ОТК, бухгалтерия, админ
+
+## Обязательные модули требований
+
+- Модуль "HR / Персонал" (#37): `docs/hr-personnel-module.md`
