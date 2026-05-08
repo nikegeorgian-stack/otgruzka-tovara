@@ -460,6 +460,27 @@ h2 {
   padding: 6px 10px;
 }
 
+.hr-doc-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  pointer-events: none;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  background:
+    linear-gradient(to right, rgba(15, 23, 42, 0.42) 0 8%, transparent 8% 92%, rgba(15, 23, 42, 0.42) 92% 100%),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.42) 0 8%, transparent 8% 92%, rgba(15, 23, 42, 0.42) 92% 100%);
+}
+
+.hr-doc-frame {
+  width: min(84%, 440px);
+  height: min(78%, 320px);
+  border: 3px solid rgba(248, 250, 252, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.8) inset;
+}
+
 .hr-subsection-grid {
   margin-top: 12px;
   display: grid;

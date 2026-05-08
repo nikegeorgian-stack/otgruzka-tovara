@@ -598,6 +598,7 @@ function App() {
   const [newHrDoc, setNewHrDoc] = useState({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
   const [newHrDocFile, setNewHrDocFile] = useState<File | null>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraMode, setCameraMode] = useState<'photo' | 'document'>('photo')
   const [cameraError, setCameraError] = useState('')
   const [newHrAbsence, setNewHrAbsence] = useState({ type: 'vacation' as HrAbsenceType, startDate: '', endDate: '', reason: '' })
   const [newHrTraining, setNewHrTraining] = useState({
@@ -1573,10 +1574,12 @@ function App() {
       cameraStreamRef.current = null
     }
     setIsCameraOpen(false)
+    setCameraMode('photo')
   }
 
   async function openCamera() {
     setCameraError('')
+    setCameraMode('photo')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' } },
@@ -1586,6 +1589,22 @@ function App() {
       setIsCameraOpen(true)
     } catch {
       setCameraError('Не удалось открыть камеру. Проверь разрешение в браузере.')
+      setIsCameraOpen(false)
+    }
+  }
+
+  async function openDocumentCamera() {
+    setCameraError('')
+    setCameraMode('document')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+      cameraStreamRef.current = stream
+      setIsCameraOpen(true)
+    } catch {
+      setCameraError('Не удалось открыть камеру для сканирования. Проверь разрешение в браузере.')
       setIsCameraOpen(false)
     }
   }
@@ -1601,6 +1620,91 @@ function App() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
     await updateDoc(doc(db, 'employees', employeeId), { photoUrl: dataUrl, updatedAt: serverTimestamp() })
+    stopCamera()
+  }
+
+  async function canvasToBlob(canvas: HTMLCanvasElement) {
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('canvas_blob_failed'))
+            return
+          }
+          resolve(blob)
+        },
+        'image/jpeg',
+        0.92,
+      )
+    })
+  }
+
+  function autoCropDocumentCanvas(sourceCanvas: HTMLCanvasElement) {
+    const w = sourceCanvas.width
+    const h = sourceCanvas.height
+    const srcCtx = sourceCanvas.getContext('2d')
+    if (!srcCtx) return sourceCanvas
+    const data = srcCtx.getImageData(0, 0, w, h).data
+
+    let minX = w
+    let minY = h
+    let maxX = 0
+    let maxY = 0
+    let found = false
+
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        const i = (y * w + x) * 4
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
+        const maxC = Math.max(r, g, b)
+        const minC = Math.min(r, g, b)
+        const isPaper = r > 145 && g > 145 && b > 145 && maxC - minC < 65
+        if (!isPaper) continue
+        found = true
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+      }
+    }
+
+    if (!found) return sourceCanvas
+
+    const width = maxX - minX
+    const height = maxY - minY
+    if (width < w * 0.2 || height < h * 0.2) return sourceCanvas
+
+    const padX = Math.round(width * 0.04)
+    const padY = Math.round(height * 0.04)
+    const cropX = Math.max(0, minX - padX)
+    const cropY = Math.max(0, minY - padY)
+    const cropW = Math.min(w - cropX, width + padX * 2)
+    const cropH = Math.min(h - cropY, height + padY * 2)
+
+    const out = document.createElement('canvas')
+    out.width = cropW
+    out.height = cropH
+    const outCtx = out.getContext('2d')
+    if (!outCtx) return sourceCanvas
+    outCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+    return out
+  }
+
+  async function captureDocumentFromCamera() {
+    const video = cameraVideoRef.current
+    if (!video) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 1920
+    canvas.height = video.videoHeight || 1080
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const cropped = autoCropDocumentCanvas(canvas)
+    const blob = await canvasToBlob(cropped)
+    const file = new File([blob], `scan-${Date.now()}.jpg`, { type: 'image/jpeg' })
+    setNewHrDocFile(file)
     stopCamera()
   }
 
@@ -4640,7 +4744,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   <label className="field-label">Загрузить фото</label>
                   <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
                   <div className="actions lot-actions">
-                    {!isCameraOpen ? (
+                    {!isCameraOpen || cameraMode !== 'photo' ? (
                       <button className="action-btn slim ghost" type="button" onClick={openCamera}>
                         Сделать фото (камера)
                       </button>
@@ -4656,7 +4760,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     )}
                   </div>
                   {cameraError ? <div className="error">{cameraError}</div> : null}
-                  {isCameraOpen ? (
+                  {isCameraOpen && cameraMode === 'photo' ? (
                     <div className="hr-camera-wrap">
                       <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
                       <div className="hr-camera-overlay" aria-hidden="true">
@@ -4715,6 +4819,31 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     <label className="field-label">Файл документа (обязательно)</label>
                     <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
                     <div className="lot-line">Выбран файл: {newHrDocFile?.name || 'не выбран'}</div>
+                    <div className="actions">
+                      {!isCameraOpen || cameraMode !== 'document' ? (
+                        <button className="action-btn slim ghost" type="button" onClick={openDocumentCamera}>
+                          Сканировать камерой
+                        </button>
+                      ) : (
+                        <>
+                          <button className="action-btn slim" type="button" onClick={captureDocumentFromCamera}>
+                            Снять документ
+                          </button>
+                          <button className="action-btn slim ghost" type="button" onClick={stopCamera}>
+                            Отмена
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {isCameraOpen && cameraMode === 'document' ? (
+                      <div className="hr-camera-wrap">
+                        <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
+                        <div className="hr-doc-overlay" aria-hidden="true">
+                          <div className="hr-doc-frame" />
+                          <div className="hr-camera-hint">Наведите на документ целиком внутри рамки и нажмите "Снять документ".</div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="actions">
                     <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>
@@ -4987,7 +5116,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <label className="field-label">Загрузить фото</label>
                       <input className="field-input" type="file" accept="image/*" capture="environment" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
                       <div className="actions lot-actions">
-                        {!isCameraOpen ? (
+                        {!isCameraOpen || cameraMode !== 'photo' ? (
                           <button className="action-btn slim ghost" type="button" onClick={openCamera}>
                             Сделать фото (камера)
                           </button>
@@ -5003,7 +5132,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                         )}
                       </div>
                       {cameraError ? <div className="error">{cameraError}</div> : null}
-                      {isCameraOpen ? (
+                      {isCameraOpen && cameraMode === 'photo' ? (
                         <div className="hr-camera-wrap">
                           <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
                           <div className="hr-camera-overlay" aria-hidden="true">
@@ -5051,6 +5180,31 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       <label className="field-label">Файл документа (обязательно)</label>
                       <input className="field-input" type="file" onChange={(e) => setNewHrDocFile(e.target.files?.[0] || null)} />
                       <div className="lot-line">Выбран файл: {newHrDocFile?.name || 'не выбран'}</div>
+                      <div className="actions">
+                        {!isCameraOpen || cameraMode !== 'document' ? (
+                          <button className="action-btn slim ghost" type="button" onClick={openDocumentCamera}>
+                            Сканировать камерой
+                          </button>
+                        ) : (
+                          <>
+                            <button className="action-btn slim" type="button" onClick={captureDocumentFromCamera}>
+                              Снять документ
+                            </button>
+                            <button className="action-btn slim ghost" type="button" onClick={stopCamera}>
+                              Отмена
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {isCameraOpen && cameraMode === 'document' ? (
+                        <div className="hr-camera-wrap">
+                          <video ref={cameraVideoRef} className="hr-camera-preview" autoPlay playsInline muted />
+                          <div className="hr-doc-overlay" aria-hidden="true">
+                            <div className="hr-doc-frame" />
+                            <div className="hr-camera-hint">Расположите лист по рамке, держите камеру ровно, без бликов.</div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="actions">
                       <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>Добавить документ</button>
