@@ -898,6 +898,14 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isCameraOpen || !cameraVideoRef.current || !cameraStreamRef.current) return
+    cameraVideoRef.current.srcObject = cameraStreamRef.current
+    cameraVideoRef.current.play().catch(() => {
+      setCameraError('Камера открыта, но видео не стартовало. Нажми "Сделать фото" еще раз.')
+    })
+  }, [isCameraOpen])
+
   const allowedStages = useMemo(() => {
     if (!currentUser) return [] as Stage[]
     const map: Record<Role, Stage[]> = {
@@ -1575,10 +1583,6 @@ function App() {
         audio: false,
       })
       cameraStreamRef.current = stream
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.srcObject = stream
-        await cameraVideoRef.current.play()
-      }
       setIsCameraOpen(true)
     } catch {
       setCameraError('Не удалось открыть камеру. Проверь разрешение в браузере.')
