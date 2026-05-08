@@ -399,6 +399,15 @@ h2 {
   resize: vertical;
 }
 
+.hr-kpi-grid {
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+}
+
+.hr-employee-modal {
+  max-width: 1200px;
+  width: min(1200px, 95vw);
+}
+
 @media (max-width: 1140px) {
   .stats,
   .stage-grid {
@@ -419,6 +428,10 @@ h2 {
 
   .hr-filters,
   .hr-new-employee {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hr-kpi-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -456,6 +469,10 @@ h2 {
 
   .hr-filters,
   .hr-new-employee {
+    grid-template-columns: 1fr;
+  }
+
+  .hr-kpi-grid {
     grid-template-columns: 1fr;
   }
 }

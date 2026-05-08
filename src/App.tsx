@@ -88,6 +88,7 @@ type Lot = {
 type HrEmployeeStatus = 'active' | 'vacation' | 'sick' | 'fired'
 type HrAbsenceType = 'vacation' | 'sick' | 'business_trip' | 'absence'
 type HrSection = 'employees' | 'cards' | 'documents' | 'absences' | 'trainings' | 'reports' | 'settings'
+type HrEmployeeModalTab = 'overview' | 'work' | 'documents' | 'absences' | 'trainings' | 'notes'
 
 type HrEmployeeDocument = {
   id: string
@@ -97,6 +98,7 @@ type HrEmployeeDocument = {
   expiresAt?: string
   uploadedBy: string
   fileUrl?: string
+  fileName?: string
 }
 
 type HrEmployeeAbsence = {
@@ -602,6 +604,9 @@ function App() {
     note: '',
   })
   const [hrSection, setHrSection] = useState<HrSection>('employees')
+  const [isHrAddModalOpen, setIsHrAddModalOpen] = useState(false)
+  const [isHrEmployeeModalOpen, setIsHrEmployeeModalOpen] = useState(false)
+  const [hrEmployeeModalTab, setHrEmployeeModalTab] = useState<HrEmployeeModalTab>('overview')
   const [newOrder, setNewOrder] = useState({ customer: '', productId: '', qty: 0 })
   const [newRun, setNewRun] = useState({
     productId: '',
@@ -1087,6 +1092,12 @@ function App() {
   ).length
   const expiringTrainingsCount = allEmployeeTrainings.filter(
     (t) => t.validUntil && new Date(t.validUntil).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30,
+  ).length
+  const overdueDocsCount = allEmployeeDocuments.filter(
+    (d) => d.expiresAt && new Date(d.expiresAt).getTime() < Date.now(),
+  ).length
+  const overdueTrainingsCount = allEmployeeTrainings.filter(
+    (t) => t.validUntil && new Date(t.validUntil).getTime() < Date.now(),
   ).length
   const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
   const productionRequestCount = productionRequests.length
@@ -1586,6 +1597,30 @@ function App() {
     ]
     await updateDoc(doc(db, 'employees', employee.id), { trainings: nextTrainings, updatedAt: serverTimestamp() })
     setNewHrTraining({ title: '', category: 'training', validUntil: '', note: '' })
+  }
+
+  async function deleteEmployeeDocument(employee: HrEmployee, documentId: string) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    const nextDocs = (employee.documents || []).filter((d) => d.id !== documentId)
+    await updateDoc(doc(db, 'employees', employee.id), { documents: nextDocs, updatedAt: serverTimestamp() })
+  }
+
+  async function deleteEmployeeAbsence(employee: HrEmployee, absenceId: string) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    const nextAbsences = (employee.absences || []).filter((d) => d.id !== absenceId)
+    await updateDoc(doc(db, 'employees', employee.id), { absences: nextAbsences, updatedAt: serverTimestamp() })
+  }
+
+  async function deleteEmployeeTraining(employee: HrEmployee, trainingId: string) {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    const nextTrainings = (employee.trainings || []).filter((d) => d.id !== trainingId)
+    await updateDoc(doc(db, 'employees', employee.id), { trainings: nextTrainings, updatedAt: serverTimestamp() })
+  }
+
+  function openEmployeeCard(employeeId: string) {
+    setSelectedEmployeeId(employeeId)
+    setHrEmployeeModalTab('overview')
+    setIsHrEmployeeModalOpen(true)
   }
 
   async function seedHrEmployees() {
@@ -4375,6 +4410,28 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
             <button className={`action-btn slim ghost ${hrSection === 'reports' ? 'active' : ''}`} type="button" onClick={() => setHrSection('reports')}>Отчеты</button>
             <button className={`action-btn slim ghost ${hrSection === 'settings' ? 'active' : ''}`} type="button" onClick={() => setHrSection('settings')}>Настройки</button>
           </div>
+          <div className="stats hr-kpi-grid">
+            <div className="card">
+              <div className="card-title">Всего сотрудников</div>
+              <div className="card-value">{effectiveEmployees.length}</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Работает</div>
+              <div className="card-value good">{effectiveEmployees.filter((e) => e.status === 'active').length}</div>
+            </div>
+            <div className="card">
+              <div className="card-title">В отпуске/больничном</div>
+              <div className="card-value warn">{effectiveEmployees.filter((e) => e.status === 'vacation' || e.status === 'sick').length}</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Скоро истекает</div>
+              <div className="card-value warn">{expiringDocsCount + expiringTrainingsCount}</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Просрочено</div>
+              <div className="card-value">{overdueDocsCount + overdueTrainingsCount}</div>
+            </div>
+          </div>
           {hrSection === 'employees' || hrSection === 'cards' ? (
           <>
           <div className="hr-filters">
@@ -4472,14 +4529,14 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
             </select>
           </div>
           <div className="actions">
-            <button className="action-btn slim" type="button" onClick={addEmployee}>
+            <button className="action-btn slim" type="button" onClick={() => setIsHrAddModalOpen(true)}>
               Добавить сотрудника
             </button>
           </div>
 
           <div className="stage-grid hr-grid">
             {filteredEmployees.map((emp) => (
-              <article className="stage-card hr-card" key={emp.id} onClick={() => { setSelectedEmployeeId(emp.id); setNewHrNote(emp.notes || '') }}>
+              <article className="stage-card hr-card" key={emp.id} onClick={() => { setNewHrNote(emp.notes || ''); openEmployeeCard(emp.id) }}>
                 <div className="stage-head">
                   <strong>{emp.name}</strong>
                   <span>{hrStatusLabel[emp.status]}</span>
@@ -4497,7 +4554,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
 
           {!filteredEmployees.length ? <p className="lot-line">Сотрудники по фильтрам не найдены.</p> : null}
 
-          {selectedEmployee ? (
+          {selectedEmployee && hrSection === 'cards' && !isHrEmployeeModalOpen ? (
             <article className="board hr-detail">
               <div className="stage-head">
                 <strong>Карточка сотрудника: {selectedEmployee.name}</strong>
@@ -4746,6 +4803,193 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
               <button className="action-btn slim ghost" type="button" onClick={seedHrEmployees}>
                 Заполнить тестовыми сотрудниками
               </button>
+            </div>
+          ) : null}
+
+          {isHrAddModalOpen ? (
+            <div className="modal-backdrop" onClick={() => setIsHrAddModalOpen(false)}>
+              <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head">
+                  <strong>Новый сотрудник</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsHrAddModalOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                <div className="hr-new-employee">
+                  <input className="field-input" placeholder="ФИО" value={newEmployee.name} onChange={(e) => setNewEmployee((s) => ({ ...s, name: e.target.value }))} />
+                  <input className="field-input" placeholder="Табельный номер" value={newEmployee.employeeNo} onChange={(e) => setNewEmployee((s) => ({ ...s, employeeNo: e.target.value }))} />
+                  <input className="field-input" placeholder="Должность" value={newEmployee.position} onChange={(e) => setNewEmployee((s) => ({ ...s, position: e.target.value }))} />
+                  <input className="field-input" placeholder="Отдел" value={newEmployee.department} onChange={(e) => setNewEmployee((s) => ({ ...s, department: e.target.value }))} />
+                  <input className="field-input" placeholder="Линия/участок" value={newEmployee.line} onChange={(e) => setNewEmployee((s) => ({ ...s, line: e.target.value }))} />
+                  <input className="field-input" placeholder="Телефон" value={newEmployee.phone} onChange={(e) => setNewEmployee((s) => ({ ...s, phone: e.target.value }))} />
+                  <select className="field-input" value={newEmployee.shift} onChange={(e) => setNewEmployee((s) => ({ ...s, shift: e.target.value }))}>
+                    <option>День</option>
+                    <option>Ночь</option>
+                  </select>
+                  <select className="field-input" value={newEmployee.status} onChange={(e) => setNewEmployee((s) => ({ ...s, status: e.target.value as HrEmployeeStatus }))}>
+                    {Object.entries(hrStatusLabel).map(([status, label]) => (
+                      <option key={status} value={status}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="actions">
+                  <button
+                    className="action-btn slim"
+                    type="button"
+                    onClick={async () => {
+                      await addEmployee()
+                      setIsHrAddModalOpen(false)
+                    }}
+                  >
+                    Сохранить сотрудника
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {isHrEmployeeModalOpen && selectedEmployee ? (
+            <div className="modal-backdrop" onClick={() => setIsHrEmployeeModalOpen(false)}>
+              <div className="doc-modal hr-employee-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head">
+                  <strong>{selectedEmployee.name} • {selectedEmployee.position || 'Сотрудник'}</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsHrEmployeeModalOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                <div className="actions view-tabs">
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'overview' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('overview')}>Основное</button>
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'work' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('work')}>Работа</button>
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'documents' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('documents')}>Документы</button>
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'absences' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('absences')}>Отсутствия</button>
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'trainings' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('trainings')}>Обучение</button>
+                  <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'notes' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('notes')}>Заметки</button>
+                </div>
+                {hrEmployeeModalTab === 'overview' || hrEmployeeModalTab === 'work' ? (
+                  <div className="hr-detail-grid">
+                    <div className="hr-photo-box">
+                      <img className="product-image" src={selectedEmployee.photoUrl || 'https://placehold.co/480x320?text=Employee+Photo'} alt={selectedEmployee.name} />
+                      <label className="field-label">Загрузить фото</label>
+                      <input className="field-input" type="file" accept="image/*" onChange={(e) => updateEmployeePhoto(selectedEmployee.id, e.target.files?.[0])} />
+                    </div>
+                    <div>
+                      <h3>Основная информация</h3>
+                      <div className="lot-line">ФИО: {selectedEmployee.name}</div>
+                      <div className="lot-line">Табельный номер: {selectedEmployee.employeeNo || '—'}</div>
+                      <div className="lot-line">Телефон: {selectedEmployee.phone || '—'}</div>
+                      <div className="lot-line">Отдел: {selectedEmployee.department || '—'}</div>
+                      <div className="lot-line">Линия/участок: {selectedEmployee.line || '—'}</div>
+                      <div className="lot-line">Статус: {hrStatusLabel[selectedEmployee.status]}</div>
+                    </div>
+                    <div>
+                      <h3>Рабочая информация</h3>
+                      <div className="lot-line">Должность: {selectedEmployee.position || '—'}</div>
+                      <div className="lot-line">Смена: {selectedEmployee.shift || '—'}</div>
+                      <div className="lot-line">Руководитель: {selectedEmployee.manager || '—'}</div>
+                      <div className="actions lot-actions">
+                        {(Object.keys(hrStatusLabel) as HrEmployeeStatus[]).map((status) => (
+                          <button key={status} className={`action-btn slim ghost ${selectedEmployee.status === status ? 'active' : ''}`} type="button" onClick={() => setEmployeeStatus(selectedEmployee.id, status)}>
+                            {hrStatusLabel[status]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                {hrEmployeeModalTab === 'documents' ? (
+                  <div className="stage-card">
+                    <h3>Документы сотрудника</h3>
+                    <div className="form-grid">
+                      <input className="field-input" placeholder="Название" value={newHrDoc.title} onChange={(e) => setNewHrDoc((s) => ({ ...s, title: e.target.value }))} />
+                      <input className="field-input" placeholder="Тип документа" value={newHrDoc.docType} onChange={(e) => setNewHrDoc((s) => ({ ...s, docType: e.target.value }))} />
+                      <input className="field-input" type="date" value={newHrDoc.expiresAt} onChange={(e) => setNewHrDoc((s) => ({ ...s, expiresAt: e.target.value }))} />
+                      <input className="field-input" placeholder="Кто загрузил" value={newHrDoc.uploadedBy} onChange={(e) => setNewHrDoc((s) => ({ ...s, uploadedBy: e.target.value }))} />
+                    </div>
+                    <div className="actions">
+                      <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>Добавить документ</button>
+                    </div>
+                    {(selectedEmployee.documents || []).map((docItem) => (
+                      <div className="lot" key={docItem.id}>
+                        <div className="lot-line"><b>{docItem.title}</b> ({docItem.docType})</div>
+                        <div className="lot-line">Загружен: {docItem.uploadedAt} • Срок: {docItem.expiresAt || '—'} • Кто: {docItem.uploadedBy}</div>
+                        <div className="actions lot-actions">
+                          <button className="action-btn slim ghost" type="button" onClick={() => window.alert(`Документ: ${docItem.title}`)}>Посмотреть</button>
+                          <button className="action-btn slim ghost" type="button" onClick={() => window.alert('Скачивание добавьте через Storage URL')}>Скачать</button>
+                          <button className="action-btn slim ghost" type="button" onClick={() => setNewHrDoc((s) => ({ ...s, title: docItem.title, docType: docItem.docType, expiresAt: docItem.expiresAt || '', uploadedBy: docItem.uploadedBy }))}>Заменить</button>
+                          <button className="action-btn slim ghost" type="button" onClick={() => deleteEmployeeDocument(selectedEmployee, docItem.id)}>Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {hrEmployeeModalTab === 'absences' ? (
+                  <div className="stage-card">
+                    <h3>Отпуска, больничные, отсутствия</h3>
+                    <div className="form-grid">
+                      <select className="field-input" value={newHrAbsence.type} onChange={(e) => setNewHrAbsence((s) => ({ ...s, type: e.target.value as HrAbsenceType }))}>
+                        {Object.entries(hrAbsenceLabel).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      <input className="field-input" type="date" value={newHrAbsence.startDate} onChange={(e) => setNewHrAbsence((s) => ({ ...s, startDate: e.target.value }))} />
+                      <input className="field-input" type="date" value={newHrAbsence.endDate} onChange={(e) => setNewHrAbsence((s) => ({ ...s, endDate: e.target.value }))} />
+                      <input className="field-input" placeholder="Причина" value={newHrAbsence.reason} onChange={(e) => setNewHrAbsence((s) => ({ ...s, reason: e.target.value }))} />
+                    </div>
+                    <div className="actions">
+                      <button className="action-btn slim" type="button" onClick={() => addEmployeeAbsence(selectedEmployee)}>Добавить период</button>
+                    </div>
+                    {(selectedEmployee.absences || []).map((item) => (
+                      <div className="lot" key={item.id}>
+                        <div className="lot-line">{hrAbsenceLabel[item.type]}: {item.startDate} - {item.endDate}</div>
+                        <div className="actions lot-actions">
+                          <button className="action-btn slim ghost" type="button" onClick={() => deleteEmployeeAbsence(selectedEmployee, item.id)}>Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {hrEmployeeModalTab === 'trainings' ? (
+                  <div className="stage-card">
+                    <h3>Обучение и допуски</h3>
+                    <div className="form-grid">
+                      <input className="field-input" placeholder="Название" value={newHrTraining.title} onChange={(e) => setNewHrTraining((s) => ({ ...s, title: e.target.value }))} />
+                      <select className="field-input" value={newHrTraining.category} onChange={(e) => setNewHrTraining((s) => ({ ...s, category: e.target.value as HrEmployeeTraining['category'] }))}>
+                        <option value="instruction">Инструктаж</option>
+                        <option value="training">Обучение</option>
+                        <option value="certificate">Сертификат</option>
+                        <option value="admission">Допуск</option>
+                      </select>
+                      <input className="field-input" type="date" value={newHrTraining.validUntil} onChange={(e) => setNewHrTraining((s) => ({ ...s, validUntil: e.target.value }))} />
+                      <input className="field-input" placeholder="Комментарий" value={newHrTraining.note} onChange={(e) => setNewHrTraining((s) => ({ ...s, note: e.target.value }))} />
+                    </div>
+                    <div className="actions">
+                      <button className="action-btn slim" type="button" onClick={() => addEmployeeTraining(selectedEmployee)}>Добавить запись</button>
+                    </div>
+                    {(selectedEmployee.trainings || []).map((item) => (
+                      <div className="lot" key={item.id}>
+                        <div className="lot-line"><b>{item.title}</b> ({item.category})</div>
+                        <div className="lot-line">Срок: {item.validUntil || '—'}</div>
+                        <div className="actions lot-actions">
+                          <button className="action-btn slim ghost" type="button" onClick={() => deleteEmployeeTraining(selectedEmployee, item.id)}>Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {hrEmployeeModalTab === 'notes' ? (
+                  <div className="stage-card">
+                    <h3>Заметки HR</h3>
+                    <textarea className="field-input hr-notes" placeholder="Замечания, рекомендации, внутренняя информация" value={newHrNote} onChange={(e) => setNewHrNote(e.target.value)} />
+                    <div className="actions">
+                      <button className="action-btn slim" type="button" onClick={() => saveEmployeeNote(selectedEmployee)}>Сохранить заметки</button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </section>
