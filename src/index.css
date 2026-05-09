@@ -750,6 +750,13 @@ h3 {
   transform: translateY(0);
 }
 
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .action-btn.ghost {
   background: var(--bg-soft);
   color: var(--text-primary);
@@ -1064,6 +1071,25 @@ h3 {
   border-radius: 16px;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.26);
   padding: 14px;
+}
+
+.hr-modal-head {
+  position: sticky;
+  top: -14px;
+  z-index: 3;
+  background: #fff;
+  padding: 10px 2px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 10px;
+}
+
+.hr-modal-tabs {
+  position: sticky;
+  top: 44px;
+  z-index: 2;
+  background: #fff;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid #edf2fb;
 }
 
 .doc-modal-grid {

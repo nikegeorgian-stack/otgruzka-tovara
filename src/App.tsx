@@ -907,6 +907,27 @@ function App() {
     })
   }, [isCameraOpen])
 
+  useEffect(() => {
+    const hasModal = isHrAddModalOpen || isHrEmployeeModalOpen || !!activeDocDialog
+    document.body.style.overflow = hasModal ? 'hidden' : 'auto'
+    return () => {
+      document.body.style.overflow = 'auto'
+    }
+  }, [isHrAddModalOpen, isHrEmployeeModalOpen, activeDocDialog])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (isCameraOpen) {
+        stopCamera()
+      }
+      if (isHrEmployeeModalOpen) setIsHrEmployeeModalOpen(false)
+      if (isHrAddModalOpen) setIsHrAddModalOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isCameraOpen, isHrEmployeeModalOpen, isHrAddModalOpen])
+
   const allowedStages = useMemo(() => {
     if (!currentUser) return [] as Stage[]
     const map: Record<Role, Stage[]> = {
@@ -1122,6 +1143,8 @@ function App() {
   const overdueTrainingsCount = allEmployeeTrainings.filter(
     (t) => t.validUntil && new Date(t.validUntil).getTime() < Date.now(),
   ).length
+  const canCreateEmployee = !!newEmployee.name.trim() && !!newEmployee.employeeNo.trim() && !!newEmployee.position.trim()
+  const canAddEmployeeDocument = !!newHrDoc.title.trim() && !!newHrDoc.docType.trim() && !!newHrDocFile
   const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
   const productionRequestCount = productionRequests.length
   const postedProductionRequestCount = productionRequests.filter((r) => r.status === 'posted').length
@@ -1545,6 +1568,7 @@ function App() {
       shift: 'День',
       status: 'active',
     })
+    return true
   }
 
   async function setEmployeeStatus(id: string, status: HrEmployeeStatus) {
@@ -1734,6 +1758,7 @@ function App() {
     await updateDoc(doc(db, 'employees', employee.id), { documents: nextDocs, updatedAt: serverTimestamp() })
     setNewHrDoc({ title: '', docType: '', expiresAt: '', uploadedBy: '' })
     setNewHrDocFile(null)
+    return true
   }
 
   async function addEmployeeAbsence(employee: HrEmployee) {
@@ -3535,7 +3560,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
           {isProductionDialogOpen ? (
             <div className="modal-backdrop" onClick={() => setIsProductionDialogOpen(false)}>
               <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="stage-head">
+                <div className="stage-head hr-modal-head">
                   <strong>{selectedProductionRequestId ? 'Редактирование заявки' : 'Новая заявка'}</strong>
                   <button type="button" className="action-btn slim ghost" onClick={() => setIsProductionDialogOpen(false)}>
                     Закрыть
@@ -4846,8 +4871,8 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     ) : null}
                   </div>
                   <div className="actions">
-                    <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>
-                      Добавить документ
+                    <button className="action-btn slim" type="button" disabled={!canAddEmployeeDocument} onClick={() => addEmployeeDocument(selectedEmployee)}>
+                      Сохранить документ
                     </button>
                   </div>
                   {(selectedEmployee.documents || []).map((docItem) => (
@@ -4941,6 +4966,11 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
           {hrSection === 'documents' ? (
             <div className="stage-card">
               <h3>Документы сотрудников (архив)</h3>
+              <div className="actions lot-actions">
+                <span className="role-pill">Всего документов: {allEmployeeDocuments.length}</span>
+                <span className="role-pill">Скоро истекают: {expiringDocsCount}</span>
+                <span className="role-pill">Просрочены: {overdueDocsCount}</span>
+              </div>
               {allEmployeeDocuments.length ? (
                 allEmployeeDocuments.map((d) => (
                   <div className="lot" key={`${d.employeeId}-${d.id}`}>
@@ -5067,8 +5097,10 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                   <button
                     className="action-btn slim"
                     type="button"
+                    disabled={!canCreateEmployee}
                     onClick={async () => {
-                      await addEmployee()
+                      const created = await addEmployee()
+                      if (!created) return
                       setIsHrAddModalOpen(false)
                     }}
                   >
@@ -5088,7 +5120,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
               }}
             >
               <div className="doc-modal hr-employee-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="stage-head">
+                <div className="stage-head hr-modal-head">
                   <strong>{selectedEmployee.name} • {selectedEmployee.position || 'Сотрудник'}</strong>
                   <button
                     type="button"
@@ -5101,7 +5133,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     Закрыть
                   </button>
                 </div>
-                <div className="actions view-tabs">
+                <div className="actions view-tabs hr-modal-tabs">
                   <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'overview' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('overview')}>Основное</button>
                   <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'work' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('work')}>Работа</button>
                   <button className={`action-btn slim ghost ${hrEmployeeModalTab === 'documents' ? 'active' : ''}`} type="button" onClick={() => setHrEmployeeModalTab('documents')}>Документы</button>
@@ -5207,7 +5239,9 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       ) : null}
                     </div>
                     <div className="actions">
-                      <button className="action-btn slim" type="button" onClick={() => addEmployeeDocument(selectedEmployee)}>Добавить документ</button>
+                      <button className="action-btn slim" type="button" disabled={!canAddEmployeeDocument} onClick={() => addEmployeeDocument(selectedEmployee)}>
+                        Сохранить документ
+                      </button>
                     </div>
                     {(selectedEmployee.documents || []).map((docItem) => (
                       <div className="lot" key={docItem.id}>
