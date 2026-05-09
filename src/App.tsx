@@ -712,6 +712,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!currentUser || currentUser.role !== 'hr') return
+    setView('hr')
+    setNavMode('sections')
+  }, [currentUser?.role, currentUser?.uid])
+
+  useEffect(() => {
     if (!firebaseUser || !currentUser) {
       setLotsState([])
       setEmployeesState([])
@@ -1057,6 +1063,10 @@ function App() {
     setView(key)
     setNavMode('sections')
   }
+
+  const workspaceTabActive =
+    !!currentUser && (navMode === 'workspace' || (currentUser.role === 'hr' && view === 'hr'))
+  const sectionsTabActive = !!currentUser && navMode === 'sections' && view !== 'hr'
 
   const navItems: Array<[ViewKey, string, typeof PackageCheck]> = [
     ['dashboard', 'Дашборд', PackageCheck],
@@ -1503,6 +1513,8 @@ function App() {
     setSelectedLogin(loginOptions[0].id)
     setPassword('')
     setError('')
+    setView('dashboard')
+    setNavMode('workspace')
   }
 
   function roleCanOperateStage(role: Role, stage: Stage) {
@@ -3042,21 +3054,25 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
   return (
     <main className="page">
       <header className="hero">
-        <div>
-          <p className="eyebrow">Fibercell Manufacturing OS / MVP</p>
-          <h1>Отгрузка товара и пропиточная линия</h1>
-          <p className="subtitle">
-            Цепочка производства: прием сырья (SIMO и другие поставщики), пропитка, контроль качества,
-            склад и отгрузка. Основа для будущих модулей складского учета и бухгалтерии.
-          </p>
-          <div className="user-row">
-            <span className="role-pill">
-              <ShieldCheck size={14} />
-              {currentUser.name} • {roleLabels[currentUser.role]} {firebaseUser?.email ? `(${firebaseUser.email})` : ''}
-            </span>
-            <button className="logout-btn" onClick={logout} type="button">
-              Выйти
-            </button>
+        <div className="hero-top">
+          <div className="hero-copy">
+            <p className="eyebrow">Fibercell Manufacturing OS / MVP</p>
+            <h1>Отгрузка товара и пропиточная линия</h1>
+            <p className="subtitle">
+              Цепочка производства: прием сырья (SIMO и другие поставщики), пропитка, контроль качества,
+              склад и отгрузка. Основа для будущих модулей складского учета и бухгалтерии.
+            </p>
+          </div>
+          <div className="hero-user">
+            <div className="user-row">
+              <span className="role-pill">
+                <ShieldCheck size={14} />
+                {currentUser.name} • {roleLabels[currentUser.role]} {firebaseUser?.email ? `(${firebaseUser.email})` : ''}
+              </span>
+              <button className="logout-btn" onClick={logout} type="button">
+                Выйти
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -3086,14 +3102,20 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
         <div className="actions workspace-mode-tabs">
           <button
             type="button"
-            className={`action-btn slim ghost ${navMode === 'workspace' ? 'active' : ''}`}
-            onClick={() => setNavMode('workspace')}
+            className={`action-btn slim ghost ${workspaceTabActive ? 'active' : ''}`}
+            onClick={() => {
+              if (currentUser.role === 'hr') {
+                openSection('hr')
+              } else {
+                setNavMode('workspace')
+              }
+            }}
           >
             Рабочее место роли
           </button>
           <button
             type="button"
-            className={`action-btn slim ghost ${navMode === 'sections' ? 'active' : ''}`}
+            className={`action-btn slim ghost ${sectionsTabActive ? 'active' : ''}`}
             onClick={() => setNavMode('sections')}
           >
             Все разделы
