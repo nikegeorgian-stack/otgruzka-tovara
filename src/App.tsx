@@ -89,6 +89,20 @@ type HrEmployeeStatus = 'active' | 'vacation' | 'sick' | 'fired'
 type HrAbsenceType = 'vacation' | 'sick' | 'business_trip' | 'absence'
 type HrSection = 'employees' | 'cards' | 'documents' | 'absences' | 'trainings' | 'reports' | 'settings'
 type HrEmployeeModalTab = 'overview' | 'work' | 'documents' | 'absences' | 'trainings' | 'notes'
+type HrContractType = 'full_time' | 'part_time' | 'temporary' | 'internship'
+
+type HrPosition = {
+  id: string
+  title: string
+  department: string
+  grade?: string
+  salary: number
+  currency: 'RUB' | 'GEL' | 'USD'
+  contractType: HrContractType
+  probationMonths?: number
+  schedule?: string
+  duties?: string
+}
 
 type HrEmployeeDocument = {
   id: string
@@ -137,6 +151,10 @@ type HrEmployee = {
   probationUntil?: string
   transferDate?: string
   history?: string
+  salary?: number
+  currency?: 'RUB' | 'GEL' | 'USD'
+  contractType?: HrContractType
+  probationMonths?: number
   notes?: string
   documents?: HrEmployeeDocument[]
   absences?: HrEmployeeAbsence[]
@@ -561,6 +579,7 @@ function App() {
 
   const [usersState, setUsersState] = useState<UserProfile[]>([])
   const [employeesState, setEmployeesState] = useState<HrEmployee[]>([])
+  const [hrPositionsState, setHrPositionsState] = useState<HrPosition[]>([])
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(true)
   const [error, setError] = useState('')
@@ -581,12 +600,17 @@ function App() {
   const [newEmployee, setNewEmployee] = useState({
     name: '',
     employeeNo: '',
+    positionId: '',
     phone: '',
     position: '',
     department: '',
     line: '',
     shift: 'День',
     status: 'active' as HrEmployeeStatus,
+    salary: 0,
+    currency: 'RUB' as 'RUB' | 'GEL' | 'USD',
+    contractType: 'full_time' as HrContractType,
+    probationMonths: 0,
   })
   const [hrSearch, setHrSearch] = useState('')
   const [hrDepartmentFilter, setHrDepartmentFilter] = useState('__all__')
@@ -609,8 +633,20 @@ function App() {
   })
   const [hrSection, setHrSection] = useState<HrSection>('employees')
   const [isHrAddModalOpen, setIsHrAddModalOpen] = useState(false)
+  const [isHrPositionModalOpen, setIsHrPositionModalOpen] = useState(false)
   const [isHrEmployeeModalOpen, setIsHrEmployeeModalOpen] = useState(false)
   const [hrEmployeeModalTab, setHrEmployeeModalTab] = useState<HrEmployeeModalTab>('overview')
+  const [newHrPosition, setNewHrPosition] = useState({
+    title: '',
+    department: '',
+    grade: '',
+    salary: 0,
+    currency: 'RUB' as 'RUB' | 'GEL' | 'USD',
+    contractType: 'full_time' as HrContractType,
+    probationMonths: 0,
+    schedule: '',
+    duties: '',
+  })
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const [newOrder, setNewOrder] = useState({ customer: '', productId: '', qty: 0 })
@@ -838,6 +874,7 @@ function App() {
     })
 
     let unsubEmployees = () => {}
+    let unsubHrPositions = () => {}
     if (currentUser.role === 'admin' || currentUser.role === 'hr') {
       const empQuery = query(collection(db, 'employees'), orderBy('name', 'asc'))
       unsubEmployees = onSnapshot(empQuery, (snap) => {
@@ -871,6 +908,12 @@ function App() {
         })
         setEmployeesState(items)
       })
+
+      const positionQuery = query(collection(db, 'hrPositions'), orderBy('title', 'asc'))
+      unsubHrPositions = onSnapshot(positionQuery, (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<HrPosition, 'id'>) }))
+        setHrPositionsState(items)
+      })
     }
 
     return () => {
@@ -887,6 +930,7 @@ function App() {
       unsubDocuments()
       unsubUsers()
       unsubEmployees()
+      unsubHrPositions()
     }
   }, [firebaseUser, currentUser])
 
@@ -1097,6 +1141,7 @@ function App() {
   const hrDepartments = Array.from(new Set(effectiveEmployees.map((e) => e.department).filter(Boolean))).sort()
   const hrLines = Array.from(new Set(effectiveEmployees.map((e) => e.line).filter(Boolean))).sort()
   const hrPositions = Array.from(new Set(effectiveEmployees.map((e) => e.position).filter(Boolean))).sort()
+  const selectedPosition = hrPositionsState.find((p) => p.id === newEmployee.positionId) || null
   const filteredEmployees = effectiveEmployees.filter((emp) => {
     const queryText = `${emp.name} ${emp.employeeNo} ${emp.position}`.toLowerCase()
     const searchHit = !hrSearch.trim() || queryText.includes(hrSearch.trim().toLowerCase())
@@ -1144,6 +1189,7 @@ function App() {
     (t) => t.validUntil && new Date(t.validUntil).getTime() < Date.now(),
   ).length
   const canCreateEmployee = !!newEmployee.name.trim() && !!newEmployee.employeeNo.trim() && !!newEmployee.position.trim()
+  const canCreatePosition = !!newHrPosition.title.trim() && !!newHrPosition.department.trim() && newHrPosition.salary > 0
   const canAddEmployeeDocument = !!newHrDoc.title.trim() && !!newHrDoc.docType.trim() && !!newHrDocFile
   const availableRawLots = effectiveLots.filter((l) => (l.rolls || 0) > 0)
   const productionRequestCount = productionRequests.length
@@ -1551,6 +1597,10 @@ function App() {
       line: newEmployee.line.trim() || 'Без линии',
       shift: newEmployee.shift,
       status: newEmployee.status,
+      salary: newEmployee.salary || undefined,
+      currency: newEmployee.currency,
+      contractType: newEmployee.contractType,
+      probationMonths: newEmployee.probationMonths || undefined,
       documents: [],
       absences: [],
       trainings: [],
@@ -1561,14 +1611,59 @@ function App() {
     setNewEmployee({
       name: '',
       employeeNo: '',
+      positionId: '',
       phone: '',
       position: '',
       department: '',
       line: '',
       shift: 'День',
       status: 'active',
+      salary: 0,
+      currency: 'RUB',
+      contractType: 'full_time',
+      probationMonths: 0,
     })
     return true
+  }
+
+  async function addHrPosition() {
+    if (!currentUser || !(currentUser.role === 'admin' || currentUser.role === 'hr')) return
+    if (!canCreatePosition) return
+    const ref = await addDoc(collection(db, 'hrPositions'), {
+      title: newHrPosition.title.trim(),
+      department: newHrPosition.department.trim(),
+      grade: newHrPosition.grade.trim() || undefined,
+      salary: Number(newHrPosition.salary),
+      currency: newHrPosition.currency,
+      contractType: newHrPosition.contractType,
+      probationMonths: Number(newHrPosition.probationMonths) || undefined,
+      schedule: newHrPosition.schedule.trim() || undefined,
+      duties: newHrPosition.duties.trim() || undefined,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    setNewEmployee((s) => ({
+      ...s,
+      positionId: ref.id,
+      position: newHrPosition.title.trim(),
+      department: newHrPosition.department.trim() || s.department,
+      salary: Number(newHrPosition.salary) || 0,
+      currency: newHrPosition.currency,
+      contractType: newHrPosition.contractType,
+      probationMonths: Number(newHrPosition.probationMonths) || 0,
+    }))
+    setNewHrPosition({
+      title: '',
+      department: '',
+      grade: '',
+      salary: 0,
+      currency: 'RUB',
+      contractType: 'full_time',
+      probationMonths: 0,
+      schedule: '',
+      duties: '',
+    })
+    setIsHrPositionModalOpen(false)
   }
 
   async function setEmployeeStatus(id: string, status: HrEmployeeStatus) {
@@ -3677,7 +3772,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
           {isBrigadierDialogOpen ? (
             <div className="modal-backdrop" onClick={() => setIsBrigadierDialogOpen(false)}>
               <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="stage-head">
+                <div className="stage-head hr-modal-head">
                   <strong>Добавить бригадира</strong>
                   <button type="button" className="action-btn slim ghost" onClick={() => setIsBrigadierDialogOpen(false)}>
                     Закрыть
@@ -5077,7 +5172,40 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                 <div className="hr-new-employee">
                   <input className="field-input" placeholder="ФИО" value={newEmployee.name} onChange={(e) => setNewEmployee((s) => ({ ...s, name: e.target.value }))} />
                   <input className="field-input" placeholder="Табельный номер" value={newEmployee.employeeNo} onChange={(e) => setNewEmployee((s) => ({ ...s, employeeNo: e.target.value }))} />
-                  <input className="field-input" placeholder="Должность" value={newEmployee.position} onChange={(e) => setNewEmployee((s) => ({ ...s, position: e.target.value }))} />
+                  <div className="position-picker">
+                    <select
+                      className="field-input"
+                      value={newEmployee.positionId}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        const position = hrPositionsState.find((p) => p.id === value)
+                        if (!position) {
+                          setNewEmployee((s) => ({ ...s, positionId: '', position: '' }))
+                          return
+                        }
+                        setNewEmployee((s) => ({
+                          ...s,
+                          positionId: position.id,
+                          position: position.title,
+                          department: position.department || s.department,
+                          salary: position.salary || 0,
+                          currency: position.currency || 'RUB',
+                          contractType: position.contractType || 'full_time',
+                          probationMonths: position.probationMonths || 0,
+                        }))
+                      }}
+                    >
+                      <option value="">Выберите должность</option>
+                      {hrPositionsState.map((position) => (
+                        <option key={position.id} value={position.id}>
+                          {position.title}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="action-btn slim ghost icon-btn" type="button" onClick={() => setIsHrPositionModalOpen(true)} title="Добавить должность">
+                      +
+                    </button>
+                  </div>
                   <input className="field-input" placeholder="Отдел" value={newEmployee.department} onChange={(e) => setNewEmployee((s) => ({ ...s, department: e.target.value }))} />
                   <input className="field-input" placeholder="Линия/участок" value={newEmployee.line} onChange={(e) => setNewEmployee((s) => ({ ...s, line: e.target.value }))} />
                   <input className="field-input" placeholder="Телефон" value={newEmployee.phone} onChange={(e) => setNewEmployee((s) => ({ ...s, phone: e.target.value }))} />
@@ -5092,7 +5220,28 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                       </option>
                     ))}
                   </select>
+                  <input className="field-input" type="number" placeholder="Оклад" value={newEmployee.salary || ''} onChange={(e) => setNewEmployee((s) => ({ ...s, salary: Number(e.target.value) || 0 }))} />
+                  <select className="field-input" value={newEmployee.currency} onChange={(e) => setNewEmployee((s) => ({ ...s, currency: e.target.value as 'RUB' | 'GEL' | 'USD' }))}>
+                    <option value="RUB">RUB</option>
+                    <option value="GEL">GEL</option>
+                    <option value="USD">USD</option>
+                  </select>
+                  <select className="field-input" value={newEmployee.contractType} onChange={(e) => setNewEmployee((s) => ({ ...s, contractType: e.target.value as HrContractType }))}>
+                    <option value="full_time">Полный рабочий день</option>
+                    <option value="part_time">Частичная занятость</option>
+                    <option value="temporary">Временный договор</option>
+                    <option value="internship">Стажировка</option>
+                  </select>
+                  <input className="field-input" type="number" placeholder="Испытательный срок (мес.)" value={newEmployee.probationMonths || ''} onChange={(e) => setNewEmployee((s) => ({ ...s, probationMonths: Number(e.target.value) || 0 }))} />
                 </div>
+                {selectedPosition ? (
+                  <div className="position-summary">
+                    <div className="lot-line"><b>Профиль должности:</b> {selectedPosition.title}</div>
+                    <div className="lot-line">Оклад: {selectedPosition.salary} {selectedPosition.currency}</div>
+                    <div className="lot-line">Тип договора: {selectedPosition.contractType}</div>
+                    <div className="lot-line">График: {selectedPosition.schedule || '—'}</div>
+                  </div>
+                ) : null}
                 <div className="actions">
                   <button
                     className="action-btn slim"
@@ -5105,6 +5254,44 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
                     }}
                   >
                     Сохранить сотрудника
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {isHrPositionModalOpen ? (
+            <div className="modal-backdrop" onClick={() => setIsHrPositionModalOpen(false)}>
+              <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="stage-head hr-modal-head">
+                  <strong>Добавить должность</strong>
+                  <button type="button" className="action-btn slim ghost" onClick={() => setIsHrPositionModalOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+                <div className="form-grid">
+                  <input className="field-input" placeholder="Название должности" value={newHrPosition.title} onChange={(e) => setNewHrPosition((s) => ({ ...s, title: e.target.value }))} />
+                  <input className="field-input" placeholder="Отдел" value={newHrPosition.department} onChange={(e) => setNewHrPosition((s) => ({ ...s, department: e.target.value }))} />
+                  <input className="field-input" placeholder="Разряд/категория" value={newHrPosition.grade} onChange={(e) => setNewHrPosition((s) => ({ ...s, grade: e.target.value }))} />
+                  <input className="field-input" type="number" placeholder="Оклад" value={newHrPosition.salary || ''} onChange={(e) => setNewHrPosition((s) => ({ ...s, salary: Number(e.target.value) || 0 }))} />
+                  <select className="field-input" value={newHrPosition.currency} onChange={(e) => setNewHrPosition((s) => ({ ...s, currency: e.target.value as 'RUB' | 'GEL' | 'USD' }))}>
+                    <option value="RUB">RUB</option>
+                    <option value="GEL">GEL</option>
+                    <option value="USD">USD</option>
+                  </select>
+                  <select className="field-input" value={newHrPosition.contractType} onChange={(e) => setNewHrPosition((s) => ({ ...s, contractType: e.target.value as HrContractType }))}>
+                    <option value="full_time">Полный рабочий день</option>
+                    <option value="part_time">Частичная занятость</option>
+                    <option value="temporary">Временный договор</option>
+                    <option value="internship">Стажировка</option>
+                  </select>
+                  <input className="field-input" type="number" placeholder="Испытательный срок (мес.)" value={newHrPosition.probationMonths || ''} onChange={(e) => setNewHrPosition((s) => ({ ...s, probationMonths: Number(e.target.value) || 0 }))} />
+                  <input className="field-input" placeholder="График работы" value={newHrPosition.schedule} onChange={(e) => setNewHrPosition((s) => ({ ...s, schedule: e.target.value }))} />
+                  <input className="field-input" placeholder="Ключевые обязанности" value={newHrPosition.duties} onChange={(e) => setNewHrPosition((s) => ({ ...s, duties: e.target.value }))} />
+                </div>
+                <div className="actions">
+                  <button className="action-btn slim" type="button" disabled={!canCreatePosition} onClick={addHrPosition}>
+                    Добавить должность
                   </button>
                 </div>
               </div>

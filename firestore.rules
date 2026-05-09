@@ -113,6 +113,11 @@ service cloud.firestore {
       allow write: if signedIn() && (isAdmin() || isHr());
     }
 
+    match /hrPositions/{positionId} {
+      allow read: if signedIn() && (isAdmin() || isHr());
+      allow write: if signedIn() && (isAdmin() || isHr());
+    }
+
     match /lots/{lotId} {
       allow read: if signedIn();
       allow write: if canManageLots();
