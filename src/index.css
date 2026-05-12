@@ -693,9 +693,26 @@ h3 {
 .hero-top {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px 18px;
+}
+
+.hero-compact {
+  padding: 8px 14px;
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
+}
+
+.hero-title {
+  margin: 0;
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: clamp(0.9rem, 1.65vw, 1.1rem);
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: #fff;
 }
 
 .hero-copy {

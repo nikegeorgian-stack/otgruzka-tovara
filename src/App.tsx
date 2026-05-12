@@ -375,7 +375,7 @@ const defaultPermissionsByRole: Record<Role, PermissionSet> = {
   warehouse: { dashboard: true, documents: true, lots: true, runs: false, rolls: true, qc: false, inventory: true, orders: true, products: false, hr: false, users: false },
   logistics: { dashboard: true, documents: true, lots: true, runs: false, rolls: true, qc: false, inventory: true, orders: true, products: false, hr: false, users: false },
   accounting: { dashboard: true, documents: true, lots: false, runs: false, rolls: false, qc: false, inventory: true, orders: true, products: false, hr: false, users: false },
-  hr: { dashboard: true, documents: false, lots: false, runs: false, rolls: false, qc: false, inventory: false, orders: false, products: false, hr: true, users: false },
+  hr: { dashboard: false, documents: false, lots: false, runs: false, rolls: false, qc: false, inventory: false, orders: false, products: false, hr: true, users: false },
 }
 
 function resolvePermissions(role: Role, raw?: Partial<PermissionSet>): PermissionSet {
@@ -1064,9 +1064,8 @@ function App() {
     setNavMode('sections')
   }
 
-  const workspaceTabActive =
-    !!currentUser && (navMode === 'workspace' || (currentUser.role === 'hr' && view === 'hr'))
-  const sectionsTabActive = !!currentUser && navMode === 'sections' && view !== 'hr'
+  const workspaceTabActive = !!currentUser && navMode === 'workspace'
+  const sectionsTabActive = !!currentUser && navMode === 'sections'
 
   const navItems: Array<[ViewKey, string, typeof PackageCheck]> = [
     ['dashboard', 'Дашборд', PackageCheck],
@@ -1126,12 +1125,7 @@ function App() {
       { title: 'Партии', description: 'Контроль переходов между этапами', view: 'lots' },
       { title: 'Traceability', description: 'Поиск по коду рулона', view: 'trace' },
     ],
-    hr: [
-      { title: 'HR', description: 'Сотрудники, статусы и смены', view: 'hr' },
-      { title: 'Дашборд', description: 'Общий обзор состояния процесса', view: 'dashboard' },
-      { title: 'Пользователи', description: 'Проверка доступов (если разрешено)', view: 'users' },
-      { title: 'Документы', description: 'Просмотр журнала (если разрешено)', view: 'documents' },
-    ],
+    hr: [{ title: 'HR', description: 'Сотрудники, статусы и смены', view: 'hr' }],
   }
 
   const workspaceMetricByView: Partial<Record<ViewKey, string>> = {
@@ -3020,7 +3014,7 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
     return (
       <main className="page auth-page">
         <section className="auth-card">
-          <p className="eyebrow">Fibercell Manufacturing OS</p>
+          <p className="eyebrow">Fibercell Manufacturing OS / MVP / CRM</p>
           <h1>Вход в систему</h1>
           <p className="subtitle dark">Роль определяет интерфейс: каждый видит только свой участок работы.</p>
           <label className="field-label">Пользователь</label>
@@ -3053,16 +3047,9 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
 
   return (
     <main className="page">
-      <header className="hero">
+      <header className="hero hero-compact">
         <div className="hero-top">
-          <div className="hero-copy">
-            <p className="eyebrow">Fibercell Manufacturing OS / MVP</p>
-            <h1>Отгрузка товара и пропиточная линия</h1>
-            <p className="subtitle">
-              Цепочка производства: прием сырья (SIMO и другие поставщики), пропитка, контроль качества,
-              склад и отгрузка. Основа для будущих модулей складского учета и бухгалтерии.
-            </p>
-          </div>
+          <h1 className="hero-title">Fibercell Manufacturing OS / MVP / CRM</h1>
           <div className="hero-user">
             <div className="user-row">
               <span className="role-pill">
@@ -3079,115 +3066,115 @@ ${shipment.rollCodes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')}
 
       {error ? <section className="board error-banner">{error}</section> : null}
 
-      <section className="stats">
-        <article className="card">
-          <div className="card-title">Всего рулонов в работе</div>
-          <div className="card-value">{totals.rolls.toLocaleString('ru-RU')}</div>
-        </article>
-        <article className="card">
-          <div className="card-title">Всего метров</div>
-          <div className="card-value">{totals.meters.toLocaleString('ru-RU')} м</div>
-        </article>
-        <article className="card">
-          <div className="card-title">На контроле качества</div>
-          <div className="card-value warn">{totals.qc.toLocaleString('ru-RU')} рул.</div>
-        </article>
-        <article className="card">
-          <div className="card-title">Готово к отгрузке</div>
-          <div className="card-value good">{totals.shipment.toLocaleString('ru-RU')} рул.</div>
-        </article>
-      </section>
+      {currentUser.role !== 'hr' ? (
+        <section className="stats">
+          <article className="card">
+            <div className="card-title">Всего рулонов в работе</div>
+            <div className="card-value">{totals.rolls.toLocaleString('ru-RU')}</div>
+          </article>
+          <article className="card">
+            <div className="card-title">Всего метров</div>
+            <div className="card-value">{totals.meters.toLocaleString('ru-RU')} м</div>
+          </article>
+          <article className="card">
+            <div className="card-title">На контроле качества</div>
+            <div className="card-value warn">{totals.qc.toLocaleString('ru-RU')} рул.</div>
+          </article>
+          <article className="card">
+            <div className="card-title">Готово к отгрузке</div>
+            <div className="card-value good">{totals.shipment.toLocaleString('ru-RU')} рул.</div>
+          </article>
+        </section>
+      ) : null}
 
-      <section className="board nav-board">
-        <div className="actions workspace-mode-tabs">
-          <button
-            type="button"
-            className={`action-btn slim ghost ${workspaceTabActive ? 'active' : ''}`}
-            onClick={() => {
-              if (currentUser.role === 'hr') {
-                openSection('hr')
-              } else {
-                setNavMode('workspace')
-              }
-            }}
-          >
-            Рабочее место роли
-          </button>
-          <button
-            type="button"
-            className={`action-btn slim ghost ${sectionsTabActive ? 'active' : ''}`}
-            onClick={() => setNavMode('sections')}
-          >
-            Все разделы
-          </button>
-        </div>
-        {navMode === 'sections' ? (
-          <div className="actions view-tabs">
-            {navItems.map(([key, label, Icon]) => {
-              if (!canAccessSection(key)) return null
-              return (
-                <button
-                  key={key}
-                  className={`action-btn slim ghost ${view === key ? 'active' : ''}`}
-                  type="button"
-                  onClick={() => setView(key)}
-                >
-                  <Icon size={15} /> {label}
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="board quick-nav-board">
-        <h3 style={{ marginBottom: 10 }}>Быстрые переходы</h3>
-        <div className="quick-nav-grid">
-          {canSeeDocuments ? (
-            <button type="button" className="quick-nav-btn" onClick={() => openSection('documents')}>
-              <span>Документы</span>
-              <small>ПН / ПМ / СП / ОТГ</small>
-            </button>
-          ) : null}
-          {canManageProductionRequest ? (
-            <button type="button" className="quick-nav-btn" onClick={() => openSection('production_request')}>
-              <span>Заявка линии</span>
-              <small>Выработка и упаковка</small>
-            </button>
-          ) : null}
-          {currentUser.permissions.inventory ? (
+      {currentUser.role !== 'hr' ? (
+        <section className="board nav-board">
+          <div className="actions workspace-mode-tabs">
             <button
               type="button"
-              className="quick-nav-btn"
-              onClick={() => {
-                setInventorySubView('balances')
-                openSection('inventory')
-              }}
+              className={`action-btn slim ghost ${workspaceTabActive ? 'active' : ''}`}
+              onClick={() => setNavMode('workspace')}
             >
-              <span>Склад</span>
-              <small>Остатки и движения</small>
+              Рабочее место роли
             </button>
-          ) : null}
-          {canManageReceipts ? (
-            <button type="button" className="quick-nav-btn" onClick={() => openSection('receipts')}>
-              <span>Поступления</span>
-              <small>Приемка сырья</small>
+            <button
+              type="button"
+              className={`action-btn slim ghost ${sectionsTabActive ? 'active' : ''}`}
+              onClick={() => setNavMode('sections')}
+            >
+              Все разделы
             </button>
+          </div>
+          {navMode === 'sections' ? (
+            <div className="actions view-tabs">
+              {navItems.map(([key, label, Icon]) => {
+                if (!canAccessSection(key)) return null
+                return (
+                  <button
+                    key={key}
+                    className={`action-btn slim ghost ${view === key ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setView(key)}
+                  >
+                    <Icon size={15} /> {label}
+                  </button>
+                )
+              })}
+            </div>
           ) : null}
-          {canManageShipping ? (
-            <button type="button" className="quick-nav-btn" onClick={() => openSection('shipping')}>
-              <span>Паллеты/Отгрузка</span>
-              <small>Упаковка и отгрузка</small>
-            </button>
-          ) : null}
-          {canManageOrders ? (
-            <button type="button" className="quick-nav-btn" onClick={() => openSection('orders')}>
-              <span>Заказы/Резервы</span>
-              <small>Распределение по заказам</small>
-            </button>
-          ) : null}
-        </div>
-      </section>
+        </section>
+      ) : null}
+
+      {currentUser.role !== 'hr' ? (
+        <section className="board quick-nav-board">
+          <h3 style={{ marginBottom: 10 }}>Быстрые переходы</h3>
+          <div className="quick-nav-grid">
+            {canSeeDocuments ? (
+              <button type="button" className="quick-nav-btn" onClick={() => openSection('documents')}>
+                <span>Документы</span>
+                <small>ПН / ПМ / СП / ОТГ</small>
+              </button>
+            ) : null}
+            {canManageProductionRequest ? (
+              <button type="button" className="quick-nav-btn" onClick={() => openSection('production_request')}>
+                <span>Заявка линии</span>
+                <small>Выработка и упаковка</small>
+              </button>
+            ) : null}
+            {currentUser.permissions.inventory ? (
+              <button
+                type="button"
+                className="quick-nav-btn"
+                onClick={() => {
+                  setInventorySubView('balances')
+                  openSection('inventory')
+                }}
+              >
+                <span>Склад</span>
+                <small>Остатки и движения</small>
+              </button>
+            ) : null}
+            {canManageReceipts ? (
+              <button type="button" className="quick-nav-btn" onClick={() => openSection('receipts')}>
+                <span>Поступления</span>
+                <small>Приемка сырья</small>
+              </button>
+            ) : null}
+            {canManageShipping ? (
+              <button type="button" className="quick-nav-btn" onClick={() => openSection('shipping')}>
+                <span>Паллеты/Отгрузка</span>
+                <small>Упаковка и отгрузка</small>
+              </button>
+            ) : null}
+            {canManageOrders ? (
+              <button type="button" className="quick-nav-btn" onClick={() => openSection('orders')}>
+                <span>Заказы/Резервы</span>
+                <small>Распределение по заказам</small>
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {navMode === 'workspace' ? (
         <section className="board workspace-board">
