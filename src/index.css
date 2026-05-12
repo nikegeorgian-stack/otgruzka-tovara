@@ -1,12 +1,27 @@
+/* Fibercell UI: design tokens in :root; avoid duplicating blocks — extend here or split into modules later. */
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  color: #0f172a;
-  background: #f3f6fb;
   line-height: 1.4;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  --bg-main: #f2f5fb;
+  --bg-surface: #ffffff;
+  --bg-soft: #f8faff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border-soft: #dbe4f1;
+  --border-strong: #cdd8ea;
+  --brand: #2563eb;
+  --brand-strong: #1d4ed8;
+  --brand-soft: #e9f0ff;
+  --danger-soft: #fff1f2;
+  --danger-text: #9f1239;
+  --ok-text: #067647;
+  --warn-text: #b45309;
+  color: var(--text-primary);
 }
 
 * {
@@ -15,7 +30,11 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #eef4ff, #f8fafc 45%);
+  background:
+    radial-gradient(1200px 650px at 5% -10%, #e4ecff 0%, transparent 70%),
+    radial-gradient(1000px 620px at 100% 0%, #eef8ff 0%, transparent 70%),
+    var(--bg-main);
+  color: var(--text-primary);
 }
 
 #root {
@@ -105,14 +124,6 @@ body {
   background: #fff7f7;
 }
 
-.hero {
-  background: linear-gradient(130deg, #0f172a, #1e293b);
-  color: #fff;
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
-}
-
 .eyebrow {
   margin: 0;
   color: #fda278;
@@ -123,13 +134,20 @@ body {
 }
 
 h1 {
-  margin: 8px 0 10px;
-  font-size: 34px;
+  margin: 10px 0 14px;
+  font-size: clamp(1.55rem, 2.5vw, 2.2rem);
+  line-height: 1.2;
 }
 
 h2 {
-  margin: 0 0 12px;
-  font-size: 22px;
+  margin: 0 0 14px;
+  font-size: clamp(1.1rem, 1.6vw, 1.4rem);
+  line-height: 1.25;
+}
+
+h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
 }
 
 .subtitle {
@@ -631,55 +649,6 @@ h2 {
   flex-direction: column;
 }
 
-/* ---- UI refresh: modern and ergonomic ---- */
-:root {
-  --bg-main: #f2f5fb;
-  --bg-surface: #ffffff;
-  --bg-soft: #f8faff;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --border-soft: #dbe4f1;
-  --border-strong: #cdd8ea;
-  --brand: #2563eb;
-  --brand-strong: #1d4ed8;
-  --brand-soft: #e9f0ff;
-  --danger-soft: #fff1f2;
-  --danger-text: #9f1239;
-  --ok-text: #067647;
-  --warn-text: #b45309;
-}
-
-body {
-  background:
-    radial-gradient(1200px 650px at 5% -10%, #e4ecff 0%, transparent 70%),
-    radial-gradient(1000px 620px at 100% 0%, #eef8ff 0%, transparent 70%),
-    var(--bg-main);
-  color: var(--text-primary);
-}
-
-.page {
-  max-width: 1360px;
-  padding: 20px;
-}
-
-h1 {
-  margin: 10px 0 14px;
-  font-size: clamp(1.55rem, 2.5vw, 2.2rem);
-  line-height: 1.2;
-}
-
-h2 {
-  margin: 0 0 14px;
-  font-size: clamp(1.1rem, 1.6vw, 1.4rem);
-  line-height: 1.25;
-}
-
-h3 {
-  margin: 0 0 10px;
-  font-size: 1rem;
-}
-
 .hero {
   border: 1px solid #1f3c74;
   background:
@@ -715,27 +684,8 @@ h3 {
   color: #fff;
 }
 
-.hero-copy {
-  flex: 1 1 280px;
-  min-width: 0;
-}
-
 .hero-user {
   flex: 0 0 auto;
-}
-
-.hero .hero-copy h1 {
-  margin: 2px 0 6px;
-  font-size: clamp(1.12rem, 2.1vw, 1.5rem);
-  line-height: 1.2;
-  font-weight: 800;
-}
-
-.hero .subtitle {
-  font-size: 12px;
-  line-height: 1.4;
-  margin: 0;
-  max-width: 62ch;
 }
 
 .hero .user-row {
@@ -750,10 +700,6 @@ h3 {
   .hero .user-row {
     flex-wrap: wrap;
   }
-}
-
-.subtitle {
-  color: #d9e6ff;
 }
 
 .board,

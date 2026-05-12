@@ -1,4 +1,4 @@
-# Otgruzka Tovara / Fibercell Manufacturing MVP
+# Fibercell Manufacturing OS / MVP / CRM
 
 MVP для управления производственной цепочкой по пропиточной линии:
 
