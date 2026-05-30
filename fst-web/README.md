@@ -6,9 +6,9 @@
 
 ## Запуск локально
 
-1. Создайте проект [Firebase](https://console.firebase.google.com/) с ID `fst-uchet` (или свой).
-2. Включите **Authentication → Email/Password** и **Firestore**.
-3. Скопируйте ключи в `.env` из `.env.example`.
+1. Firebase-проект **`fbeda-5c061`** (приложение `fibercell`) — уже настроен.
+2. **Authentication → Email/Password** и **Firestore** включены.
+3. Для локального запуска скопируйте `.env.example` → `.env` (или используйте `.env.production`).
 4. Из корня репозитория:
 
 ```bash
@@ -51,6 +51,7 @@ firebase deploy
 
 ## Аккаунт
 
-Рекомендуемый владелец: `nikegeorgian@gmail.com` — добавьте как Owner в Firebase / Vercel / GitHub.
+Владелец: `nikegeorgian@gmail.com`
 
-Первый пользователь регистрируется на экране входа FST.
+На экране входа FST — **Войти** или **Создать аккаунт** (email + пароль от 6 символов).
+Данные сохраняются в Firestore (`f
