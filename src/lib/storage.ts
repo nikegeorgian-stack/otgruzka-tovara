@@ -301,6 +301,12 @@ export function loadStore(): LoadStoreResult {
   return { store: createDefaultStore(), warning: 'fresh_start' }
 }
 
+/** Разбор JSON/store payload (импорт, облако). */
+export function parseStorePayload(parsed: unknown): AppStore | null {
+  const migrated = migrateFromRaw(parsed)
+  return migrated ? purgeExpiredTrash(migrated) : null
+}
+
 /** @deprecated use loadStore() */
 export function loadStoreLegacy(): AppStore {
   return loadStore().store

@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFstAuth } from '@/context/FstAuthContext'
-import { ensureCloudStore, saveCloudStore } from '@/lib/cloud/firestoreSync'
+import {
+  cloudErrorMessage,
+  ensureCloudStore,
+  saveCloudStore,
+} from '@/lib/cloud/firestoreSync'
 import type { FstCloudSyncProps } from './fstCloudTypes'
 
 const SAVE_DEBOUNCE_MS = 1200
@@ -9,8 +13,14 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
   const { user, configured } = useFstAuth()
   const [cloudReady, setCloudReady] = useState(!configured)
   const [cloudError, setCloudError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipSave = useRef(true)
+
+  const retryLoad = useCallback(() => {
+    setCloudError(null)
+    setReloadKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     if (!configured || !user) {
@@ -29,11 +39,12 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
         replaceStore(data)
         skipSave.current = false
         setCloudReady(true)
-      } catch {
+      } catch (err) {
+        console.error('FST cloud load failed', err)
         if (!cancelled) {
-          setCloudError('Не удалось загрузить данные из облака.')
+          setCloudError(cloudErrorMessage(err, 'Не удалось загрузить данные из облака.'))
           setCloudReady(true)
-          skipSave.current = false
+          skipSave.current = true
         }
       }
     })()
@@ -41,7 +52,7 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
     return () => {
       cancelled = true
     }
-  }, [configured, user, replaceStore])
+  }, [configured, user, replaceStore, reloadKey])
 
   useEffect(() => {
     if (!configured || !user || !cloudReady || skipSave.current) return
@@ -50,15 +61,7 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
     saveTimer.current = setTimeout(() => {
       void saveCloudStore(user.uid, store).catch((err) => {
         console.error('FST cloud save failed', err)
-        const code =
-          err && typeof err === 'object' && 'code' in err ? String((err as { code: string }).code) : ''
-        if (code.includes('permission-denied')) {
-          setCloudError('Нет доступа к облаку. Выйдите и войдите снова.')
-        } else if (code.includes('resource-exhausted') || code.includes('invalid-argument')) {
-          setCloudError('Данные слишком большие для облака (лимит Firestore 1 MB).')
-        } else {
-          setCloudError('Ошибка сохранения в облако.')
-        }
+        setCloudError(cloudErrorMessage(err, 'Ошибка сохранения в облако.'))
       })
     }, SAVE_DEBOUNCE_MS)
 
@@ -78,7 +81,14 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
   if (cloudError) {
     return (
       <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
-        {cloudError}
+        <p>{cloudError}</p>
+        <button
+          type="button"
+          className="mt-2 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+          onClick={retryLoad}
+        >
+          Повторить
+        </button>
       </div>
     )
   }

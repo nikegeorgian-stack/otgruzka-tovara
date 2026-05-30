@@ -2,14 +2,15 @@ import type { AppStore, MonthSheet, TrashEmployee, TrashMonth } from './types'
 import { TRASH_RETENTION_DAYS } from './types'
 
 export function purgeExpiredTrash(store: AppStore): AppStore {
+  const trash = store.trash ?? { employees: [], months: [] }
   const cutoff = Date.now() - TRASH_RETENTION_DAYS * 86400000
   return {
     ...store,
     trash: {
-      employees: store.trash.employees.filter(
+      employees: (trash.employees ?? []).filter(
         (t) => new Date(t.deletedAt).getTime() > cutoff,
       ),
-      months: store.trash.months.filter(
+      months: (trash.months ?? []).filter(
         (t) => new Date(t.deletedAt).getTime() > cutoff,
       ),
     },
