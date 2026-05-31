@@ -1,8 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // FST — табель и склад (только свой документ)
     match /fstStores/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // FBeda — заказы обедов (fibercell / eda-fibersell)
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    match /config/{docId} {
+      allow read, write: if true;
     }
   }
 }
