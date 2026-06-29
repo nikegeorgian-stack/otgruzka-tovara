@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ka">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CEC — გადამისამართება</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        background: #f5f5f4;
+        color: #44403c;
+      }
+      .box {
+        text-align: center;
+        padding: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <p>გადამისამართება ცესკოს საიტზე…</p>
+      <p style="font-size: 0.85rem; opacity: 0.8">Redirecting to CEC voter portal…</p>
+    </div>
+    <script>
+      ;(function () {
+        var q = new URLSearchParams(location.search)
+        var pn = q.get('pn') || ''
+        var sn = q.get('sn') || ''
+
+        if (!pn && !sn) {
+          location.replace('https://ems-voters.cec.gov.ge/')
+          return
+        }
+
+        var params = new URLSearchParams()
+        if (pn) params.set('personalNumber', pn)
+        if (sn) params.set('surname', sn)
+
+        var query = params.toString()
+        location.replace('https://ems-voters.cec.gov.ge/?' + query)
+      })()
+    </script>
+  </body>
+</html>

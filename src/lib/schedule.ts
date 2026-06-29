@@ -57,6 +57,13 @@ export function autoCodeForDay(
     const mod = ((daysBetween(start, current) % 4) + 4) % 4
     return mod < 2 ? workCode2x2(shiftMode) : 'В'
   }
+  if (schedule === '1/1 11ч') {
+    if (!cycleStart) return ''
+    const start = new Date(cycleStart + 'T12:00:00')
+    const current = new Date(year, month - 1, day)
+    const mod = ((daysBetween(start, current) % 2) + 2) % 2
+    return mod === 0 ? workCode2x2(shiftMode) : 'В'
+  }
   return ''
 }
 

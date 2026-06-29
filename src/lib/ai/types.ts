@@ -1,6 +1,6 @@
 import type { ViewId } from '@/lib/types'
 
-export const TIMESHEET_CODES = ['8', '11', 'Н', '22', 'В', 'ОТ', 'Б', 'X', 'ПР'] as const
+export const TIMESHEET_CODES = ['8', '11', 'Н', '22', 'В', 'ОТ', 'ОО', 'Б', 'X', 'ПР'] as const
 
 export type TimesheetCode = (typeof TIMESHEET_CODES)[number]
 export type TimesheetTarget = 'plan' | 'fact'
@@ -91,7 +91,7 @@ export type AiSettingsResolved = {
 
 const codeSchema = {
   type: 'string',
-  enum: ['8', '11', 'Н', '22', 'В', 'ОТ', 'Б', 'X', 'ПР'],
+  enum: ['8', '11', 'Н', '22', 'В', 'ОТ', 'ОО', 'Б', 'X', 'ПР'],
   description: 'Код табеля',
 }
 
@@ -112,7 +112,18 @@ export const AI_TOOL_DEFINITIONS = [
         properties: {
           view: {
             type: 'string',
-            enum: ['month', 'employees', 'warehouse', 'summary', 'settings', 'codes', 'pay'],
+            enum: [
+              'month',
+              'directories',
+              'employees',
+              'warehouse',
+              'summary',
+              'settings',
+              'codes',
+              'pay',
+              'hr',
+              'production',
+            ],
           },
         },
         required: ['view'],
@@ -279,7 +290,7 @@ export const AI_TOOL_DEFINITIONS = [
     function: {
       name: 'change_schedule_from_day',
       description:
-        'Изменить график с дня: schedule 5/2 8ч или 2/2 11ч; либо pattern same_code с code для проставления кодов по дням',
+        'Изменить график с дня: schedule 5/2 8ч, 2/2 11ч или 1/1 11ч; либо pattern same_code с code для проставления кодов по дням',
       parameters: {
         type: 'object',
         properties: {
@@ -288,7 +299,7 @@ export const AI_TOOL_DEFINITIONS = [
           fromDay: { type: 'integer' },
           toDay: { type: 'integer' },
           target: targetSchema,
-          schedule: { type: 'string', enum: ['5/2 8ч', '2/2 11ч'] },
+          schedule: { type: 'string', enum: ['5/2 8ч', '2/2 11ч', '1/1 11ч'] },
           pattern: { type: 'string', enum: ['same_code'] },
           code: codeSchema,
         },
@@ -334,7 +345,7 @@ export const AI_SYSTEM_PROMPT = `Ты — ИИ-помощник FiberCell «Та
 
 Правила:
 - Факты только через tools. Не выдумывай остатки и табель.
-- Коды: 8, 11, Н (ночная/ночь), 22, В (выходной), ОТ (отпуск), Б (больничный), X, ПР (прогул).
+- Коды: 8, 11, Н (ночная/ночь), 22, В (выходной), ОТ (оплачиваемый отпуск), ОО (неоплачиваемый отпуск), Б (больничный), X, ПР (прогул).
 - «в факте» = target fact, «в плане» = target plan.
 - Если день не указан — уточни. Месяц — из get_app_summary или текущий.
 - Несколько похожих сотрудников — уточни через search_employees.

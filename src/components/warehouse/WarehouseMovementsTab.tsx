@@ -3,6 +3,8 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { WarehouseDocumentEditor } from '@/components/warehouse/WarehouseDocumentEditor'
 import { NomenclaturePicker } from '@/components/warehouse/NomenclaturePicker'
 import { useI18n } from '@/context/I18nContext'
+import { useConfirm } from '@/context/ConfirmContext'
+import { CloseIcon } from '@/components/ui/icons'
 import { formatQty } from '@/lib/warehouse/stock'
 import type { ItemBalance, StockMovementType } from '@/lib/warehouse/types'
 import type { WarehousePageProps } from './warehouseTypes'
@@ -12,10 +14,18 @@ type Props = Pick<
   | 'warehouse'
   | 'brigades'
   | 'onPostDocument'
+  | 'onPostTransfer'
   | 'onMergeInvoiceRegistry'
   | 'onAddMovement'
   | 'onDeleteMovement'
   | 'printMeta'
+  | 'allowNegativeStock'
+  | 'counterparties'
+  | 'onUpsertCounterparty'
+  | 'onOpenCounterparties'
+  | 'productionRequests'
+  | 'keeperId'
+  | 'keeperName'
 > & {
   warehouseId: string
   categoryNames: Map<string, string>
@@ -41,7 +51,7 @@ function MovementTypeBadge({ type }: { type: StockMovementType }) {
     inventory: t('warehouse.inventoryShort'),
   }
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${styles[type] ?? ''}`}>
+    <span className={`rounded-sm px-2 py-0.5 text-[10px] font-bold uppercase ${styles[type] ?? ''}`}>
       {labels[type] ?? type}
     </span>
   )
@@ -54,12 +64,21 @@ export function WarehouseMovementsTab({
   categoryNames,
   balances,
   printMeta,
+  allowNegativeStock = false,
+  counterparties,
+  onUpsertCounterparty,
+  onOpenCounterparties,
+  productionRequests,
+  keeperId,
+  keeperName,
   onPostDocument,
+  onPostTransfer,
   onMergeInvoiceRegistry,
   onAddMovement,
   onDeleteMovement,
 }: Props) {
   const { t } = useI18n()
+  const { confirm } = useConfirm()
   const whId = warehouseId || warehouse.locations[0]?.id || ''
   const [mode, setMode] = useState<'document' | 'other'>('document')
 
@@ -112,10 +131,10 @@ export function WarehouseMovementsTab({
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_minmax(18rem,24rem)]">
       <div className="space-y-4 min-w-0">
-        <div className="flex rounded-lg border border-grid bg-white p-1 shadow-sm w-fit">
+        <div className="flex rounded-sm border border-grid bg-white p-1 shadow-sm w-fit">
           <button
             type="button"
-            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+            className={`rounded-sm px-4 py-2 text-sm font-semibold ${
               mode === 'document' ? 'bg-teal-700 text-white' : 'text-stone-600 hover:bg-stone-50'
             }`}
             onClick={() => setMode('document')}
@@ -124,7 +143,7 @@ export function WarehouseMovementsTab({
           </button>
           <button
             type="button"
-            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+            className={`rounded-sm px-4 py-2 text-sm font-semibold ${
               mode === 'other' ? 'bg-teal-700 text-white' : 'text-stone-600 hover:bg-stone-50'
             }`}
             onClick={() => setMode('other')}
@@ -142,13 +161,21 @@ export function WarehouseMovementsTab({
             warehouseId={whId}
             variant="page"
             printMeta={printMeta}
+            allowNegativeStock={allowNegativeStock}
+            counterparties={counterparties}
+            onUpsertCounterparty={onUpsertCounterparty}
+            onOpenCounterparties={onOpenCounterparties}
+            productionRequests={productionRequests}
+            keeperId={keeperId}
+            keeperName={keeperName}
             onPost={onPostDocument}
+            onPostTransfer={onPostTransfer}
             onMergeInvoiceRegistry={onMergeInvoiceRegistry}
           />
         ) : (
           <form
             onSubmit={submitOther}
-            className="space-y-4 rounded-xl border border-grid bg-white p-5 shadow-sm"
+            className="space-y-4 rounded-sm border border-grid bg-white p-5 shadow-sm"
           >
             <h3 className="font-bold text-ink">{t('warehouse.doc.modeOther')}</h3>
             {formError && (
@@ -159,7 +186,7 @@ export function WarehouseMovementsTab({
                 <button
                   key={id}
                   type="button"
-                  className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  className={`rounded-sm border px-3 py-2 text-xs font-semibold ${
                     opType === id ? 'border-teal-700 bg-teal-700 text-white' : 'border-grid'
                   }`}
                   onClick={() => setOpType(id)}
@@ -190,7 +217,7 @@ export function WarehouseMovementsTab({
               <input
                 type="text"
                 inputMode="decimal"
-                className="mt-1 w-full rounded-lg border border-grid px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
               />
@@ -199,7 +226,7 @@ export function WarehouseMovementsTab({
               {t('warehouse.date')}
               <input
                 type="date"
-                className="mt-1 w-full rounded-lg border border-grid px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
@@ -207,14 +234,14 @@ export function WarehouseMovementsTab({
             <label className="block text-xs font-semibold text-stone-500">
               {t('warehouse.comment')}
               <input
-                className="mt-1 w-full rounded-lg border border-grid px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
             </label>
             <button
               type="submit"
-              className="w-full rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
+              className="w-full rounded-sm bg-teal-700 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
             >
               {t('warehouse.saveMovement')}
             </button>
@@ -222,7 +249,7 @@ export function WarehouseMovementsTab({
         )}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-grid bg-white shadow-sm xl:max-h-[calc(100vh-12rem)]">
+      <div className="overflow-hidden rounded-sm border border-grid bg-white shadow-sm xl:max-h-[calc(100vh-12rem)]">
         <div className="border-b border-grid px-4 py-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
           {t('warehouse.journal')}
         </div>
@@ -259,15 +286,28 @@ export function WarehouseMovementsTab({
                         {formatQty(Math.abs(m.quantity))}
                       </td>
                       <td className="px-1 py-2 text-right">
-                        <button
-                          type="button"
-                          className="text-xs text-red-600 hover:underline"
-                          onClick={() => {
-                            if (confirm(t('warehouse.confirmDeleteMovement'))) onDeleteMovement(m.id)
-                          }}
-                        >
-                          ×
-                        </button>
+                        {m.documentId ? (
+                          <span
+                            className="text-[10px] text-stone-400"
+                            title={t('warehouse.err.cannotDeleteLinkedMovement')}
+                          >
+                            {t('warehouse.linkedDocShort')}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={t('common.delete')}
+                            className="text-red-600 hover:text-red-700"
+                            onClick={async () => {
+                              if (!(await confirm({ message: t('warehouse.confirmDeleteMovement'), danger: true }))) return
+                              if (!onDeleteMovement(m.id)) {
+                                setFormError(t('warehouse.err.cannotDeleteLinkedMovement'))
+                              }
+                            }}
+                          >
+                            <CloseIcon size={14} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )

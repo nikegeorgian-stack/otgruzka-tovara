@@ -1,8 +1,8 @@
-import type { AppStore, MonthSheet, TrashEmployee, TrashMonth } from './types'
+import type { AppStore, Candidate, MonthSheet, TrashCandidate, TrashEmployee, TrashMonth } from './types'
 import { TRASH_RETENTION_DAYS } from './types'
 
 export function purgeExpiredTrash(store: AppStore): AppStore {
-  const trash = store.trash ?? { employees: [], months: [] }
+  const trash = store.trash ?? { employees: [], months: [], candidates: [] }
   const cutoff = Date.now() - TRASH_RETENTION_DAYS * 86400000
   return {
     ...store,
@@ -11,6 +11,9 @@ export function purgeExpiredTrash(store: AppStore): AppStore {
         (t) => new Date(t.deletedAt).getTime() > cutoff,
       ),
       months: (trash.months ?? []).filter(
+        (t) => new Date(t.deletedAt).getTime() > cutoff,
+      ),
+      candidates: (trash.candidates ?? []).filter(
         (t) => new Date(t.deletedAt).getTime() > cutoff,
       ),
     },
@@ -102,6 +105,48 @@ export function permanentlyDeleteTrashMonth(store: AppStore, deletedAt: string):
   })
 }
 
+export function trashCandidate(store: AppStore, id: string): AppStore {
+  const candidate = (store.candidates ?? []).find((c) => c.id === id)
+  if (!candidate) return store
+  const item: TrashCandidate = { candidate, deletedAt: new Date().toISOString() }
+  return purgeExpiredTrash({
+    ...store,
+    candidates: (store.candidates ?? []).filter((c) => c.id !== id),
+    trash: {
+      ...store.trash,
+      candidates: [item, ...(store.trash.candidates ?? [])],
+    },
+  })
+}
+
+export function restoreTrashCandidate(store: AppStore, deletedAt: string): AppStore {
+  const item = (store.trash.candidates ?? []).find((t) => t.deletedAt === deletedAt)
+  if (!item) return store
+  return purgeExpiredTrash({
+    ...store,
+    candidates: [...(store.candidates ?? []), item.candidate as Candidate],
+    trash: {
+      ...store.trash,
+      candidates: (store.trash.candidates ?? []).filter((t) => t.deletedAt !== deletedAt),
+    },
+  })
+}
+
+export function permanentlyDeleteTrashCandidate(store: AppStore, deletedAt: string): AppStore {
+  return purgeExpiredTrash({
+    ...store,
+    trash: {
+      ...store.trash,
+      candidates: (store.trash.candidates ?? []).filter((t) => t.deletedAt !== deletedAt),
+    },
+  })
+}
+
 export function normalizeMonthSheet(sheet: MonthSheet): MonthSheet {
-  return { ...sheet, comments: sheet.comments ?? {} }
+  return {
+    ...sheet,
+    comments: sheet.comments ?? {},
+    substitutions: sheet.substitutions ?? {},
+    factExtraHours: sheet.factExtraHours ?? {},
+  }
 }

@@ -28,10 +28,28 @@ export function applyHolidayVForAll(sheet: MonthSheet): MonthSheet {
   return next
 }
 
-/** Скопировать план → факт для сотрудников 5/2 (сброс ручных правок факта по строке) */
-export function copyPlanToFactFor52(
+export type CopyPlanToFactScope = 'all' | '52' | '22' | '11' | 'brigade'
+
+function rowMatchesCopyScope(
+  row: MonthSheet['rows'][number],
+  emp: AppStore['employees'][number] | undefined,
+  scope: CopyPlanToFactScope,
+  brigade?: string,
+): boolean {
+  if (!row.employeeId || !emp) return false
+  if (scope === '52') return emp.schedule === '5/2 8ч'
+  if (scope === '22') return emp.schedule === '2/2 11ч'
+  if (scope === '11') return emp.schedule === '1/1 11ч'
+  if (scope === 'brigade') return !!brigade && row.brigade === brigade
+  return true
+}
+
+/** Скопировать план → факт (сброс ручных правок факта по затронутым строкам) */
+export function copyPlanToFact(
   sheet: MonthSheet,
   employees: AppStore['employees'],
+  scope: CopyPlanToFactScope,
+  brigade?: string,
 ): MonthSheet {
   let next: MonthSheet = {
     ...sheet,
@@ -40,15 +58,22 @@ export function copyPlanToFactFor52(
   }
 
   for (const row of sheet.rows) {
-    if (!row.employeeId) continue
     const emp = employees.find((e) => e.id === row.employeeId)
-    if (!emp || emp.schedule !== '5/2 8ч') continue
+    if (!rowMatchesCopyScope(row, emp, scope, brigade)) continue
 
     const planRow = sheet.plan[row.id] ?? {}
     next.fact[row.id] = { ...planRow }
     next.factOverrides = next.factOverrides.filter((k) => !k.startsWith(`${row.id}|`))
   }
   return next
+}
+
+/** @deprecated use copyPlanToFact(..., '52') */
+export function copyPlanToFactFor52(
+  sheet: MonthSheet,
+  employees: AppStore['employees'],
+): MonthSheet {
+  return copyPlanToFact(sheet, employees, '52')
 }
 
 export function setCellComment(

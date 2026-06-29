@@ -1,0 +1,4611 @@
+{
+  "recipes": [
+    {
+      "code": "РП-75/2",
+      "name": "Рецептура пропиточного состава Celloplex 75/2 - 07.04.2026",
+      "sheet": "75",
+      "category": "75",
+      "variantCode": "75/2",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Расход:    г\\м2\nрасчетный сухой остаток: 45,4%",
+      "components": [
+        {
+          "name": "Стирол-акриловая дисперсия COLORCOAT AG-80 (Турция)",
+          "weightKg": 541.0,
+          "batchKg": 676.25,
+          "sharePct": 67.625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 743.875,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 40.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 1.25,
+          "costPerBatch": 62.5,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.0,
+          "sharePct": 12.5,
+          "pricePerKg": 0.2,
+          "costPerBatch": 25.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.85,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.48,
+          "costPerBatch": 4.35,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 116.0,
+          "batchKg": 145.0,
+          "sharePct": 14.5,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-75/1",
+      "name": "Рецептура пропиточного состава 75 ОСНОВНАЯ 75/1 - 15.01.2026",
+      "sheet": "75",
+      "category": "75",
+      "variantCode": "75/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Расход: 74 г\\м2\nрасчетный сухой остаток: 47,11%\nАктуальная цена на 05.02.2026",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 523.0,
+          "batchKg": 653.75,
+          "sharePct": 65.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 719.125,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 58.0,
+          "batchKg": 72.5,
+          "sharePct": 7.25,
+          "pricePerKg": 1.25,
+          "costPerBatch": 90.625,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.48,
+          "costPerBatch": 4.35,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 141.5,
+          "batchKg": 176.875,
+          "sharePct": 17.6875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130-90/1",
+      "name": "Рецептура пропиточного состава 130 БАЗОВАЯ 130-90/1 - 17.11.2025",
+      "sheet": "130",
+      "category": "130",
+      "variantCode": "130-90/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Базовая рецептура 130 пропитки на суровье 90 г/м2\n\nРасчетный сухой остаток - 57,2%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 428.0,
+          "batchKg": 535.0668834,
+          "sharePct": 53.50668834,
+          "pricePerKg": 1.1,
+          "costPerBatch": 588.5735717,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 87.0,
+          "batchKg": 108.7635954,
+          "sharePct": 10.87635954,
+          "pricePerKg": 1.1,
+          "costPerBatch": 119.639955,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 200.0,
+          "batchKg": 250.0312539,
+          "sharePct": 25.00312539,
+          "pricePerKg": 0.2,
+          "costPerBatch": 50.00625078,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 4.0,
+          "batchKg": 5.000625078,
+          "sharePct": 0.5000625078,
+          "pricePerKg": 1.1,
+          "costPerBatch": 5.500687586,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125140643,
+          "sharePct": 0.1125140643,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.613076635,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 100.0125016,
+          "sharePct": 10.00125016,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130-90/2",
+      "name": "Рецептура пропиточного состава 130 130-90/2 - 25.11.2025",
+      "sheet": "130",
+      "category": "130",
+      "variantCode": "130-90/2",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшенное содержание 145-50 дисперсии из-за ее небольших остатков \n\nРасчетный сухой остаток - 55,7%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.5765721,
+          "sharePct": 61.25765721,
+          "pricePerKg": 1.1,
+          "costPerBatch": 673.8342293,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.50781348,
+          "sharePct": 6.250781348,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.75859482,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.7773472,
+          "sharePct": 21.87773472,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.75546943,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.375546943,
+          "sharePct": 0.4375546943,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.813101638,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25015627,
+          "sharePct": 0.125015627,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125640705,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 100.0125016,
+          "sharePct": 10.00125016,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130-90Ж/1",
+      "name": "Рецептура пропиточного состава 130 Цвет желтый 130-90Ж/1 - 23.05.2024",
+      "sheet": "130",
+      "category": "130",
+      "variantCode": "130-90Ж/1",
+      "colorVariant": "yellow",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Желтая пропитка Уменьшенное содержание 145-50 дисперсии из-за ее небольших остатков",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 489.0,
+          "batchKg": 611.4793047,
+          "sharePct": 61.14793047,
+          "pricePerKg": 1.1,
+          "costPerBatch": 672.6272352,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.52344629,
+          "sharePct": 6.252344629,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.77579092,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.832062,
+          "sharePct": 21.8832062,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.7664124,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.37664124,
+          "sharePct": 0.437664124,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.814305365,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Золотисто-желтый",
+          "weightKg": 1.3,
+          "batchKg": 1.625609604,
+          "sharePct": 0.1625609604,
+          "pricePerKg": 8.0,
+          "costPerBatch": 13.00487683,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125422033,
+          "sharePct": 0.1125422033,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.614230336,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 100.0375141,
+          "sharePct": 10.00375141,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130-004",
+      "name": "Рецептура пропиточного состава тест 1 130 КФС 5% - 28.11.2025",
+      "sheet": "130",
+      "category": "130",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Тестовая рецептура 130 пропитки на суровье 90 г/м2\n+5% карбамидоформальдегидная смола (КФ МХ) от суммы дисперсий  + сниженное содержаниие загустителя\nИзменяла относительно базовой 130 90\\2",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.5,
+          "sharePct": 61.24234375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 673.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 23.0,
+          "batchKg": 28.75,
+          "sharePct": 2.874640625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 31.625,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 27.0,
+          "batchKg": 33.75,
+          "sharePct": 3.374578125,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.87226563,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.375,
+          "sharePct": 0.4374453125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.8125,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.5,
+          "batchKg": 0.625,
+          "sharePct": 0.0624921875,
+          "pricePerKg": 4.1,
+          "costPerBatch": 2.5625,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 81.0,
+          "batchKg": 101.25,
+          "sharePct": 10.12373438,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130-005",
+      "name": "Рецептура пропиточного состава тест 2 130 КФС 10% - 28.11.2025",
+      "sheet": "130",
+      "category": "130",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Тестовая рецептура 130 пропитки на суровье 90 г/м2\n+10% карбамидоформальдегидная смола (КФ МХ) от суммы дисперсий  + сниженное содержаниие загустителя\nИзменяла относительно базовой 130 90\\2",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 486.0,
+          "batchKg": 607.2722729,
+          "sharePct": 60.72715328,
+          "pricePerKg": 1.1,
+          "costPerBatch": 667.9995002,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 0.0,
+          "batchKg": 0.0,
+          "sharePct": 0.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 67.47469699,
+          "sharePct": 6.747461475,
+          "pricePerKg": 1.25,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.6679995,
+          "sharePct": 21.8667733,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.7335999,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.37335999,
+          "sharePct": 0.437335466,
+          "pricePerKg": 1.54,
+          "costPerBatch": 6.734974385,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.5,
+          "batchKg": 0.6247657129,
+          "sharePct": 0.06247649514,
+          "pricePerKg": 3.48,
+          "costPerBatch": 2.174184681,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 99.96251406,
+          "sharePct": 9.996239223,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Пигментная паста Лаканил Золотисто-желтый",
+          "weightKg": 1.3,
+          "batchKg": 1.625609604,
+          "sharePct": 0.1625607622,
+          "pricePerKg": 8.67,
+          "costPerBatch": 14.09403526,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/2В",
+      "name": "Рецептура пропиточного состава 145 145/2В - 02.04.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/2В",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Рецептура на одной жесткой дисперсии с пластификатором. Используется в отсутствие 106 мягкой дисперсии\n увеличили кальцит из-за тяна \nРасчетный сухой остаток 47 %",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 475.0,
+          "batchKg": 586.4197531,
+          "sharePct": 58.64197531,
+          "pricePerKg": 1.1,
+          "costPerBatch": 645.0617284,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 17.0,
+          "batchKg": 20.98765432,
+          "sharePct": 2.098765432,
+          "pricePerKg": 6.1,
+          "costPerBatch": 128.0246914,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 110.0,
+          "batchKg": 135.8024691,
+          "sharePct": 13.58024691,
+          "pricePerKg": 0.2,
+          "costPerBatch": 27.16049383,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.469135802,
+          "sharePct": 0.2469135802,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.802469136,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 205.0,
+          "batchKg": 253.0864198,
+          "sharePct": 25.30864198,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.234567901,
+          "sharePct": 0.1234567901,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.444444444,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/2A",
+      "name": "Рецептура пропиточного состава 145 145/2A - 02.04.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/2A",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 475.0,
+          "batchKg": 593.2679698,
+          "sharePct": 59.32679698,
+          "pricePerKg": 1.1,
+          "costPerBatch": 652.5947668,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 17.0,
+          "batchKg": 21.23274839,
+          "sharePct": 2.123274839,
+          "pricePerKg": 6.1,
+          "costPerBatch": 129.5197652,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 125.0,
+          "batchKg": 156.1231499,
+          "sharePct": 15.61231499,
+          "pricePerKg": 0.2,
+          "costPerBatch": 31.22462999,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.5,
+          "batchKg": 3.122462999,
+          "sharePct": 0.3122462999,
+          "pricePerKg": 1.54,
+          "costPerBatch": 4.808593018,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 180.0,
+          "batchKg": 224.8173359,
+          "sharePct": 22.48173359,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.15,
+          "batchKg": 1.436332979,
+          "sharePct": 0.1436332979,
+          "pricePerKg": 3.6,
+          "costPerBatch": 5.170798726,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/2",
+      "name": "Рецептура пропиточного состава 145 145/2 C - 28.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/2",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Рецептура на одной жесткой дисперсии с пластификатором. Используется в отсутствие 106 мягкой дисперсии\n+ сток 3,7 СО, -7,4 кг из 106\nРасчетный сухой остаток 44,6%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 468.0,
+          "batchKg": 590.1639344,
+          "sharePct": 59.01639344,
+          "pricePerKg": 1.1,
+          "costPerBatch": 649.1803279,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 17.0,
+          "batchKg": 21.43757881,
+          "sharePct": 2.143757881,
+          "pricePerKg": 6.1,
+          "costPerBatch": 130.7692308,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 126.1034048,
+          "sharePct": 12.61034048,
+          "pricePerKg": 0.2,
+          "costPerBatch": 25.22068096,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.522068096,
+          "sharePct": 0.2522068096,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.883984868,
+          "isWater": false
+        },
+        {
+          "name": "Сточные воды",
+          "weightKg": 205.0,
+          "batchKg": 258.5119798,
+          "sharePct": 25.85119798,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.261034048,
+          "sharePct": 0.1261034048,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.539722573,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/13",
+      "name": "Рецептура пропиточного состава 145 145/13 С - 28.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/13",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Оптимизация 160/10, экономия дисперсий \n+ сток 3,7 СО, -7,4 кг из 106",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 388.0,
+          "batchKg": 489.2812106,
+          "sharePct": 48.92812106,
+          "pricePerKg": 1.1,
+          "costPerBatch": 538.2093317,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 150.0,
+          "batchKg": 189.1551072,
+          "sharePct": 18.91551072,
+          "pricePerKg": 1.1,
+          "costPerBatch": 208.0706179,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 94.57755359,
+          "sharePct": 9.457755359,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.91551072,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex",
+          "weightKg": 1.5,
+          "batchKg": 1.891551072,
+          "sharePct": 0.1891551072,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.912988651,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.261034048,
+          "sharePct": 0.1261034048,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.539722573,
+          "isWater": false
+        },
+        {
+          "name": "Сточные воды",
+          "weightKg": 177.5,
+          "batchKg": 223.8335435,
+          "sharePct": 22.38335435,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 0.0,
+          "batchKg": 0.0,
+          "sharePct": 0.0,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/13",
+      "name": "Рецептура пропиточного состава 145 145/13 - 23.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/13",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Оптимизация 160/10, экономия дисперсий",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 395.0,
+          "batchKg": 493.75,
+          "sharePct": 49.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 543.125,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 206.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 177.5,
+          "batchKg": 221.875,
+          "sharePct": 22.1875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/12",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/12- 07.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/12",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "106 Дисперсия приход 0326.Уменьшили количество кальцита из за большой массы рулонов",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 415.0,
+          "batchKg": 518.75,
+          "sharePct": 51.875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 570.625,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 220.0,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 65.0,
+          "batchKg": 81.25,
+          "sharePct": 8.125,
+          "pricePerKg": 0.2,
+          "costPerBatch": 16.25,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 157.5,
+          "batchKg": 196.875,
+          "sharePct": 19.6875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/11",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/11- 05.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/11",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "106 Дисперсия приход 0326",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 415.0,
+          "batchKg": 518.75,
+          "sharePct": 51.875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 570.625,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 220.0,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 147.5,
+          "batchKg": 184.375,
+          "sharePct": 18.4375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/10",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/10- 28.02.2026 НЕ ИСПОЛЬЗОВАТЬ",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/10",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшили количество 106-50, из за маленького остатка в наличии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 338.0,
+          "batchKg": 422.5,
+          "sharePct": 42.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 464.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 155.0,
+          "batchKg": 193.75,
+          "sharePct": 19.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 213.125,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 229.5,
+          "batchKg": 286.875,
+          "sharePct": 28.6875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/9",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/9- 27.02.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/9",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшили количество 106-50, из за маленького остатка в наличии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 405.0,
+          "batchKg": 506.25,
+          "sharePct": 50.625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 556.875,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 155.0,
+          "batchKg": 193.75,
+          "sharePct": 19.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 213.125,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 162.5,
+          "batchKg": 203.125,
+          "sharePct": 20.3125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/8",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/8- 26.02.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/8",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 538.0,
+          "batchKg": 672.5,
+          "sharePct": 67.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 739.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 30.0,
+          "batchKg": 37.5,
+          "sharePct": 3.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 41.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 75.0,
+          "batchKg": 93.75,
+          "sharePct": 9.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.875,
+          "sharePct": 0.1875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.8875,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 154.5,
+          "batchKg": 193.125,
+          "sharePct": 19.3125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/7",
+      "name": "Рецептура пропиточного состава 145 145/7- 24.02",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/7",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Экономия на 145 дисперсии из-за малого количества на складе",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 514.0,
+          "batchKg": 642.9018136,
+          "sharePct": 64.29018136,
+          "pricePerKg": 1.1,
+          "costPerBatch": 707.191995,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 30.0,
+          "batchKg": 37.52345216,
+          "sharePct": 3.752345216,
+          "pricePerKg": 1.1,
+          "costPerBatch": 41.27579737,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 75.0,
+          "batchKg": 93.80863039,
+          "sharePct": 9.380863039,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.76172608,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 1.5,
+          "batchKg": 1.876172608,
+          "sharePct": 0.1876172608,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.889305816,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.250781739,
+          "sharePct": 0.1250781739,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.502814259,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 98.0,
+          "batchKg": 100.0625391,
+          "sharePct": 10.00625391,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Пропитка ратла",
+          "weightKg": 80.0,
+          "batchKg": null,
+          "sharePct": null,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/6",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/6- 01.02.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/6",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 518.0,
+          "batchKg": 647.9049406,
+          "sharePct": 64.79049406,
+          "pricePerKg": 1.1,
+          "costPerBatch": 712.6954346,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.53908693,
+          "sharePct": 6.253908693,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.79299562,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 75.0,
+          "batchKg": 93.80863039,
+          "sharePct": 9.380863039,
+          "pricePerKg": 0.2,
+          "costPerBatch": 18.76172608,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.5,
+          "batchKg": 1.876172608,
+          "sharePct": 0.1876172608,
+          "pricePerKg": 1.54,
+          "costPerBatch": 2.889305816,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.250781739,
+          "sharePct": 0.1250781739,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.502814259,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 154.0,
+          "batchKg": 192.6203877,
+          "sharePct": 19.26203877,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/5",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/5 - 05.01.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/5",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 500.0,
+          "batchKg": 625.0781348,
+          "sharePct": 62.50781348,
+          "pricePerKg": 1.1,
+          "costPerBatch": 687.5859482,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 56.0,
+          "batchKg": 70.00875109,
+          "sharePct": 7.000875109,
+          "pricePerKg": 1.25,
+          "costPerBatch": 87.51093887,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.015627,
+          "sharePct": 12.5015627,
+          "pricePerKg": 0.24,
+          "costPerBatch": 30.00375047,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.500312539,
+          "sharePct": 0.2500312539,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.85048131,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25015627,
+          "sharePct": 0.125015627,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125640705,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 140.9,
+          "batchKg": 176.1470184,
+          "sharePct": 17.61470184,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/4",
+      "name": "Рецептура пропиточного состава 145 ОСНОВНАЯ 145/4 - 07.12.2025",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/4",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 506.0,
+          "batchKg": 632.5790724,
+          "sharePct": 63.25790724,
+          "pricePerKg": 1.1,
+          "costPerBatch": 695.8369796,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.50781348,
+          "sharePct": 6.250781348,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.75859482,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.015627,
+          "sharePct": 12.5015627,
+          "pricePerKg": 0.24,
+          "costPerBatch": 30.00375047,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.500312539,
+          "sharePct": 0.2500312539,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.85048131,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25015627,
+          "sharePct": 0.125015627,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125640705,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 140.9,
+          "batchKg": 176.1470184,
+          "sharePct": 17.61470184,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/3",
+      "name": "Рецептура БАЗОВАЯ пропиточного состава 145 145/3 - 06.11.2025",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/3",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 459.0,
+          "batchKg": 573.7715164,
+          "sharePct": 57.37715164,
+          "pricePerKg": 1.1,
+          "costPerBatch": 631.1486681,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 97.2,
+          "batchKg": 121.5045564,
+          "sharePct": 12.15045564,
+          "pricePerKg": 1.1,
+          "costPerBatch": 133.6550121,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.0046877,
+          "sharePct": 12.50046877,
+          "pricePerKg": 0.24,
+          "costPerBatch": 30.00112504,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.500093754,
+          "sharePct": 0.2500093754,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.85014438,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.87,
+          "batchKg": 1.087540783,
+          "sharePct": 0.1087540783,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.458917209,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 140.9,
+          "batchKg": 176.1316049,
+          "sharePct": 17.61316049,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/2",
+      "name": "Рецептура пропиточного состава 145 145/2 - 23.08.2024 UPD 28.03.2026",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/2",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Рецептура на одной жесткой дисперсии с пластификатором. Используется в отсутствие 106 мягкой дисперсии\n\nРасчетный сухой остаток - 43,3%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 475.0,
+          "batchKg": 593.75,
+          "sharePct": 59.375,
+          "pricePerKg": 0.78,
+          "costPerBatch": 463.125,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 17.0,
+          "batchKg": 21.25,
+          "sharePct": 2.125,
+          "pricePerKg": 6.1,
+          "costPerBatch": 129.625,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.0,
+          "sharePct": 12.5,
+          "pricePerKg": 0.2,
+          "costPerBatch": 25.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.85,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 205.0,
+          "batchKg": 256.25,
+          "sharePct": 25.625,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145/1",
+      "name": "Рецептура пропиточного состава 145 145/1 СУПЕР БАЗА ИСТОКИ",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": "145/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Стандартная рецептура на смеси мягкой и жесткой дисперсии без пластификатора",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 415.0,
+          "batchKg": 518.75,
+          "sharePct": 51.875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 570.625,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 220.0,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.0,
+          "sharePct": 12.5,
+          "pricePerKg": 0.2,
+          "costPerBatch": 25.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 2.75,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.6125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 122.1,
+          "batchKg": 152.625,
+          "sharePct": 15.2625,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145-018",
+      "name": "Рецептура пропиточного состава 145 оранжевый 145O/1 - 20.08.2024",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": null,
+      "colorVariant": "orange",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Заказ в Беларусь. Возможно, слишком красно-оранжевый",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 390.0,
+          "batchKg": 487.5,
+          "sharePct": 48.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 536.25,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 206.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 125.0,
+          "batchKg": 156.25,
+          "sharePct": 15.625,
+          "pricePerKg": 0.2,
+          "costPerBatch": 31.25,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.5,
+          "batchKg": 3.125,
+          "sharePct": 0.3125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 3.4375,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Аква оранжевый",
+          "weightKg": 3.45,
+          "batchKg": 4.3125,
+          "sharePct": 0.43125,
+          "pricePerKg": 11.53,
+          "costPerBatch": 49.723125,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Аква красный",
+          "weightKg": 0.45,
+          "batchKg": 0.5625,
+          "sharePct": 0.05625,
+          "pricePerKg": 13.49,
+          "costPerBatch": 7.588125,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.6125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 127.7,
+          "batchKg": 159.625,
+          "sharePct": 15.9625,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145-019",
+      "name": "Рецептура пропиточного состава 145 оранжевый 145O/2 - 12.03.2025",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": null,
+      "colorVariant": "orange",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 450.0,
+          "batchKg": 562.5,
+          "sharePct": 56.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 618.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 240.625,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 0.2,
+          "costPerBatch": 12.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 1.375,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Аква оранжевый",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 11.53,
+          "costPerBatch": 28.825,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 121.0,
+          "batchKg": 151.25,
+          "sharePct": 15.125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145-020",
+      "name": "Рецептура пропиточного состава 145 Ultra 145U/1 - 08.11.2024",
+      "sheet": "145",
+      "category": "145",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 511.1,
+          "batchKg": 320.0,
+          "sharePct": 63.8875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 352.0,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 197.0,
+          "batchKg": 122.8,
+          "sharePct": 24.625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 135.08,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 50.0,
+          "batchKg": 31.0,
+          "sharePct": 6.25,
+          "pricePerKg": 0.2,
+          "costPerBatch": 6.2,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 0.6,
+          "sharePct": 0.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 0.66,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 0.6,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 2.46,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 40.0,
+          "batchKg": 25.0,
+          "sharePct": 5.0,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145 Ультра-001",
+      "name": "Рецептура пропиточного состава 145 Ultra №1 145U/1 - 15.03.2025+22.05.2025",
+      "sheet": "145 Ультра",
+      "category": "145ultra",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Без воды сетка была липковатой, масса рулонов слегка выходила за верхний предел",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 544.0,
+          "batchKg": 408.0,
+          "sharePct": 68.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 448.8,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 210.0,
+          "batchKg": 157.5,
+          "sharePct": 26.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 173.25,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.7,
+          "batchKg": 0.525,
+          "sharePct": 0.0875,
+          "pricePerKg": 4.1,
+          "costPerBatch": 2.1525,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 45.3,
+          "batchKg": 33.975,
+          "sharePct": 5.6625,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-145 Ультра-002",
+      "name": "Рецептура пропиточного состава 145 Ultra №2 145U/2 - 09.12.2025",
+      "sheet": "145 Ультра",
+      "category": "145ultra",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "уменьшили содержание 145 дисперсии из-за малого количества",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 685.0,
+          "batchKg": 513.75,
+          "sharePct": 85.625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 565.125,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 69.0,
+          "batchKg": 51.75,
+          "sharePct": 8.625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 56.925,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.7,
+          "batchKg": 0.525,
+          "sharePct": 0.0875,
+          "pricePerKg": 4.1,
+          "costPerBatch": 2.1525,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 45.3,
+          "batchKg": 33.975,
+          "sharePct": 5.6625,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/1",
+      "name": "Рецептура пропиточного состава 160 БАЗОВАЯ №1 160/1 - 09.08.2024",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Первоначальная пропитка !Стандартная рецептура на смеси мягкой и жесткой дисперсии без пластификатора. Более жесткая пропитка",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 390.0,
+          "batchKg": 487.5,
+          "sharePct": 48.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 536.25,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 206.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 200.0,
+          "batchKg": 250.0,
+          "sharePct": 25.0,
+          "pricePerKg": 0.24,
+          "costPerBatch": 60.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 4.0,
+          "batchKg": 5.0,
+          "sharePct": 0.5,
+          "pricePerKg": 1.54,
+          "costPerBatch": 7.7,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.6125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 55.1,
+          "batchKg": 68.875,
+          "sharePct": 6.8875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/2",
+      "name": "Рецептура пропиточного состава 160 №2 160/2 - 23.08.2024",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/2",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Рецептура на одной жесткой дисперсии с пластификатором. Используется в отсутствие 106 мягкой дисперсии\n\nРасчетный сухой остаток - 57,5%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 520.0,
+          "batchKg": 650.0,
+          "sharePct": 65.0,
+          "pricePerKg": 0.78,
+          "costPerBatch": 507.0,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 19.0,
+          "batchKg": 23.75,
+          "sharePct": 2.375,
+          "pricePerKg": 6.1,
+          "costPerBatch": 144.875,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.2,
+          "costPerBatch": 37.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.54,
+          "costPerBatch": 5.775,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 107.0,
+          "batchKg": 133.75,
+          "sharePct": 13.375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/3",
+      "name": "Рецептура пропиточного состава 160 НОВАЯ БАЗОВАЯ 160/3 - 06.11.2025",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/3",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Измененные соотношения дисперсий, так как был очень большой диаметр рулонов. + больше воды+ постоянно верзняя граница массы + более мягкая пропитка",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 445.0,
+          "batchKg": 555.972014,
+          "sharePct": 55.5972014,
+          "pricePerKg": 1.1,
+          "costPerBatch": 611.5692154,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 100.0,
+          "batchKg": 124.9375312,
+          "sharePct": 12.49375312,
+          "pricePerKg": 1.1,
+          "costPerBatch": 137.4312844,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.6406797,
+          "sharePct": 21.86406797,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.72813593,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.372813593,
+          "sharePct": 0.4372813593,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.810094953,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.124437781,
+          "sharePct": 0.1124437781,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.610194903,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 76.0,
+          "batchKg": 94.95252374,
+          "sharePct": 9.495252374,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/4",
+      "name": "Рецептура пропиточного состава 160 160/4 - 18.12.2025",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/4",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Измененные соотношения дисперсий, так как был очень большой диаметр рулонов. с увеличенным кальцитом уменьшила 145",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 465.0,
+          "batchKg": 581.25,
+          "sharePct": 58.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 639.375,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.75,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 200.0,
+          "batchKg": 250.0,
+          "sharePct": 25.0,
+          "pricePerKg": 0.2,
+          "costPerBatch": 50.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 4.0,
+          "batchKg": 5.0,
+          "sharePct": 0.5,
+          "pricePerKg": 1.1,
+          "costPerBatch": 5.5,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 100.0,
+          "sharePct": 10.0,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/5",
+      "name": "Рецептура пропиточного состава 160 160/5 - 10.01.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/5",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшенный кальцит так как верхняя граница всегда идет по массе+ сниженная концентрация  145 дисперсии так как мало в наличии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.8830519,
+          "sharePct": 61.28830519,
+          "pricePerKg": 0.78,
+          "costPerBatch": 478.0487805,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.53908693,
+          "sharePct": 6.253908693,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.79299562,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.8868043,
+          "sharePct": 21.88868043,
+          "pricePerKg": 0.2,
+          "costPerBatch": 43.77736085,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.377736085,
+          "sharePct": 0.4377736085,
+          "pricePerKg": 1.54,
+          "costPerBatch": 6.741713571,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.250781739,
+          "sharePct": 0.1250781739,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.502814259,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 80.0,
+          "batchKg": 100.0625391,
+          "sharePct": 10.00625391,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/6",
+      "name": "Рецептура пропиточного состава 160 160/6 - 12.01.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/6",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "\"Измененная рецептура 160/5 пропитки на суровье 120 г/м2\n+10% карбамидоформальдегидная смола (КФ МХ) от суммы дисперсий .\nИспытания стабильности в щелочи идентичны без КФС,  можно использовать",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 486.0,
+          "batchKg": 607.5,
+          "sharePct": 60.75,
+          "pricePerKg": 0.78,
+          "costPerBatch": 473.85,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 67.5,
+          "sharePct": 6.75,
+          "pricePerKg": 1.25,
+          "costPerBatch": 84.375,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.12,
+          "costPerBatch": 22.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.125,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.5,
+          "sharePct": 13.25,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/6А",
+      "name": "Рецептура пропиточного состава 160 160/6А - 12.02.2026 + 10% КФС",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/6А",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "\"Измененная рецептура 160/5 пропитки на суровье 120 г/м2\n+10% карбамидоформальдегидная смола (КФ МХ) от суммы дисперсий .\nИспытания стабильности в щелочи идентичны без КФС,  можно использовать",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 486.0,
+          "batchKg": 607.5,
+          "sharePct": 60.75,
+          "pricePerKg": 0.78,
+          "costPerBatch": 473.85,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 67.5,
+          "sharePct": 6.75,
+          "pricePerKg": 1.25,
+          "costPerBatch": 84.375,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.12,
+          "costPerBatch": 22.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.125,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.5,
+          "sharePct": 13.25,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/6В",
+      "name": "Рецептура пропиточного состава 160 160/6В - 14.02.2026 + 10% КФС",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/6В",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Изменился производитель диспергатора!",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 486.0,
+          "batchKg": 607.5,
+          "sharePct": 60.75,
+          "pricePerKg": 0.78,
+          "costPerBatch": 473.85,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 67.5,
+          "sharePct": 6.75,
+          "pricePerKg": 1.25,
+          "costPerBatch": 84.375,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.12,
+          "costPerBatch": 22.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Кратадисп",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.125,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.5,
+          "sharePct": 13.25,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/6С",
+      "name": "Рецептура пропиточного состава 160 160/6С - 14.02.2026 + 10% КФС+ сточные воды",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/6С",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Тест сточных вод вместо воды!",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 476.0,
+          "batchKg": 602.5316456,
+          "sharePct": 60.25316456,
+          "pricePerKg": 0.78,
+          "costPerBatch": 469.9746835,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 68.35443038,
+          "sharePct": 6.835443038,
+          "pricePerKg": 1.25,
+          "costPerBatch": 85.44303797,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 189.8734177,
+          "sharePct": 18.98734177,
+          "pricePerKg": 0.12,
+          "costPerBatch": 22.78481013,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45 (кг)",
+          "weightKg": 3.0,
+          "batchKg": 3.797468354,
+          "sharePct": 0.3797468354,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.17721519,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.265822785,
+          "sharePct": 0.1265822785,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.556962025,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 0.0,
+          "batchKg": 0.0,
+          "sharePct": 0.0,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        },
+        {
+          "name": "Сточные воды",
+          "weightKg": 106.0,
+          "batchKg": 134.1772152,
+          "sharePct": 13.41772152,
+          "pricePerKg": 16.98445762,
+          "costPerBatch": null,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/6СC",
+      "name": "Рецептура пропиточного состава 160 160/6СC - 20.02.2026 + сточные воды",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/6СC",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Тест сточных вод вместо воды!",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 479.0,
+          "batchKg": 604.035309,
+          "sharePct": 60.4035309,
+          "pricePerKg": 0.78,
+          "costPerBatch": 471.147541,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 54.0,
+          "batchKg": 68.09583859,
+          "sharePct": 6.809583859,
+          "pricePerKg": 1.25,
+          "costPerBatch": 85.11979823,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 189.1551072,
+          "sharePct": 18.91551072,
+          "pricePerKg": 0.12,
+          "costPerBatch": 22.69861286,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45 (кг)",
+          "weightKg": 3.0,
+          "batchKg": 3.783102144,
+          "sharePct": 0.3783102144,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.161412358,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.261034048,
+          "sharePct": 0.1261034048,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.539722573,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 0.0,
+          "batchKg": 0.0,
+          "sharePct": 0.0,
+          "pricePerKg": 0.0,
+          "costPerBatch": null,
+          "isWater": true
+        },
+        {
+          "name": "Сточные воды",
+          "weightKg": 106.0,
+          "batchKg": 133.6696091,
+          "sharePct": 13.36696091,
+          "pricePerKg": 16.92020368,
+          "costPerBatch": null,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/7",
+      "name": "Рецептура пропиточного состава 160 160/7 - 06.02.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/7",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшили относительно 160/5 из-за большого диаметра и массы  суровья 127 вместо 120",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.5,
+          "sharePct": 61.25,
+          "pricePerKg": 0.78,
+          "costPerBatch": 477.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 0.78,
+          "costPerBatch": 48.75,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.2,
+          "costPerBatch": 37.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.54,
+          "costPerBatch": 5.775,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.5,
+          "sharePct": 13.25,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/8",
+      "name": "Рецептура пропиточного состава 160 160/8 - 09.02.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/8",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Поменяли относительно 160/7 + 10% процентов ратла для сработки+ 10%КФУ",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 437.0,
+          "batchKg": 546.5232616,
+          "sharePct": 54.65232616,
+          "pricePerKg": 0.78,
+          "costPerBatch": 426.2881441,
+          "isWater": false
+        },
+        {
+          "name": "Карбамидоформальдегидная смола (КФ МХ)",
+          "weightKg": 48.6,
+          "batchKg": 60.7803902,
+          "sharePct": 6.07803902,
+          "pricePerKg": 0.78,
+          "costPerBatch": 47.40870435,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 135.0,
+          "batchKg": 168.8344172,
+          "sharePct": 16.88344172,
+          "pricePerKg": 0.2,
+          "costPerBatch": 33.76688344,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.7,
+          "batchKg": 3.376688344,
+          "sharePct": 0.3376688344,
+          "pricePerKg": 1.54,
+          "costPerBatch": 5.20010005,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125562781,
+          "sharePct": 0.1125562781,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.052026013,
+          "isWater": false
+        },
+        {
+          "name": "Пропитка ратла",
+          "weightKg": 80.0,
+          "batchKg": 100.050025,
+          "sharePct": 10.0050025,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 95.4,
+          "batchKg": 119.3096548,
+          "sharePct": 11.93096548,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/9",
+      "name": "Рецептура пропиточного состава 160 160/9 - 23.02.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/9",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшение 145 дисперсии экономия 145 дисперсии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 510.0,
+          "batchKg": 637.8986867,
+          "sharePct": 63.78986867,
+          "pricePerKg": 0.78,
+          "costPerBatch": 497.5609756,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 30.0,
+          "batchKg": 37.52345216,
+          "sharePct": 3.752345216,
+          "pricePerKg": 0.78,
+          "costPerBatch": 29.26829268,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.6172608,
+          "sharePct": 18.76172608,
+          "pricePerKg": 0.2,
+          "costPerBatch": 37.52345216,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.0,
+          "batchKg": 3.752345216,
+          "sharePct": 0.3752345216,
+          "pricePerKg": 1.54,
+          "costPerBatch": 5.778611632,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.250781739,
+          "sharePct": 0.1250781739,
+          "pricePerKg": 3.6,
+          "costPerBatch": 4.502814259,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.5828643,
+          "sharePct": 13.25828643,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/10",
+      "name": "Рецептура пропиточного состава 160 НОВАЯ БАЗОВАЯ 160/10 - 10.03.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/10",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Исходное соотношение дисперсий  как 160/1,но уменьшенное количество кальцита так-как большая масса рулонов",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 390.0,
+          "batchKg": 487.5,
+          "sharePct": 48.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 536.25,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 150.0,
+          "batchKg": 187.4062969,
+          "sharePct": 18.74062969,
+          "pricePerKg": 1.1,
+          "costPerBatch": 206.1469265,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.4062969,
+          "sharePct": 18.74062969,
+          "pricePerKg": 0.2,
+          "costPerBatch": 37.48125937,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.0,
+          "batchKg": 3.748125937,
+          "sharePct": 0.3748125937,
+          "pricePerKg": 1.1,
+          "costPerBatch": 4.122938531,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.249375312,
+          "sharePct": 0.1249375312,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.122438781,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 106.0,
+          "batchKg": 132.4337831,
+          "sharePct": 13.24337831,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/11",
+      "name": "Рецептура пропиточного состава 160 160/11 - 15.04.2026 РАЗОВАЯ",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/11",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Использование пропитки ратла без крахмала на 106 дисперсии и срабатывание остатков пластификатора",
+      "components": [
+        {
+          "name": "Пропитка ратл",
+          "weightKg": 105.0,
+          "batchKg": 131.25,
+          "sharePct": 13.125,
+          "pricePerKg": null,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Дисперсия COLORCOAT AG-80",
+          "weightKg": 366.0,
+          "batchKg": 457.5,
+          "sharePct": 45.75,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 145.0,
+          "batchKg": 181.25,
+          "sharePct": 18.125,
+          "pricePerKg": 0.78,
+          "costPerBatch": 141.375,
+          "isWater": false
+        },
+        {
+          "name": "Пластификатор Loxanol PL 5060 EL",
+          "weightKg": 5.0,
+          "batchKg": 6.25,
+          "sharePct": 0.625,
+          "pricePerKg": 0.2,
+          "costPerBatch": 1.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 336.875,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 3.6,
+          "costPerBatch": 13.5,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/12",
+      "name": "Рецептура пропиточного состава 160 160/12 - 15.04.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/12",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Вода",
+          "weightKg": 90.6,
+          "batchKg": 113.25,
+          "sharePct": 11.325,
+          "pricePerKg": null,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Дисперсия COLORCOAT AG-80",
+          "weightKg": 499.9,
+          "batchKg": 624.875,
+          "sharePct": 62.4875,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 30.0,
+          "batchKg": 37.5,
+          "sharePct": 3.75,
+          "pricePerKg": 0.78,
+          "costPerBatch": 29.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 336.875,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.5,
+          "batchKg": 4.375,
+          "sharePct": 0.4375,
+          "pricePerKg": 3.6,
+          "costPerBatch": 15.75,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Пенагаситель",
+          "weightKg": 0.8,
+          "batchKg": 1.0,
+          "sharePct": 0.1,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/12С",
+      "name": "Рецептура пропиточного состава 160 160/12С - 22.04.26",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/12С",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Сточные воды",
+          "weightKg": 90.6,
+          "batchKg": 113.25,
+          "sharePct": 11.325,
+          "pricePerKg": null,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Дисперсия COLORCOAT AG-80",
+          "weightKg": 499.1,
+          "batchKg": 623.875,
+          "sharePct": 62.3875,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 30.0,
+          "batchKg": 37.5,
+          "sharePct": 3.75,
+          "pricePerKg": 0.78,
+          "costPerBatch": 29.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 1.54,
+          "costPerBatch": 336.875,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.5,
+          "batchKg": 4.375,
+          "sharePct": 0.4375,
+          "pricePerKg": 3.6,
+          "costPerBatch": 15.75,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": false
+        },
+        {
+          "name": "Пенагаситель",
+          "weightKg": 0.8,
+          "batchKg": 1.0,
+          "sharePct": 0.1,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160/13",
+      "name": "Рецептура пропиточного состава 160 160/13 - 17.04.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": "160/13",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Дисперсия COLORCOAT AG-80",
+          "weightKg": 530.0,
+          "batchKg": 662.5,
+          "sharePct": 66.25,
+          "pricePerKg": 1.4,
+          "costPerBatch": 927.5,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 1.54,
+          "costPerBatch": 288.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 3.6,
+          "costPerBatch": 13.5,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 117.0,
+          "batchKg": 146.25,
+          "sharePct": 14.625,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160-019",
+      "name": "Рецептура пропиточного состава 160 Цвет оранжевый 160О/1 - 04.11.2024",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": null,
+      "colorVariant": "orange",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 503.3,
+          "batchKg": 629.125,
+          "sharePct": 62.9125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 692.0375,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 90.0,
+          "batchKg": 112.5,
+          "sharePct": 11.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 123.75,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 200.0,
+          "batchKg": 250.0,
+          "sharePct": 25.0,
+          "pricePerKg": 0.24,
+          "costPerBatch": 60.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 4.0,
+          "batchKg": 5.0,
+          "sharePct": 0.5,
+          "pricePerKg": 1.54,
+          "costPerBatch": 7.7,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Оранжевый",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 11.53,
+          "costPerBatch": 28.825,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.7,
+          "batchKg": 0.875,
+          "sharePct": 0.0875,
+          "pricePerKg": 4.1,
+          "costPerBatch": 3.5875,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160-020",
+      "name": "Рецептура пропиточного состава 160 Цвет желтый 160Ж/1 - 23.05.2024",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": null,
+      "colorVariant": "yellow",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Желтая пропитка с уменьшенным содержанием кальцита для улучшения прокраса",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 415.0,
+          "batchKg": 518.75,
+          "sharePct": 51.875,
+          "pricePerKg": 1.1,
+          "costPerBatch": 570.625,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 220.0,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 0.24,
+          "costPerBatch": 52.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.375,
+          "sharePct": 0.4375,
+          "pricePerKg": 1.54,
+          "costPerBatch": 6.7375,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Золотисто-желтый",
+          "weightKg": 1.3,
+          "batchKg": 1.625,
+          "sharePct": 0.1625,
+          "pricePerKg": 8.0,
+          "costPerBatch": 13.0,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.6125,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 44.3,
+          "batchKg": 55.375,
+          "sharePct": 5.5375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160-021",
+      "name": "Рецептура пропиточного состава 160 Цвет желтый 160Ж/2-10.01.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": null,
+      "colorVariant": "yellow",
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "За основу взята рецептура 160/5 пропитки на суровье 120 г/м2\nБрать для заказа с желтой пастой российской\n\nАктуальная цена на 05,02,2026\n\nРасчетный сухой остаток - 55,6%",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.5,
+          "sharePct": 61.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 673.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.75,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 175.0,
+          "batchKg": 218.75,
+          "sharePct": 21.875,
+          "pricePerKg": 0.24,
+          "costPerBatch": 52.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 4.375,
+          "sharePct": 0.4375,
+          "pricePerKg": 1.54,
+          "costPerBatch": 6.7375,
+          "isWater": false
+        },
+        {
+          "name": "PIGMARAMA YELLOW 3R",
+          "weightKg": 1.3,
+          "batchKg": 1.625,
+          "sharePct": 0.1625,
+          "pricePerKg": 12.79,
+          "costPerBatch": 20.78375,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 3.48,
+          "costPerBatch": 4.35,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 79.2,
+          "batchKg": 99.0,
+          "sharePct": 9.9,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160-022",
+      "name": "Рецептура пропиточного состава 160 Цвет желтый 160Ж/3-06.02.2026",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": null,
+      "colorVariant": "yellow",
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "За основу взята рецептура 160/6 пропитки с уменьшенным кальцитом из-за высокой массы и диаметра 18.5 см\n\nАктуальная цена на 05,02,2026\n\nРасчетный сухой остаток - 53 %",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 490.0,
+          "batchKg": 612.5,
+          "sharePct": 61.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 673.75,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 68.75,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 150.0,
+          "batchKg": 187.5,
+          "sharePct": 18.75,
+          "pricePerKg": 0.24,
+          "costPerBatch": 45.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.0,
+          "batchKg": 3.75,
+          "sharePct": 0.375,
+          "pricePerKg": 1.54,
+          "costPerBatch": 5.775,
+          "isWater": false
+        },
+        {
+          "name": "PIGMARAMA YELLOW 3R",
+          "weightKg": 1.3,
+          "batchKg": 1.625,
+          "sharePct": 0.1625,
+          "pricePerKg": 12.79,
+          "costPerBatch": 20.78375,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.1,
+          "batchKg": 1.375,
+          "sharePct": 0.1375,
+          "pricePerKg": 3.48,
+          "costPerBatch": 4.785,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 104.6,
+          "batchKg": 130.75,
+          "sharePct": 13.075,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-160-023",
+      "name": "Рецептура пропиточного состава 160 Цвет синий 160С/1 - 19.09.2024",
+      "sheet": "160",
+      "category": "160",
+      "variantCode": null,
+      "colorVariant": "blue",
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Заказ в Беларусь со сниженным содержанием жесткой дисперсии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 440.0,
+          "batchKg": 550.0,
+          "sharePct": 55.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 605.0,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 100.0,
+          "batchKg": 125.0,
+          "sharePct": 12.5,
+          "pricePerKg": 1.1,
+          "costPerBatch": 137.5,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 200.0,
+          "batchKg": 250.0,
+          "sharePct": 25.0,
+          "pricePerKg": 0.24,
+          "costPerBatch": 60.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 4.0,
+          "batchKg": 5.0,
+          "sharePct": 0.5,
+          "pricePerKg": 1.54,
+          "costPerBatch": 7.7,
+          "isWater": false
+        },
+        {
+          "name": "Пигментная паста Лаканил Голубой",
+          "weightKg": 3.2,
+          "batchKg": 4.0,
+          "sharePct": 0.4,
+          "pricePerKg": 10.32,
+          "costPerBatch": 41.28,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 51.9,
+          "batchKg": 64.875,
+          "sharePct": 6.4875,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.9,
+          "batchKg": 1.125,
+          "sharePct": 0.1125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 4.6125,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-001",
+      "name": "Рецептура пропиточного состава для мембраны Мем/1 - 26.06.2025",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-002",
+      "name": "Рецептура пропиточного состава для мембраны Ч Мем/2 - 31.10.2025",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-003",
+      "name": "Рецептура пропиточного состава для мембраны Мем/3 - 1.11.2025",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-004",
+      "name": "Рецептура пропиточного состава для мембраны Мем/4 - 21.02.2026",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-005",
+      "name": "Рецептура пропиточного состава для мембраны Мем/5 - 05.03.2026",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-МембраныТкань-006",
+      "name": "Рецептура пропиточного состава для черной ткани Ч ТК/ 1- 06.11.2025",
+      "sheet": "МембраныТкань",
+      "category": "membrane",
+      "variantCode": null,
+      "colorVariant": "black",
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-001",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/1 - 27.08.2025",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 0.78,
+          "costPerBatch": 156.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 40.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 1.16,
+          "costPerBatch": 58.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 548.0,
+          "batchKg": 685.0,
+          "sharePct": 68.5,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 50.0,
+          "batchKg": 62.5,
+          "sharePct": 6.25,
+          "pricePerKg": 0.2,
+          "costPerBatch": 12.5,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 1.375,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-002",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/2 - 11.12.2025",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Уменьшили воду расчитывали на массу суровья 175 получили  гп массу",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 0.78,
+          "costPerBatch": 156.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 40.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 1.16,
+          "costPerBatch": 58.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 563.0,
+          "batchKg": 703.75,
+          "sharePct": 70.375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 35.0,
+          "batchKg": 43.75,
+          "sharePct": 4.375,
+          "pricePerKg": 0.2,
+          "costPerBatch": 8.75,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 1.375,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 4.1,
+          "costPerBatch": 5.125,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-003",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/3 - 15.12.2025",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "уменьшено до 3.5% содержания крахмала и убрали загуститель, очень густая и так пропитка была",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 0.78,
+          "costPerBatch": 156.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 28.0,
+          "batchKg": 35.0,
+          "sharePct": 3.5,
+          "pricePerKg": 1.16,
+          "costPerBatch": 40.6,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 571.0,
+          "batchKg": 713.75,
+          "sharePct": 71.375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 40.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 0.2,
+          "costPerBatch": 10.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.1,
+          "costPerBatch": 1.375,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-004",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/4 - 22.01.2026",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Увеличели кальцит так как масса шла маленькая!",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 0.78,
+          "costPerBatch": 156.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 28.0,
+          "batchKg": 35.0,
+          "sharePct": 3.5,
+          "pricePerKg": 1.0,
+          "costPerBatch": 35.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 566.0,
+          "batchKg": 707.5,
+          "sharePct": 70.75,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 45.0,
+          "batchKg": 56.25,
+          "sharePct": 5.625,
+          "pricePerKg": 0.2,
+          "costPerBatch": 11.25,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.54,
+          "costPerBatch": 1.925,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-005",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/4А - 12.02.2026",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Увеличели кальцит так как масса шла маленькая!\nИзменился производитель кальцита! с 12.02.2026",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.32,
+          "costPerBatch": 264.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 28.0,
+          "batchKg": 35.0,
+          "sharePct": 3.5,
+          "pricePerKg": 1.0,
+          "costPerBatch": 35.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 566.0,
+          "batchKg": 707.5,
+          "sharePct": 70.75,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 45.0,
+          "batchKg": 56.25,
+          "sharePct": 5.625,
+          "pricePerKg": 0.2,
+          "costPerBatch": 11.25,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор акриловый  Кратадисп А 45 (кг)",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.88,
+          "costPerBatch": 2.35,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-РАТЛ-006",
+      "name": "Рецептура пропиточного состава для Ратл Ратл/5 - 03.04.2026",
+      "sheet": "РАТЛ",
+      "category": "ratl",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Вместо дисперсии используем ПВА пока она чудестным образом не преплывет!",
+      "components": [
+        {
+          "name": "PVA GLUE ecomix 51%",
+          "weightKg": 160.0,
+          "batchKg": 200.0,
+          "sharePct": 20.0,
+          "pricePerKg": 1.02,
+          "costPerBatch": 204.0,
+          "isWater": false
+        },
+        {
+          "name": "Крахмал",
+          "weightKg": 28.0,
+          "batchKg": 35.0,
+          "sharePct": 3.5,
+          "pricePerKg": 1.0,
+          "costPerBatch": 35.0,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 566.0,
+          "batchKg": 707.5,
+          "sharePct": 70.75,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        },
+        {
+          "name": "Кальцит danismanlik ve sanayl limitid",
+          "weightKg": 45.0,
+          "batchKg": 56.25,
+          "sharePct": 5.625,
+          "pricePerKg": 0.2,
+          "costPerBatch": 11.25,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex (кг)",
+          "weightKg": 1.0,
+          "batchKg": 1.25,
+          "sharePct": 0.125,
+          "pricePerKg": 1.88,
+          "costPerBatch": 2.35,
+          "isWater": false
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-165 Ультра-001",
+      "name": "Рецептура пропиточного состава 160 Ultra №1 160U/1 - 16.03.2025",
+      "sheet": "165 Ультра",
+      "category": "165ultra",
+      "variantCode": null,
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "USD",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": "Комментарии",
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 472.5,
+          "batchKg": 590.625,
+          "sharePct": 59.0625,
+          "pricePerKg": 1.1,
+          "costPerBatch": 649.6875,
+          "isWater": false
+        },
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 145-50",
+          "weightKg": 190.0,
+          "batchKg": 237.5,
+          "sharePct": 23.75,
+          "pricePerKg": 1.1,
+          "costPerBatch": 261.25,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 100.0,
+          "batchKg": 125.0,
+          "sharePct": 12.5,
+          "pricePerKg": 0.2,
+          "costPerBatch": 25.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 2.0,
+          "batchKg": 2.5,
+          "sharePct": 0.25,
+          "pricePerKg": 1.1,
+          "costPerBatch": 2.75,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.5,
+          "batchKg": 0.625,
+          "sharePct": 0.0625,
+          "pricePerKg": 4.1,
+          "costPerBatch": 2.5625,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 35.0,
+          "batchKg": 43.75,
+          "sharePct": 4.375,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-80/1",
+      "name": "Рецептура пропиточного состава 80 Ст-80/1- 24.02.2026",
+      "sheet": "Стеклообои",
+      "category": "glasspaper",
+      "variantCode": "80/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 180.0,
+          "batchKg": 300.0,
+          "sharePct": 30.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 330.0,
+          "isWater": false
+        },
+        {
+          "name": "Диоксид титана Billions BLR-698",
+          "weightKg": 24.0,
+          "batchKg": 40.0,
+          "sharePct": 4.0,
+          "pricePerKg": null,
+          "costPerBatch": null,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 30.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 0.2,
+          "costPerBatch": 10.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 1.2,
+          "batchKg": 2.0,
+          "sharePct": 0.2,
+          "pricePerKg": 1.54,
+          "costPerBatch": 3.08,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.3,
+          "batchKg": 0.5,
+          "sharePct": 0.05,
+          "pricePerKg": 3.48,
+          "costPerBatch": 1.74,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 364.5,
+          "batchKg": 607.5,
+          "sharePct": 60.75,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-130/1",
+      "name": "Рецептура пропиточного состава 130 Ст-130/1- 24.02.2026",
+      "sheet": "Стеклообои",
+      "category": "glasspaper",
+      "variantCode": "130/1",
+      "colorVariant": null,
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [
+        {
+          "name": "Стирол-бутадиеновая дисперсия LL 106-50",
+          "weightKg": 300.0,
+          "batchKg": 600.0,
+          "sharePct": 60.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 660.0,
+          "isWater": false
+        },
+        {
+          "name": "Диоксид титана Billions BLR-698",
+          "weightKg": 25.0,
+          "batchKg": 50.0,
+          "sharePct": 5.0,
+          "pricePerKg": 1.1,
+          "costPerBatch": 55.0,
+          "isWater": false
+        },
+        {
+          "name": "Кальцит Omyacarb® 1 - SW",
+          "weightKg": 140.0,
+          "batchKg": 280.0,
+          "sharePct": 28.0,
+          "pricePerKg": 0.2,
+          "costPerBatch": 56.0,
+          "isWater": false
+        },
+        {
+          "name": "Диспергатор Dispex AA 4140",
+          "weightKg": 3.5,
+          "batchKg": 7.0,
+          "sharePct": 0.7,
+          "pricePerKg": 1.54,
+          "costPerBatch": 10.78,
+          "isWater": false
+        },
+        {
+          "name": "Загуститель Rheovis HS 1212",
+          "weightKg": 0.5,
+          "batchKg": 1.0,
+          "sharePct": 0.1,
+          "pricePerKg": 3.48,
+          "costPerBatch": 3.48,
+          "isWater": false
+        },
+        {
+          "name": "Вода",
+          "weightKg": 31.0,
+          "batchKg": 62.0,
+          "sharePct": 6.2,
+          "pricePerKg": 0.0,
+          "costPerBatch": 0.0,
+          "isWater": true
+        }
+      ],
+      "active": true
+    },
+    {
+      "code": "РП-Лого-001",
+      "name": "Рецептура черной краски для лого (под ведро)",
+      "sheet": "Лого",
+      "category": "logo",
+      "variantCode": null,
+      "colorVariant": "black",
+      "grammageGsm": null,
+      "currency": "EUR",
+      "dryBatchKg": null,
+      "totalBatchKg": null,
+      "totalCost": null,
+      "note": null,
+      "components": [],
+      "active": true
+    }
+  ],
+  "pigmentPastes": [
+    {
+      "name": "Lakanil Akva water-based pigment paste Orange YS",
+      "colorIndex": "PO13",
+      "pricePerKg": 11.53,
+      "currency": "USD"
+    },
+    {
+      "name": "Lakanil Akva water-based pigment paste Red BS",
+      "colorIndex": "PR170",
+      "pricePerKg": 13.49,
+      "currency": "USD"
+    },
+    {
+      "name": "Lakanil Akva water-based pigment paste Black TP",
+      "colorIndex": "PBlack 7",
+      "pricePerKg": 2.66,
+      "currency": "USD"
+    },
+    {
+      "name": "Lakanil Akva water-based pigment paste Golden Yellow 2K",
+      "colorIndex": "PY13 + PO13",
+      "pricePerKg": 8.19,
+      "currency": "USD"
+    },
+    {
+      "name": "Lakanil Akva water-based pigment paste Blue RS",
+      "colorIndex": "PBlue 15:0",
+      "pricePerKg": 10.32,
+      "currency": "USD"
+    },
+    {
+      "name": "Lakanil Akva water-based pigment paste Olive Green",
+      "colorIndex": "PY13 + PBlue 15:3 + PG7 + PBlack7",
+      "pricePerKg": 10.27,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA ORANGE KY",
+      "colorIndex": "PO13",
+      "pricePerKg": 16.83,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA RED PR",
+      "colorIndex": "PR254",
+      "pricePerKg": 21.44,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA BLACK CB",
+      "colorIndex": "PBlack 7",
+      "pricePerKg": 12.56,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA YELLOW 5GT",
+      "colorIndex": "PY74",
+      "pricePerKg": 7.61,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA YELLOW 3R",
+      "colorIndex": "PY83",
+      "pricePerKg": 12.79,
+      "currency": "USD"
+    },
+    {
+      "name": "PIGMARAMA BLUE BR",
+      "colorIndex": "PBlue 15",
+      "pricePerKg": 17.75,
+      "currency": "USD"
+    }
+  ]
+}

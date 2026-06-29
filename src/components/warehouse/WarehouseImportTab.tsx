@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
+import { useConfirm } from '@/context/ConfirmContext'
 import {
   isWarehouseImportError,
   type ImportResult,
@@ -28,6 +29,7 @@ export function WarehouseImportTab({
   onWarehouseChange,
 }: Props) {
   const { t, tf } = useI18n()
+  const { confirm } = useConfirm()
   const ref = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -45,7 +47,7 @@ export function WarehouseImportTab({
       return
     }
 
-    if (!confirm(t('warehouse.import.confirm'))) {
+    if (!(await confirm({ message: t('warehouse.import.confirm') }))) {
       return
     }
 
@@ -91,14 +93,14 @@ export function WarehouseImportTab({
 
   return (
     <div className="max-w-xl space-y-4">
-      <div className="rounded-xl border border-grid bg-white p-6 shadow-sm">
+      <div className="rounded-sm border border-grid bg-white p-6 shadow-sm">
         <h3 className="font-bold text-ink">{t('warehouse.import.title')}</h3>
         <p className="mt-2 text-sm text-stone-500">{t('warehouse.import.hint')}</p>
 
         <label className="mt-4 block text-xs font-semibold text-stone-500">
           {t('warehouse.location')} *
           <select
-            className="mt-1 w-full rounded-lg border border-grid px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
             value={warehouseId}
             onChange={(e) => onWarehouseChange(e.target.value)}
           >
@@ -130,7 +132,7 @@ export function WarehouseImportTab({
         <button
           type="button"
           disabled={busy || !warehouseId}
-          className="mt-4 rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-4 rounded-sm bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => ref.current?.click()}
           title={!warehouseId ? t('warehouse.import.noWarehouse') : undefined}
         >
@@ -146,7 +148,7 @@ export function WarehouseImportTab({
             onDismiss={() => setNotice(null)}
           />
           {notice.warnings && notice.warnings.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <div className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
                 {t('warehouse.import.warningsTitle')} ({notice.warnings.length})
               </p>

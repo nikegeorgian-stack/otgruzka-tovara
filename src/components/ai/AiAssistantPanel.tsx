@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAiAssistant } from '@/context/AiAssistantContext'
 import { useI18n } from '@/context/I18nContext'
+import { CloseIcon, SparkleIcon } from '@/components/ui/icons'
 
 const STARTERS = [
   'Что заканчивается на складе?',
@@ -40,17 +41,18 @@ export function AiAssistantPanel() {
       <button
         type="button"
         title={t('ai.open')}
-        className="fixed bottom-5 right-5 z-[91] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-teal-600 text-2xl text-white shadow-lg hover:scale-105 print:hidden"
+        aria-label={t('ai.open')}
+        className="fixed bottom-5 right-5 z-[91] flex h-14 w-14 items-center justify-center rounded-sm bg-violet-700 text-white shadow-sm transition-shadow hover:shadow-sm print:hidden"
         onClick={() => setOpen(true)}
       >
-        ✦
+        <SparkleIcon size={24} />
       </button>
     )
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-[91] flex h-[min(32rem,calc(100vh-2.5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-grid bg-white shadow-2xl print:hidden">
-      <header className="flex items-center justify-between border-b border-grid bg-gradient-to-r from-violet-50 to-teal-50 px-4 py-3">
+    <div className="fixed bottom-5 right-5 z-[91] flex h-[min(32rem,calc(100vh-2.5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-sm border border-grid bg-white shadow-sm print:hidden">
+      <header className="flex items-center justify-between border-b border-grid bg-stone-50 px-4 py-3">
         <div>
           <h3 className="text-sm font-bold text-ink">{t('ai.title')}</h3>
           <p className="text-[10px] text-stone-500">
@@ -67,10 +69,11 @@ export function AiAssistantPanel() {
           </button>
           <button
             type="button"
-            className="rounded px-2 py-1 text-lg leading-none text-stone-400 hover:bg-white/80"
+            aria-label={t('common.close')}
+            className="rounded px-2 py-1 leading-none text-stone-400 hover:bg-white/80"
             onClick={() => setOpen(false)}
           >
-            ×
+            <CloseIcon size={16} />
           </button>
         </div>
       </header>
@@ -83,7 +86,7 @@ export function AiAssistantPanel() {
               <button
                 key={s}
                 type="button"
-                className="block w-full rounded-lg border border-grid bg-stone-50 px-3 py-2 text-left text-xs text-stone-700 hover:border-teal-400 hover:bg-teal-50/50"
+                className="block w-full rounded-sm border border-grid bg-stone-50 px-3 py-2 text-left text-xs text-stone-700 hover:border-teal-400 hover:bg-teal-50/50"
                 onClick={() => void send(s)}
               >
                 {s}
@@ -94,7 +97,7 @@ export function AiAssistantPanel() {
         {messages.map((m) => (
           <div
             key={m.id}
-            className={`rounded-xl px-3 py-2 text-sm leading-relaxed ${
+            className={`rounded-sm px-3 py-2 text-sm leading-relaxed ${
               m.role === 'user'
                 ? 'ml-6 bg-teal-700 text-white'
                 : 'mr-4 bg-stone-100 text-ink whitespace-pre-wrap'
@@ -105,20 +108,20 @@ export function AiAssistantPanel() {
         ))}
 
         {status && (
-          <div className="mr-4 rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-700 animate-pulse">
+          <div className="mr-4 rounded-sm bg-indigo-50 px-3 py-2 text-xs text-indigo-700 animate-pulse">
             {status}
           </div>
         )}
 
         {pendingConfirmation && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="rounded-sm border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             <div className="mb-3 font-medium">{pendingConfirmation.message}</div>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => void approvePendingConfirmation()}
                 disabled={loading}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                className="rounded-sm bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
               >
                 {t('ai.confirmYes')}
               </button>
@@ -126,7 +129,7 @@ export function AiAssistantPanel() {
                 type="button"
                 onClick={rejectPendingConfirmation}
                 disabled={loading}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                className="rounded-sm border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
               >
                 {t('ai.confirmNo')}
               </button>
@@ -151,7 +154,7 @@ export function AiAssistantPanel() {
       >
         <div className="flex gap-2">
           <input
-            className="min-w-0 flex-1 rounded-lg border border-grid px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-sm border border-grid px-3 py-2 text-sm"
             placeholder={t('ai.placeholder')}
             value={input}
             disabled={loading || Boolean(pendingConfirmation)}
@@ -160,7 +163,7 @@ export function AiAssistantPanel() {
           <button
             type="submit"
             disabled={loading || !input.trim() || Boolean(pendingConfirmation)}
-            className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            className="rounded-sm bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
             →
           </button>

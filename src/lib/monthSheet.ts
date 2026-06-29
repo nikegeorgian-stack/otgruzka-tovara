@@ -43,7 +43,16 @@ export function createMonthSheet(
     fact[row.id] = { ...plan[row.id] }
   }
 
-  return { month, rows, plan, fact, factOverrides: [], comments: {} }
+  return {
+    month,
+    rows,
+    plan,
+    fact,
+    factOverrides: [],
+    comments: {},
+    substitutions: {},
+    factExtraHours: {},
+  }
 }
 
 export function ensureMonth(store: AppStore, month: string): AppStore {

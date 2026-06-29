@@ -4,12 +4,34 @@
 
 Локальная версия остаётся в корне репозитория (`npm run dev`).
 
+## База данных (Firestore)
+
+| | |
+|---|---|
+| Проект FST | **`fst-uchet-14c02`** |
+| FBeda | `fbeda-5c061` — **не используется** для FST |
+| Коллекция | `fstStores` |
+| Документ | `fstStores/{uid}` — весь store в поле `payload` |
+
+Первичная настройка (создание проекта + БД + ключи в `.env`):
+
+```bash
+npm run setup:firebase
+```
+
+Если квота проектов исчерпана — создайте `fst-uchet` вручную в [Firebase Console](https://console.firebase.google.com/), затем снова запустите скрипт.
+
+Проверка записи:
+
+```bash
+npm run test:firebase
+```
+
 ## Запуск локально
 
-1. Firebase-проект **`fbeda-5c061`** (приложение `fibercell`) — уже настроен.
-2. **Authentication → Email/Password** и **Firestore** включены.
-3. Для локального запуска скопируйте `.env.example` → `.env` (или используйте `.env.production`).
-4. Из корня репозитория:
+1. Выполните `npm run setup:firebase` (проект **`fst-uchet-14c02`**) или `vercel env pull fst-web/.env`.
+2. **Authentication → Email/Password** и **Firestore** включены в консоли `fst-uchet-14c02`.
+3. Из корня репозитория:
 
 ```bash
 npm install
@@ -28,7 +50,13 @@ npm run build:fst-web
 
 Репозиторий: https://github.com/DMDAdmin/FST-uchet
 
-Production: https://fst-uchet.vercel.app
+Production: https://fst-uchet-theta.vercel.app
+
+| | |
+|---|---|
+| Firebase | `fst-uchet-14c02` |
+| Vercel | `fb-cell-admin-s-projects/fst-uchet` |
+| GitHub | https://github.com/DMDAdmin/FST-uchet |
 
 Корневой `vercel.json` собирает `fst-web` из монорепозитория:
 
@@ -53,8 +81,8 @@ firebase deploy
 
 | | |
 |---|---|
-| Email | `nikegeorgian@gmail.com` |
-| Пароль | задаётся администратором в Firebase |
+| Email | `admin@fibercell.net` |
+| Пароль | задаётся в Firebase Console → Authentication |
 | Права | полный доступ (табель, зарплата, склад, настройки) |
 
 Регистрация новых пользователей отключена — только вход администратора.

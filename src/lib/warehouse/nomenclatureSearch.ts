@@ -1,4 +1,5 @@
 import type { WarehouseItem } from '@/lib/warehouse/types'
+import { nextDocumentNumber } from './docNumbering'
 
 export function normSearch(s: string): string {
   return s
@@ -33,15 +34,17 @@ export function searchNomenclature(
     const name = normSearch(item.name)
     const sku = normSearch(item.sku ?? '')
     const barcode = normSearch(item.barcode ?? '')
+    const internalCode = normSearch(item.internalCode ?? '')
     const cat = normSearch(opts?.categoryNames?.get(item.categoryId) ?? '')
 
     let score = 0
-    if (sku === q || barcode === q) score = 100
+    if (internalCode === q || sku === q || barcode === q) score = 100
     else if (name.startsWith(q)) score = 80
-    else if (sku.startsWith(q) || barcode.startsWith(q)) score = 75
+    else if (internalCode.startsWith(q) || sku.startsWith(q) || barcode.startsWith(q))
+      score = 75
     else if (name.includes(q)) score = 60
     else if (cat.includes(q)) score = 40
-    else if (sku.includes(q) || barcode.includes(q)) score = 35
+    else if (internalCode.includes(q) || sku.includes(q) || barcode.includes(q)) score = 35
     else continue
 
     if (opts?.warehouseId && item.warehouseId === opts.warehouseId) score += 5
@@ -53,12 +56,9 @@ export function searchNomenclature(
 }
 
 export function suggestDocNumber(
-  documents: { type: string; date: string; number: string }[],
+  documents: { type: string; date: string; number: string; status?: string }[],
   type: 'receipt' | 'issue',
   date: string,
 ): string {
-  const prefix = type === 'receipt' ? 'ПР' : 'РС'
-  const day = date.replace(/-/g, '')
-  const count = documents.filter((d) => d.type === type && d.date === date).length
-  return `${prefix}-${day}-${String(count + 1).padStart(3, '0')}`
+  return nextDocumentNumber(documents as import('./types').WarehouseDocument[], type, date)
 }

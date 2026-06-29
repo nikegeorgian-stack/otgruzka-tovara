@@ -1,6 +1,10 @@
 import seedWarehouse from '@/data/seed-warehouse.json'
+import { ensureProductionWarehouseLocations } from '@/lib/warehouse/productionLocations'
+import { assignMissingInternalCodes, formatInternalCode } from './itemHistory'
+import { normalizeLocationKind } from './locationKinds'
 import type {
   WarehouseCategory,
+  WarehouseDocumentStatus,
   WarehouseItem,
   WarehouseLocation,
   WarehouseStore,
@@ -11,9 +15,9 @@ function newId(): string {
 }
 
 export const DEFAULT_WAREHOUSE_LOCATIONS: Omit<WarehouseLocation, 'id'>[] = [
-  { name: 'Основной', sortOrder: 0 },
-  { name: 'Офис', sortOrder: 1 },
-  { name: 'Химия', sortOrder: 2 },
+  { name: 'Основной', sortOrder: 0, kind: 'raw' },
+  { name: 'Офис', sortOrder: 1, kind: 'office' },
+  { name: 'Химия', sortOrder: 2, kind: 'chemistry' },
 ]
 
 type SeedItem = { name: string; category: string; unit: string }
@@ -60,14 +64,17 @@ function buildItemsFromSeed(
   const catByName = new Map(categories.map((c) => [c.name, c.id]))
   const fallbackCat = categories[0]?.id ?? newId()
 
+  const now = new Date().toISOString()
   return seed.items.map((it, sortOrder) => ({
     id: newId(),
+    internalCode: formatInternalCode(sortOrder + 1),
     name: it.name.trim(),
     categoryId: catByName.get(it.category || 'Прочее') ?? fallbackCat,
     warehouseId,
     unit: normalizeUnit(it.unit),
     active: true,
     sortOrder,
+    createdAt: now,
   }))
 }
 
@@ -85,6 +92,8 @@ export function createDefaultWarehouse(): WarehouseStore {
     documents: [],
     invoiceRegistry: [],
     auditLog: [],
+    nextInternalCode: items.length + 1,
+    itemHistories: {},
   }
 }
 
@@ -122,10 +131,11 @@ function migrateCatalog(store: WarehouseStore): WarehouseStore {
 export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): WarehouseStore {
   if (!raw?.items?.length) return createDefaultWarehouse()
 
-  let locations = (raw.locations ?? []).map((l, i) => ({
+  let locations: WarehouseLocation[] = (raw.locations ?? []).map((l, i) => ({
     id: l.id || newId(),
     name: l.name?.trim() || 'Склад',
     sortOrder: l.sortOrder ?? i,
+    kind: normalizeLocationKind(l.kind, l.name?.trim() || 'Склад'),
   }))
   if (!locations.length) locations = defaultLocations()
 
@@ -147,6 +157,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
 
   const items = raw.items.map((it, i) => ({
     id: it.id || newId(),
+    internalCode: it.internalCode?.trim() ?? '',
     name: it.name?.trim() || '—',
     categoryId: catIds.has(it.categoryId) ? it.categoryId : fallbackCat,
     warehouseId: locIds.has(it.warehouseId) ? it.warehouseId : mainWh,
@@ -154,11 +165,14 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     sku: it.sku,
     barcode: it.barcode,
     price: it.price,
+    weightKg: it.weightKg && it.weightKg > 0 ? it.weightKg : undefined,
     minStock: it.minStock,
     note: it.note,
+    photoDataUrl: it.photoDataUrl,
     unitConversions: it.unitConversions,
     active: it.active !== false,
     sortOrder: it.sortOrder ?? i,
+    createdAt: it.createdAt,
   }))
 
   const itemIds = new Set(items.map((i) => i.id))
@@ -173,6 +187,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     ...d,
     warehouseId: locIds.has(d.warehouseId) ? d.warehouseId : mainWh,
     lines: d.lines.filter((l) => itemIds.has(l.itemId)),
+    status: (d.status === 'cancelled' ? 'cancelled' : 'posted') as WarehouseDocumentStatus,
   }))
 
   let store: WarehouseStore = {
@@ -183,11 +198,18 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     documents,
     invoiceRegistry: raw.invoiceRegistry ?? [],
     auditLog: raw.auditLog ?? [],
+    dailyIssueSessions: raw.dailyIssueSessions ?? [],
+    nextInternalCode: raw.nextInternalCode,
+    itemHistories: raw.itemHistories ?? {},
+    itemRequests: Array.isArray(raw.itemRequests) ? raw.itemRequests : [],
+    itemRenameRequests: Array.isArray(raw.itemRenameRequests) ? raw.itemRenameRequests : [],
+    replenishmentRequests: Array.isArray(raw.replenishmentRequests) ? raw.replenishmentRequests : [],
+    loadingShipments: Array.isArray(raw.loadingShipments) ? raw.loadingShipments : [],
   }
 
   if (needsCatalogMigration(store)) {
     store = migrateCatalog(store)
   }
 
-  return store
+  return ensureProductionWarehouseLocations(assignMissingInternalCodes(store))
 }

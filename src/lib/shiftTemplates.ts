@@ -31,6 +31,22 @@ export const DEFAULT_SHIFT_TEMPLATES: ShiftTemplate[] = [
     shiftMode: 'night',
     cycleStart: '2026-06-01',
   },
+  {
+    id: 'tpl-11-a-day',
+    name: '1/1 группа А (день)',
+    schedule: '1/1 11ч',
+    group2x2: 'А',
+    shiftMode: 'day',
+    cycleStart: '2026-06-01',
+  },
+  {
+    id: 'tpl-11-b-day',
+    name: '1/1 группа Б (день)',
+    schedule: '1/1 11ч',
+    group2x2: 'Б',
+    shiftMode: 'day',
+    cycleStart: '2026-06-02',
+  },
 ]
 
 export function applyTemplateToEmployees(

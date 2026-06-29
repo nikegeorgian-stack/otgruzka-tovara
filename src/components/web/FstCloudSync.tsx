@@ -80,11 +80,11 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
   }
   if (cloudError) {
     return (
-      <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
+      <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-sm border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))]">
         <p>{cloudError}</p>
         <button
           type="button"
-          className="mt-2 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+          className="mt-2 rounded-sm bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
           onClick={retryLoad}
         >
           Повторить

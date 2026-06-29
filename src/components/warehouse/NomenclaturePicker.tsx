@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
 import { useI18n } from '@/context/I18nContext'
 import { formatQty } from '@/lib/warehouse/stock'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
@@ -118,7 +119,7 @@ export function NomenclaturePicker({
         <ul
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-64 overflow-auto rounded-lg border border-grid bg-white py-1 shadow-lg"
+          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-64 overflow-auto rounded-sm border border-grid bg-white py-1 shadow-sm"
         >
           {results.map((item, idx) => {
             const bal = balances.get(item.id)
@@ -137,16 +138,21 @@ export function NomenclaturePicker({
                   pick(item)
                 }}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="min-w-0 font-medium leading-snug">{item.name}</span>
-                  <span className="shrink-0 tabular-nums text-xs text-stone-500">
-                    {formatQty(bal?.available ?? 0)} {item.unit}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-stone-400">
-                  {cat && <span>{cat}</span>}
-                  {item.sku && <span>SKU: {item.sku}</span>}
-                  {item.barcode && <span>{item.barcode}</span>}
+                <div className="flex items-start gap-2">
+                  <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 font-medium leading-snug">{item.name}</span>
+                      <span className="shrink-0 tabular-nums text-xs text-stone-500">
+                        {formatQty(bal?.available ?? 0)} {item.unit}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-stone-400">
+                      {cat && <span>{cat}</span>}
+                      {item.sku && <span>SKU: {item.sku}</span>}
+                      {item.barcode && <span>{item.barcode}</span>}
+                    </div>
+                  </div>
                 </div>
               </li>
             )
@@ -154,7 +160,7 @@ export function NomenclaturePicker({
         </ul>
       )}
       {open && query && results.length === 0 && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-0.5 rounded-lg border border-grid bg-white px-3 py-2 text-sm text-stone-400 shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-50 mt-0.5 rounded-sm border border-grid bg-white px-3 py-2 text-sm text-stone-400 shadow-sm">
           {t('warehouse.picker.empty')}
         </div>
       )}

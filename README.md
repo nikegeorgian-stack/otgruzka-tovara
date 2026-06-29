@@ -1,26 +1,48 @@
-# FiberCell — Табель (локальная версия)
+# FiberCell — FST (веб)
 
-Локальное ПО для учёта рабочего времени и склада FiberCell.
+Веб-учёт табеля, склада, производства и технологии FiberCell.
 
-**Облачная версия FST:** см. папку [`fst-web/`](fst-web/README.md) (Vercel + Firebase).
+**Production:** https://fst-uchet-theta.vercel.app  
+**Данные:** Firebase Firestore (`fst-uchet-14c02`)  
+**Архитектура:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-## Запуск (локально)
+## Быстрый старт
 
 ```bash
 npm install
-npm run dev
+npm start          # облачная версия локально → http://localhost:5173
 ```
 
-## Возможности
+Первичная настройка Firebase (один раз):
 
-- **Сотрудники** — база из 79 активных (из вашего Excel), бригады, графики 5/2 и 2/2
-- **Табель** — план и факт по месяцам, 4 бригады пропитки, автозаполнение по графику
-- **Сводка** — июнь / июль / август 2026
-- **Справочник** — коды 8, 11, Н, 22, ОТ, Б, X, ПР, В
-- **Экспорт / импорт JSON** — резервные копии в `data/`
+```bash
+firebase login
+npm run setup:firebase
+```
 
-Данные хранятся в `localStorage` браузера (`fibercell-tabel-v2`).
+Вход: `admin@fibercell.net` (пароль в Firebase Console).
 
-## Сброс
+## Команды
 
-Кнопка «Сброс» в меню загружает начальный набор (сотрудники из Excel + месяцы 06–08.2026).
+| Команда | Что делает |
+|---------|------------|
+| `npm start` | Разработка (Firebase, как на Vercel) |
+| `npm run deploy` | Сборка + деплой на Vercel |
+| `npm run release` | Сборка + правила Firestore + Vercel |
+| `npm run test:firebase` | Проверка записи в Firestore |
+
+## Деплой
+
+```bash
+npm run deploy
+```
+
+## Локальная версия (устарела)
+
+Только если нужен SQLite на ПК завода:
+
+```bash
+npm run dev:local
+```
+
+Подробнее: [`fst-web/README.md`](fst-web/README.md), [`docs/CLOUD_INTEGRATION.md`](docs/CLOUD_INTEGRATION.md)

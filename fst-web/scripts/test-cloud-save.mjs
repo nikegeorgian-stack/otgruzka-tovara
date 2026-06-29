@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const envPath = join(__dirname, '../.env.production')
+const envPath = join(__dirname, '../.env')
 const env = Object.fromEntries(
   readFileSync(envPath, 'utf8')
     .split('\n')
@@ -39,8 +39,12 @@ const app = initializeApp({
 const auth = getAuth(app)
 const db = getFirestore(app)
 
-const email = process.env.FST_ADMIN_EMAIL ?? 'nikegeorgian@gmail.com'
-const password = process.env.FST_ADMIN_PASSWORD ?? 'Ikusha28022013'
+const email = process.env.FST_ADMIN_EMAIL
+const password = process.env.FST_ADMIN_PASSWORD
+if (!email || !password) {
+  console.error('Задайте FST_ADMIN_EMAIL и FST_ADMIN_PASSWORD в окружении.')
+  process.exit(1)
+}
 
 const { user } = await signInWithEmailAndPassword(auth, email, password)
 console.log('Signed in:', user.uid)

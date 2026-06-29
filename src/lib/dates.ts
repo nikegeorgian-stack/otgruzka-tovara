@@ -74,3 +74,39 @@ export function weekdayShort(
   const names = locale === 'ka' ? DOW_SHORT_KA : DOW_SHORT_RU
   return names[new Date(year, month - 1, day).getDay()]
 }
+
+export function isoDateLocal(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Понедельник недели, в которую попадает дата (ISO YYYY-MM-DD). */
+export function mondayOfWeekIso(iso?: string): string {
+  const base = iso ? new Date(`${iso}T12:00:00`) : new Date()
+  const dow = base.getDay()
+  const diff = dow === 0 ? -6 : 1 - dow
+  const mon = new Date(base)
+  mon.setDate(base.getDate() + diff)
+  return isoDateLocal(mon)
+}
+
+export function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`)
+  d.setDate(d.getDate() + days)
+  return isoDateLocal(d)
+}
+
+export function parseIsoDate(iso: string): { year: number; month: number; day: number } {
+  const [y, m, d] = iso.split('-').map(Number)
+  return { year: y, month: m, day: d }
+}
+
+export function formatShortDate(iso: string, locale: 'ru' | 'ka' = 'ru'): string {
+  const { year, month, day } = parseIsoDate(iso)
+  return new Date(year, month - 1, day).toLocaleDateString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+  })
+}

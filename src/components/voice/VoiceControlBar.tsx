@@ -33,7 +33,7 @@ export function VoiceControlBar({
       className={`fixed z-[89] flex max-w-sm flex-col gap-2 print:hidden ${dockClass}`}
     >
       {(feedback || interim) && (
-        <div className="rounded-lg border border-grid bg-white/95 px-3 py-2 text-xs text-stone-700 shadow-lg backdrop-blur">
+        <div className="rounded-sm border border-grid bg-white/95 px-3 py-2 text-xs text-stone-700 shadow-sm backdrop-blur">
           {interim && <p className="italic text-stone-400">{interim}…</p>}
           {feedback && <p className="font-medium">{feedback}</p>}
         </div>
@@ -41,7 +41,7 @@ export function VoiceControlBar({
       <div className="flex gap-2">
         <button
           type="button"
-          className="rounded-full border border-grid bg-white px-3 py-2 text-xs font-medium shadow-md hover:bg-paper-dark"
+          className="rounded-sm border border-grid bg-white px-3 py-2 text-xs font-medium shadow-md hover:bg-paper-dark"
           onClick={onHelp}
           title={t('voice.help')}
         >
@@ -49,7 +49,7 @@ export function VoiceControlBar({
         </button>
         <button
           type="button"
-          className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-lg transition-all ${
+          className={`flex items-center gap-2 rounded-sm px-4 py-2.5 text-sm font-semibold shadow-sm transition-all ${
             active
               ? listening
                 ? 'bg-red-500 text-white animate-pulse'

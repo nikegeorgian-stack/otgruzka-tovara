@@ -10,6 +10,7 @@ function stripRowData(sheet: MonthSheet, rowIds: string[]): MonthSheet {
   const plan = { ...sheet.plan }
   const fact = { ...sheet.fact }
   const comments = { ...sheet.comments }
+  const substitutions = { ...(sheet.substitutions ?? {}) }
   for (const id of rowIds) {
     delete plan[id]
     delete fact[id]
@@ -20,6 +21,9 @@ function stripRowData(sheet: MonthSheet, rowIds: string[]): MonthSheet {
     fact,
     comments: Object.fromEntries(
       Object.entries(comments).filter(([k]) => !drop.has(k.split('|')[0] ?? '')),
+    ),
+    substitutions: Object.fromEntries(
+      Object.entries(substitutions).filter(([k]) => !drop.has(k.split('|')[0] ?? '')),
     ),
     factOverrides: sheet.factOverrides.filter((k) => !drop.has(k.split('|')[0] ?? '')),
   }
@@ -73,4 +77,38 @@ export function removeBrigadeRow(sheet: MonthSheet, rowId: string): MonthSheet {
     rows: sheet.rows.filter((r) => r.id !== rowId),
   }
   return stripRowData(next, [rowId])
+}
+
+function countEmptyInBrigade(sheet: MonthSheet, brigade: string): number {
+  return sheet.rows.filter((r) => r.brigade === brigade && !r.employeeId).length
+}
+
+/**
+ * План бригады: одно пустое место в конце, когда все заняты — добавить ещё;
+ * лишние пустые (после снятия сотрудника) — убрать.
+ */
+export function normalizeBrigadeSlots(
+  sheet: MonthSheet,
+  brigade: string,
+  options?: { addIfAllFilled?: boolean },
+): MonthSheet {
+  const addIfAllFilled = options?.addIfAllFilled !== false
+  let next = sheet
+
+  for (let guard = 0; guard < 32; guard++) {
+    const empty = countEmptyInBrigade(next, brigade)
+    if (empty <= 1) break
+    const trimmed = removeEmptyBrigadeRow(next, brigade)
+    if (trimmed === next) break
+    next = trimmed
+  }
+
+  if (addIfAllFilled) {
+    const inBrigade = next.rows.filter((r) => r.brigade === brigade)
+    if (inBrigade.length > 0 && countEmptyInBrigade(next, brigade) === 0) {
+      next = addBrigadeRow(next, brigade)
+    }
+  }
+
+  return next
 }

@@ -1,3 +1,5 @@
+import { CloseIcon } from '@/components/ui/icons'
+
 type Props = {
   type: 'error' | 'success' | 'info'
   message: string
@@ -15,17 +17,17 @@ export function FormNotice({ type, message, onDismiss }: Props) {
   return (
     <div
       role="alert"
-      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${styles}`}
+      className={`flex items-start gap-2 rounded-sm border px-3 py-2 text-sm ${styles}`}
     >
       <span className="flex-1">{message}</span>
       {onDismiss && (
         <button
           type="button"
-          className="shrink-0 text-xs opacity-70 hover:opacity-100"
+          className="shrink-0 opacity-70 hover:opacity-100"
           onClick={onDismiss}
           aria-label="Закрыть"
         >
-          ×
+          <CloseIcon size={14} />
         </button>
       )}
     </div>

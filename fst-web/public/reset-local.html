@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FST — локальный сброс</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: system-ui, sans-serif;
+        background: #1c1917;
+        color: #fafaf9;
+        padding: 1.5rem;
+      }
+      .card {
+        max-width: 28rem;
+        width: 100%;
+        border: 1px solid rgb(45 212 191 / 0.35);
+        border-radius: 4px;
+        background: rgb(255 255 255 / 0.97);
+        color: #1c1917;
+        padding: 1.75rem;
+        box-shadow:
+          0 0 0 1px rgb(255 255 255 / 0.9) inset,
+          0 24px 48px -16px rgb(0 0 0 / 0.35);
+      }
+      h1 { margin: 0 0 0.5rem; font-size: 1.25rem; }
+      p { margin: 0.5rem 0; font-size: 0.875rem; color: #57534e; line-height: 1.5; }
+      .ok { color: #0f766e; font-weight: 600; }
+      .err { color: #b91c1c; }
+      button {
+        margin-top: 1rem;
+        width: 100%;
+        padding: 0.75rem;
+        border: none;
+        border-radius: 4px;
+        background: #0f766e;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 0.9375rem;
+      }
+      button:hover { background: #115e59; }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      ul { margin: 0.75rem 0 0; padding-left: 1.25rem; font-size: 0.8125rem; color: #78716c; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <p style="font-size:0.625rem;font-weight:700;letter-spacing:0.2em;color:#0f766e">FST</p>
+      <h1>Локальный сброс</h1>
+      <p id="status">Нажмите кнопку, чтобы очистить данные браузера на этом компьютере.</p>
+      <ul>
+        <li>localStorage / sessionStorage</li>
+        <li>кэш Firebase (IndexedDB)</li>
+        <li>биометрия Face ID (если была)</li>
+      </ul>
+      <p style="margin-top:0.75rem;font-size:0.75rem">
+        Облачные данные в Firestore <strong>не удаляются</strong>.
+      </p>
+      <button type="button" id="run">Сбросить и перейти на вход</button>
+    </div>
+    <script>
+      const STORAGE_KEYS = [
+        'fibercell-tabel-v6',
+        'fibercell-tabel-v5',
+        'fibercell-tabel-v4',
+        'fibercell-tabel-v3',
+        'fibercell-tabel-v2',
+        'tabel-local-v1',
+        'fibercell-corrupt-backup',
+        'fibercell-auth-session',
+        'fibercell-daily-backups',
+        'fst-biometric-v1',
+        'fibercell-ai-query-log',
+        'fibercell-attendance-log-selection',
+      ]
+
+      async function clearIndexedDb() {
+        if (!indexedDB.databases) return
+        const dbs = await indexedDB.databases()
+        await Promise.all(
+          dbs.map(
+            (db) =>
+              new Promise((resolve) => {
+                const req = indexedDB.deleteDatabase(db.name)
+                req.onsuccess = () => resolve()
+                req.onerror = () => resolve()
+                req.onblocked = () => resolve()
+              }),
+          ),
+        )
+      }
+
+      async function resetAll() {
+        const status = document.getElementById('status')
+        const btn = document.getElementById('run')
+        btn.disabled = true
+        try {
+          for (const key of STORAGE_KEYS) {
+            try { localStorage.removeItem(key) } catch (_) {}
+          }
+          try { sessionStorage.clear() } catch (_) {}
+          await clearIndexedDb()
+          status.innerHTML = '<span class="ok">Готово.</span> Переход на главную…'
+          setTimeout(() => { window.location.href = '/' }, 800)
+        } catch (e) {
+          status.innerHTML = '<span class="err">Ошибка: ' + String(e) + '</span>'
+          btn.disabled = false
+        }
+      }
+
+      document.getElementById('run').addEventListener('click', () => void resetAll())
+    </script>
+  </body>
+</html>

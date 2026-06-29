@@ -29,7 +29,7 @@ export function StorageAlert({
       {loadWarning && (
         <div
           role="alert"
-          className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 shadow-md"
+          className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-sm border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 shadow-md"
         >
           <span className="flex-1">
             {loadWarning === 'corrupt_recovered'
@@ -57,7 +57,7 @@ export function StorageAlert({
       {saveError && !saveError.ok && (
         <div
           role="alert"
-          className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-900 shadow-md"
+          className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-sm border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-900 shadow-md"
         >
           <span className="flex-1">
             {saveError.error === 'quota' ? t('storage.quotaError') : saveError.message}

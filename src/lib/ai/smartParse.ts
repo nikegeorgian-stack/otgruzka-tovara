@@ -138,6 +138,7 @@ function parseCodeFromText(text: string): DayCode | null {
   if (/\b22\b/.test(t)) return '22'
   if (/ночн|ночь|ночную/.test(t)) return 'Н'
   if (/выходн|выход/.test(t)) return 'В'
+  if (/неоплач|без содерж|за свой сч/.test(t)) return 'ОО'
   if (/отпуск|отгу/.test(t)) return 'ОТ'
   if (/больнич|больник|болеет/.test(t)) return 'Б'
   if (/прогул|не вышел/.test(t)) return 'X'
@@ -166,6 +167,7 @@ function parseDayRange(text: string): { fromDay?: number; toDay?: number; day?: 
 function parseSchedule(text: string): ScheduleType | null {
   const t = norm(text)
   if (/5\s*[/.\\]\s*2|пятиднев|5\s*2\s*8|восьмичас/.test(t)) return '5/2 8ч'
+  if (/1\s*[/.\\]\s*1|один\s*один|через\s*день|день\s*через\s*день/.test(t)) return '1/1 11ч'
   if (/2\s*[/.\\]\s*2|сменн|11\s*час|два\s*два/.test(t)) return '2/2 11ч'
   return null
 }
@@ -393,10 +395,10 @@ export function parseSmartIntent(
   }
   if (/^склад/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'warehouse' } }] }
   if (/^(табель|tabel)/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'month' } }] }
-  if (/^сотрудники/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'employees' } }] }
+  if (/^сотрудники/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'directories' } }] }
   if (/^настройки/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'settings' } }] }
   if (/^оплат/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'pay' } }] }
-  if (/^коды/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'codes' } }] }
+  if (/^коды/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'directories' } }] }
   if (/^сводка/.test(t)) return { tools: [{ name: 'navigate', args: { view: 'summary' } }] }
 
   if (/следующ(?:ий|его)\s+месяц/.test(t)) {

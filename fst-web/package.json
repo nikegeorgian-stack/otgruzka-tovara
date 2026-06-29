@@ -6,7 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync:firestore-rules": "node scripts/sync-firestore-rules.mjs",
+    "deploy:firestore-rules": "node scripts/sync-firestore-rules.mjs && firebase deploy --only firestore:rules --project fst-uchet-14c02",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting --project fst-uchet-14c02",
+    "migrate:cloud-store": "node scripts/normalize-cloud-store.mjs",
+    "clear:hr-cloud": "node scripts/clear-hr-employees.mjs",
+    "clear:hr-cloud:ps1": "powershell -ExecutionPolicy Bypass -File ../scripts/clear-hr-cloud.ps1",
+    "reset-local": "node ../scripts/reset-local.mjs"
   },
   "dependencies": {
     "firebase": "^11.10.0",

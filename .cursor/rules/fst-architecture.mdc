@@ -1,0 +1,42 @@
+---
+description: FST program architecture & policy map (modules, AppStore/slices, views/roles, production chain, i18n, deploy). Always-on context index.
+alwaysApply: true
+---
+
+# FST — карта программы (всегда в курсе)
+
+Учётная система (табель/HR, склад, закупки, производство, технолог, миксер, дирекция, финансы).
+React+TS+Vite+Tailwind. Десктоп и веб — **общий код** в `src/` (алиас `@`→`src/`);
+веб-обёртка `fst-web/`; бэкенд `server/`.
+
+## Разделы (ViewId → страница)
+`month, summary, production, planner, director, warehouse, procurement, technologist, mixer, hr, finance, directories, journals, settings`.
+Реестр ViewId — `src/lib/types.ts`; рендер — `src/App.tsx`; навигация — `src/components/layout/AppShell.tsx`;
+иконки — `webMobileNavIcons.tsx`; lazy-загрузка — `src/app/lazyPages.tsx`.
+
+## Состояние и данные
+- Единый `AppStore` (`src/lib/types.ts`); сборка/нормализация/миграции — `src/lib/storage.ts` (version 6).
+  Хранится одним JSON-блобом: localStorage + SQLite (`server`) + Firestore.
+- Срезы стора — `src/store/slices/*` (экспорт через `src/store/index.ts`),
+  подключение — `src/hooks/useAppStore.ts`, проброс пропсов — `src/App.tsx`.
+- Доменные модули — `src/lib/<domain>/` (обычно `types.ts`/`init.ts`/`calc.ts`):
+  production, planner, sales, finishedProducts, packaging, formulations (рецепты/замесы/задания миксеру),
+  technologist (QC), wastewater, warehouse, procurement, counterparties, access.
+
+## Доступ
+Роли — `src/lib/access/{types,roles,init}.ts`; доступ к разделу — `DEFAULT_ROLE_VIEWS` + `canAccessView`.
+
+## Производственная цепочка
+заказ клиента (`director`/`sales`) → произв. заказ (`planner`) → сменные заявки (`production`)
+→ задания миксеру (`formulations.mixTasks`) → замес (`formulations.batchRuns`, pending)
+→ подтверждение кладовщиком + этикетки QR/штрихкод.
+
+## Политика (обязательно)
+- i18n RU+KA: ключи добавлять **синхронно** в `src/i18n/ru.ts` и `src/i18n/ka.ts`.
+- Готовность правок: `npx tsc --noEmit` и `npm run build` без ошибок; затронутые файлы — без линт-ошибок.
+- Печать/PDF: `src/styles/print.css`, бордеры ≥ 1px.
+- Деплой: `docs/DEPLOY.md` (Vercel `vercel --prod`; Firebase требует `firebase login --reauth`).
+
+## Глубже (по требованию)
+Подробности — скил **`fst-architecture`** (`.cursor/skills/fst-architecture/`) и `docs/ARCHITECTURE.md`.
+Не читай справочники целиком — открывай только нужный раздел.

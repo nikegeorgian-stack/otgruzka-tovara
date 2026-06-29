@@ -1,4 +1,5 @@
-import * as XLSX from 'xlsx'
+import type { WorkSheet } from 'xlsx'
+import { loadXlsx } from '@/lib/lazy/xlsx'
 import { appendWarehouseAudit } from './audit'
 import type { StockMovement, WarehouseItem, WarehouseStore } from './types'
 
@@ -44,13 +45,14 @@ function isCategoryHeader(name: string, row: unknown[]): boolean {
 }
 
 function parseSheetMovements(
-  ws: XLSX.WorkSheet,
+  xlsx: Awaited<ReturnType<typeof loadXlsx>>,
+  ws: WorkSheet,
   sheetName: string,
   items: WarehouseItem[],
   warehouseId: string,
   warnings: string[],
 ): Omit<StockMovement, 'id' | 'createdAt'>[] {
-  const data = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
+  const data = xlsx.utils.sheet_to_json<(string | number | null)[]>(ws, {
     header: 1,
     defval: null,
   })
@@ -130,7 +132,8 @@ export async function importWarehouseFromExcel(
   store: WarehouseStore,
   warehouseId?: string,
 ): Promise<{ store: WarehouseStore; result: ImportResult }> {
-  let wb: XLSX.WorkBook
+  const XLSX = await loadXlsx()
+  let wb: import('xlsx').WorkBook
   try {
     const buf = await file.arrayBuffer()
     wb = XLSX.read(buf, { type: 'array', cellDates: true })
@@ -149,7 +152,7 @@ export async function importWarehouseFromExcel(
     if (/лист5|расход/i.test(name) && !/приход/i.test(name)) continue
     const ws = wb.Sheets[name]
     if (!ws) continue
-    const chunk = parseSheetMovements(ws, name, store.items, whId, warnings)
+    const chunk = parseSheetMovements(XLSX, ws, name, store.items, whId, warnings)
     if (chunk.length) {
       pending.push(...chunk)
       sheetsProcessed++
@@ -200,11 +203,12 @@ export async function importWarehouseFromExcel(
   }
 }
 
-export function exportWarehouseBalancesExcel(
+export async function exportWarehouseBalancesExcel(
   store: WarehouseStore,
   balances: Map<string, import('./types').ItemBalance>,
   warehouseId?: string,
-): void {
+): Promise<void> {
+  const XLSX = await loadXlsx()
   const loc = warehouseId
     ? store.locations.find((l) => l.id === warehouseId)?.name
     : 'Все склады'
@@ -235,4 +239,74 @@ export function exportWarehouseBalancesExcel(
   const ws = XLSX.utils.aoa_to_sheet(rows)
   XLSX.utils.book_append_sheet(wb, ws, (loc ?? 'Остатки').slice(0, 31))
   XLSX.writeFile(wb, `fibercell-sklad-${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
+
+const today = () => new Date().toISOString().slice(0, 10)
+
+export async function exportWarehouseReorderExcel(
+  store: WarehouseStore,
+  rows: { item: WarehouseItem; available: number; minStock: number; suggested: number }[],
+): Promise<void> {
+  const XLSX = await loadXlsx()
+  const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
+  const locMap = new Map(store.locations.map((l) => [l.id, l.name]))
+  const aoa: (string | number)[][] = [
+    ['Категория', 'Наименование', 'Склад', 'Ед.', 'Доступно', 'Минимум', 'Докупить'],
+  ]
+  for (const r of rows) {
+    aoa.push([
+      catMap.get(r.item.categoryId) ?? '',
+      r.item.name,
+      locMap.get(r.item.warehouseId) ?? '',
+      r.item.unit,
+      r.available,
+      r.minStock,
+      r.suggested,
+    ])
+  }
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'К пополнению')
+  XLSX.writeFile(wb, `fibercell-popolnenie-${today()}.xlsx`)
+}
+
+export async function exportWarehouseTurnoverExcel(
+  store: WarehouseStore,
+  rows: { itemId: string; receipt: number; issue: number; net: number }[],
+  period: { from: string; to: string },
+): Promise<void> {
+  const XLSX = await loadXlsx()
+  const itemMap = new Map(store.items.map((i) => [i.id, i]))
+  const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
+  const aoa: (string | number)[][] = [
+    [`Обороты ${period.from} — ${period.to}`],
+    ['Категория', 'Наименование', 'Ед.', 'Приход', 'Расход', 'Итого'],
+  ]
+  for (const r of rows) {
+    const item = itemMap.get(r.itemId)
+    aoa.push([
+      item ? catMap.get(item.categoryId) ?? '' : '',
+      item?.name ?? r.itemId,
+      item?.unit ?? '',
+      r.receipt,
+      r.issue,
+      r.net,
+    ])
+  }
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Обороты')
+  XLSX.writeFile(wb, `fibercell-oboroty-${today()}.xlsx`)
+}
+
+export async function exportWarehouseAuditExcel(
+  entries: { at: string; action: string; detail: string }[],
+  labelFor: (action: string) => string,
+): Promise<void> {
+  const XLSX = await loadXlsx()
+  const aoa: (string | number)[][] = [['Когда', 'Действие', 'Детали']]
+  for (const e of entries) {
+    aoa.push([e.at.slice(0, 16).replace('T', ' '), labelFor(e.action), e.detail])
+  }
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Журнал')
+  XLSX.writeFile(wb, `fibercell-audit-${today()}.xlsx`)
 }

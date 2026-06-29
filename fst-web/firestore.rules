@@ -1,26 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // FST — табель и склад (только свой документ)
-    match /fstStores/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    function isAllowedFstEmail() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in [
+          'admin@fibercell.net',
+          'admin-dm@fibercell.net',
+          'levan-admin@fibercell.net',
+          'hr-nino@fibercell.net',
+          'finans-lizi@fibercell.net',
+          'sklad-alexandra@fibercell.net',
+          'manager-ved-tamara@fibercell.net',
+          'technolog-lasha@fibercell.net',
+          'technolog-ekaterina@fibercell.net',
+          'technolog-annastasia@fibercell.net',
+          'technolog-maria@fibercell.net',
+          'master-karlo@fibercell.net',
+          'master-valera@fibercell.net',
+        ];
     }
 
-    // FBeda — заказы обедов (fibercell / eda-fibersell)
-    match /orders/{orderId} {
-      allow read, write: if true;
-    }
-
-    match /accepted_days/{dayId} {
-      allow read, write: if true;
-    }
-
-    match /cook_finance/{docId} {
-      allow read, write: if true;
-    }
-
-    match /config/{docId} {
-      allow read, write: if true;
+    match /fstStores/{storeId} {
+      allow read, write: if isAllowedFstEmail() && (
+        request.auth.uid == storeId ||
+        storeId == 'fibercell-main'
+      );
     }
   }
 }

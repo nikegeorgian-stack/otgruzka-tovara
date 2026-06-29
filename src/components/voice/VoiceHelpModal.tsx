@@ -23,7 +23,7 @@ export function VoiceHelpModal({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-xl bg-white p-6 shadow-xl">
+      <div className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-sm bg-white p-6 shadow-sm">
         <h3 className="text-lg font-bold">{t('voice.helpTitle')}</h3>
         <p className="mt-1 text-sm text-stone-500">{t('voice.helpHint')}</p>
         <ul className="mt-4 space-y-3 text-sm text-stone-700">
@@ -35,7 +35,7 @@ export function VoiceHelpModal({ onClose }: Props) {
         </ul>
         <button
           type="button"
-          className="mt-6 w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          className="mt-6 w-full rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white"
           onClick={onClose}
         >
           {t('common.cancel')}

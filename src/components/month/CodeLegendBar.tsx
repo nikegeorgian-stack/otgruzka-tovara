@@ -1,10 +1,14 @@
 import { useI18n } from '@/context/I18nContext'
 import { CODE_DEFS } from '@/lib/codes'
 
-export function CodeLegendBar() {
+export function CodeLegendBar({ compact = false }: { compact?: boolean }) {
   const { t, codeLabel } = useI18n()
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-grid bg-white/90 px-4 py-2.5 text-xs shadow-sm">
+    <div
+      className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${
+        compact ? '' : 'rounded-sm border border-grid bg-white/90 px-4 py-2.5 shadow-sm'
+      }`}
+    >
       <span className="font-semibold text-stone-500">{t('legend.codes')}:</span>
       {CODE_DEFS.map((c) => (
         <span key={c.code} className="text-stone-600">

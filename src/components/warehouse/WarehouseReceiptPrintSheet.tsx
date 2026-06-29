@@ -27,6 +27,12 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
         </p>
 
         <dl className="warehouse-receipt-meta">
+          {model.purpose ? (
+            <div>
+              <dt>{t('warehouse.doc.purpose')}</dt>
+              <dd>{t(`warehouse.doc.purpose.${model.purpose}`)}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>{t('warehouse.location')}</dt>
             <dd>{model.warehouseName}</dd>
@@ -35,6 +41,30 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
             <dt>{t('warehouse.doc.counterparty')}</dt>
             <dd>{model.counterparty}</dd>
           </div>
+          {model.contractNumber ? (
+            <div>
+              <dt>{t('warehouse.doc.contract')}</dt>
+              <dd>{model.contractNumber}</dd>
+            </div>
+          ) : null}
+          {model.invoiceKey ? (
+            <div>
+              <dt>{t('warehouse.doc.invoiceKey')}</dt>
+              <dd>{model.invoiceKey}</dd>
+            </div>
+          ) : null}
+          {model.keeperName ? (
+            <div>
+              <dt>{t('warehouse.doc.keeper')}</dt>
+              <dd>{model.keeperName}</dd>
+            </div>
+          ) : null}
+          {model.productionRequestLabel ? (
+            <div>
+              <dt>{t('warehouse.doc.productionRequest')}</dt>
+              <dd>{model.productionRequestLabel}</dd>
+            </div>
+          ) : null}
         </dl>
 
         <table className="warehouse-receipt-table">

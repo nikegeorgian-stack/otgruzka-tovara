@@ -16,6 +16,9 @@ const CODE_ALIASES: Record<string, TimesheetCode> = {
   выходной: 'В',
   от: 'ОТ',
   отпуск: 'ОТ',
+  оо: 'ОО',
+  'неоплачиваемыйотпуск': 'ОО',
+  'отпускбезсодержания': 'ОО',
   б: 'Б',
   больничный: 'Б',
   x: 'X',
@@ -30,7 +33,7 @@ export function normalizeCode(raw: unknown): DayCode | null {
   const n = s.toLowerCase().replace(/\s+/g, '')
   if (CODE_ALIASES[n]) return CODE_ALIASES[n]
   const up = s.toUpperCase() as DayCode
-  if (['8', '11', 'Н', '22', 'В', 'ОТ', 'Б', 'X', 'ПР', ''].includes(up)) return up
+  if (['8', '11', 'Н', '22', 'В', 'ОТ', 'ОО', 'Б', 'X', 'ПР', ''].includes(up)) return up
   return null
 }
 

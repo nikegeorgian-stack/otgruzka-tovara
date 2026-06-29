@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useFstAuth } from '@/context/FstAuthContext'
-import { FST_ADMIN_EMAIL } from '@/lib/cloud/fstAdmin'
+import { useI18n } from '@/context/I18nContext'
 import {
   biometricErrorMessage,
   hasBiometricRegistration,
@@ -12,7 +12,8 @@ import {
 
 export function FstLoginScreen() {
   const { login, configured } = useFstAuth()
-  const [email, setEmail] = useState(FST_ADMIN_EMAIL)
+  const { t } = useI18n()
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -40,7 +41,7 @@ export function FstLoginScreen() {
   if (!configured) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-100 p-6">
-        <div className="max-w-md rounded-2xl border border-red-200 bg-white p-8 shadow-lg">
+        <div className="max-w-md rounded-sm border border-red-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-bold text-ink">FST — настройка Firebase</h1>
           <p className="mt-3 text-sm text-stone-600">
             Добавьте переменные <code className="text-xs">VITE_FIREBASE_*</code> в Vercel /{' '}
@@ -92,21 +93,21 @@ export function FstLoginScreen() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-teal-950 via-stone-900 to-stone-950 p-6">
+    <div className="flex min-h-[100dvh] items-center justify-center bg-stone-900 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <form
         onSubmit={submit}
-        className="w-full max-w-md rounded-2xl border border-white/10 bg-white/95 p-8 shadow-2xl backdrop-blur"
+        className="w-full max-w-md rounded-sm border border-white/10 bg-white/95 p-6 shadow-sm backdrop-blur sm:p-8"
       >
         <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-teal-700">FST</p>
-        <h1 className="mt-1 text-2xl font-bold text-ink">Администратор</h1>
-        <p className="mt-1 text-sm text-stone-500">Полный доступ · табель и склад</p>
+        <h1 className="mt-1 text-2xl font-bold text-ink">{t('web.login.title')}</h1>
+        <p className="mt-1 text-sm text-stone-500">{t('web.login.subtitle')}</p>
 
         {bioRegistered && (
           <button
             type="button"
             disabled={busy}
             onClick={() => void submitBiometric()}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 py-3 text-sm font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-sm border border-teal-200 bg-teal-50 py-3 text-sm font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
           >
             <span aria-hidden className="text-lg">
               👤
@@ -127,7 +128,7 @@ export function FstLoginScreen() {
             type="email"
             required
             autoComplete="email"
-            className="mt-1 w-full rounded-lg border border-grid px-3 py-2.5 text-sm"
+            className="mt-1 w-full rounded-sm border border-grid px-3 py-3 text-base sm:py-2.5 sm:text-sm"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
@@ -139,7 +140,7 @@ export function FstLoginScreen() {
             required
             minLength={6}
             autoComplete="current-password"
-            className="mt-1 w-full rounded-lg border border-grid px-3 py-2.5 text-sm"
+            className="mt-1 w-full rounded-sm border border-grid px-3 py-3 text-base sm:py-2.5 sm:text-sm"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -158,7 +159,7 @@ export function FstLoginScreen() {
         )}
 
         {error && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+          <p className="mt-3 rounded-sm bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
             {error}
           </p>
         )}
@@ -166,7 +167,7 @@ export function FstLoginScreen() {
         <button
           type="submit"
           disabled={busy}
-          className="mt-5 w-full rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+          className="mt-5 min-h-[3rem] w-full rounded-sm bg-teal-700 py-3 text-base font-semibold text-white hover:bg-teal-800 disabled:opacity-50 sm:py-2.5 sm:text-sm"
         >
           {busy ? '…' : 'Войти по паролю'}
         </button>

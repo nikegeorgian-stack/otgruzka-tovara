@@ -57,7 +57,7 @@ export function WarehouseReceiptPrintPreview({ model, onClose }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="rounded-lg border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+            className="rounded-sm border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
             disabled={pdfBusy}
             onClick={() => void handlePdf()}
           >
@@ -65,14 +65,14 @@ export function WarehouseReceiptPrintPreview({ model, onClose }: Props) {
           </button>
           <button
             type="button"
-            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-stone-900 hover:bg-stone-100"
+            className="rounded-sm bg-white px-4 py-2 text-sm font-semibold text-stone-900 hover:bg-stone-100"
             onClick={handlePrint}
           >
             {t('print.printBtn')}
           </button>
           <button
             type="button"
-            className="rounded-lg border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+            className="rounded-sm border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
             onClick={onClose}
           >
             {t('print.close')}

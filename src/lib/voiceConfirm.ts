@@ -1,3 +1,4 @@
+import { scheduleShortLabel } from './schedules'
 import type { VoiceAction } from './voiceCommands'
 
 const CONFIRM_TYPES = new Set<VoiceAction['type']>([
@@ -30,7 +31,7 @@ export function describeVoiceAction(action: VoiceAction): string {
       return `график ${action.name} с ${action.fromDay}`
     case 'changeEmployeeShift': {
       const parts = []
-      if (action.schedule) parts.push(action.schedule === '5/2 8ч' ? '5/2' : '2/2')
+      if (action.schedule) parts.push(scheduleShortLabel(action.schedule))
       if (action.group2x2) parts.push(`гр.${action.group2x2}`)
       if (action.shiftMode) parts.push(action.shiftMode === 'night' ? 'ночь' : 'день')
       return `${action.name} · ${parts.join(' ') || 'смена'} · с ${action.fromDay}`

@@ -13,7 +13,7 @@ export function BilingualText({
   secondaryClassName = 'text-[10px] text-stone-500',
 }: Props) {
   if (!lines.secondary) {
-    return <span className={className}>{lines.primary}</span>
+    return <span className={`block ${className}`.trim()}>{lines.primary}</span>
   }
   return (
     <span className={`block leading-tight ${className}`}>

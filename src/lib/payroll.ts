@@ -1,5 +1,10 @@
 import { hoursForCode } from './codes'
 import { dayDateKey } from './dates'
+import {
+  getFactExtraHours,
+  isWorkCode,
+  OVERTIME_EXTRA_MULTIPLIER,
+} from './factExtra'
 import { getFactMark, rowStats } from './stats'
 import type { DayCode, Employee, MonthSheet } from './types'
 
@@ -47,6 +52,10 @@ export function calculateRowPay(
     const key = dayDateKey(year, month, d)
     const code = getFactMark(sheet, rowId, key)
     amount += payForCode(code, rate)
+    const extra = getFactExtraHours(sheet, rowId, key)
+    if (extra > 0 && isWorkCode(code)) {
+      amount += extra * rate * OVERTIME_EXTRA_MULTIPLIER
+    }
   }
 
   return {

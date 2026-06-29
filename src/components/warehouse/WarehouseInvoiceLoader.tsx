@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
+import { isInvoiceAlreadyPosted } from '@/lib/warehouse/documents'
 import {
   applyInvoiceToItems,
   findInvoiceByKey,
@@ -40,6 +41,10 @@ export function WarehouseInvoiceLoader({
   const [notice, setNotice] = useState<{ type: 'error' | 'info'; message: string } | null>(null)
 
   function applyInvoice(invoice: GeorgianInvoice) {
+    if (isInvoiceAlreadyPosted(warehouse, invoice.key)) {
+      setNotice({ type: 'error', message: t('warehouse.invoice.alreadyPosted') })
+      return
+    }
     const { matched, unmatched } = applyInvoiceToItems(invoice, items)
     if (!matched.length) {
       setNotice({
@@ -80,13 +85,6 @@ export function WarehouseInvoiceLoader({
     if (!found) {
       setNotice({ type: 'error', message: t('warehouse.invoice.notFound') })
       return
-    }
-
-    const dup = warehouse.documents.some(
-      (d) => d.type === 'receipt' && d.invoiceKey === found.key,
-    )
-    if (dup) {
-      setNotice({ type: 'info', message: t('warehouse.invoice.alreadyPosted') })
     }
 
     applyInvoice(found)
@@ -135,13 +133,13 @@ export function WarehouseInvoiceLoader({
   const registryCount = warehouse.invoiceRegistry.length
 
   return (
-    <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-4">
+    <div className="rounded-sm border border-teal-200 bg-teal-50/40 p-4">
       <h4 className="text-sm font-bold text-teal-900">{t('warehouse.invoice.title')}</h4>
       <p className="mt-1 text-xs text-teal-800/80">{t('warehouse.invoice.hint')}</p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <input
-          className="min-w-[12rem] flex-1 rounded-lg border border-grid bg-white px-3 py-2 text-sm"
+          className="min-w-[12rem] flex-1 rounded-sm border border-grid bg-white px-3 py-2 text-sm"
           placeholder={t('warehouse.invoice.placeholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -154,14 +152,14 @@ export function WarehouseInvoiceLoader({
         />
         <button
           type="button"
-          className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+          className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
           onClick={lookupRegistry}
         >
           {t('warehouse.invoice.load')}
         </button>
         <button
           type="button"
-          className="rounded-lg border border-teal-600 bg-white px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+          className="rounded-sm border border-teal-600 bg-white px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
           onClick={() => fileRef.current?.click()}
         >
           {t('warehouse.invoice.importFile')}

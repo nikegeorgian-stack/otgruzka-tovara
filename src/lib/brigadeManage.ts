@@ -2,11 +2,12 @@ import { createEmptyBrigadeRow } from './brigadeRows'
 import { buildPlanRow } from './schedule'
 import type { AppStore, MonthSheet } from './types'
 
-function mergeBrigadeIntoSheet(
+export function mergeBrigadeIntoSheet(
   sheet: MonthSheet,
   brigade: string,
   employees: AppStore['employees'],
 ): MonthSheet {
+  if (sheet.rows.some((r) => r.brigade === brigade)) return sheet
   const startOrder =
     sheet.rows.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1
   let order = startOrder
@@ -41,20 +42,34 @@ function mergeBrigadeIntoSheet(
   return { ...sheet, rows, plan, fact }
 }
 
+/** Убедиться, что у каждого месяца есть строки для всех бригад из справочника. */
+export function syncAllBrigadesIntoMonths(store: AppStore): AppStore {
+  if (!store.brigades.length) return store
+  let changed = false
+  const months: AppStore['months'] = { ...store.months }
+  for (const [key, sheet] of Object.entries(store.months)) {
+    let next = sheet
+    for (const brigade of store.brigades) {
+      const merged = mergeBrigadeIntoSheet(next, brigade, store.employees)
+      if (merged !== next) {
+        next = merged
+        changed = true
+      }
+    }
+    if (next !== sheet) months[key] = next
+  }
+  if (!changed) return store
+  return { ...store, months }
+}
+
 export function addBrigadeToStore(store: AppStore, name: string): AppStore {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('empty')
   if (store.brigades.some((b) => b === trimmed)) throw new Error('duplicate')
 
   const brigades = [...store.brigades, trimmed]
-  const months = Object.fromEntries(
-    Object.entries(store.months).map(([key, sheet]) => [
-      key,
-      mergeBrigadeIntoSheet(sheet, trimmed, store.employees),
-    ]),
-  )
-
-  return { ...store, brigades, months }
+  const withBrigade = { ...store, brigades }
+  return syncAllBrigadesIntoMonths(withBrigade)
 }
 
 export function renameBrigadeInStore(
@@ -92,9 +107,6 @@ export function removeBrigadeFromStore(store: AppStore, name: string): AppStore 
   if (!store.brigades.includes(name)) throw new Error('missing')
   if (store.brigades.length <= 1) throw new Error('last')
 
-  const assigned = store.employees.filter((e) => e.brigade === name && e.active)
-  if (assigned.length > 0) throw new Error('employees')
-
   const brigades = store.brigades.filter((b) => b !== name)
   const employees = store.employees.map((e) =>
     e.brigade === name ? { ...e, brigade: '' } : e,
@@ -104,6 +116,8 @@ export function removeBrigadeFromStore(store: AppStore, name: string): AppStore 
       const dropIds = new Set(
         sheet.rows.filter((r) => r.brigade === name).map((r) => r.id),
       )
+      if (dropIds.size === 0) return [key, sheet]
+
       const plan = { ...sheet.plan }
       const fact = { ...sheet.fact }
       for (const id of dropIds) {
@@ -111,14 +125,28 @@ export function removeBrigadeFromStore(store: AppStore, name: string): AppStore 
         delete fact[id]
       }
       const rows = sheet.rows.filter((r) => r.brigade !== name)
-      const factOverrides = sheet.factOverrides.filter(
-        (k) => !dropIds.has(k.split('|')[0] ?? ''),
+      const byRowKey = (k: string) => dropIds.has(k.split('|')[0] ?? '')
+      const factOverrides = sheet.factOverrides.filter((k) => !byRowKey(k))
+      const comments = Object.fromEntries(
+        Object.entries(sheet.comments ?? {}).filter(([k]) => !byRowKey(k)),
       )
-      return [key, { ...sheet, rows, plan, fact, factOverrides }]
+      const substitutions = Object.fromEntries(
+        Object.entries(sheet.substitutions ?? {}).filter(([k]) => !byRowKey(k)),
+      )
+      const factExtraHours = Object.fromEntries(
+        Object.entries(sheet.factExtraHours ?? {}).filter(([k]) => !byRowKey(k)),
+      )
+      return [
+        key,
+        { ...sheet, rows, plan, fact, factOverrides, comments, substitutions, factExtraHours },
+      ]
     }),
   )
 
-  return { ...store, brigades, employees, months }
+  const { [name]: _removedKa, ...brigadeNamesKa } = store.brigadeNamesKa
+  const { [name]: _removedBrigadier, ...brigadiers } = store.brigadiers
+
+  return { ...store, brigades, brigadeNamesKa, brigadiers, employees, months }
 }
 
 export function brigadeEmployeeCount(store: AppStore, name: string): number {

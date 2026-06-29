@@ -1,4 +1,5 @@
 import { dayDateKey, daysInMonth, parseMonthKey } from './dates'
+import { findRowByEmployeeId } from './substitutions'
 import { getFactMark } from './stats'
 import type { AppStore, MonthSheet } from './types'
 
@@ -17,6 +18,11 @@ export function monthProblems(store: AppStore, sheet: MonthSheet): MonthProblem[
   let mismatches = 0
   let emptyRows = 0
   let unfilled = 0
+  let substitutionNoRow = 0
+
+  for (const sub of Object.values(sheet.substitutions ?? {})) {
+    if (!findRowByEmployeeId(sheet, sub.substituteEmployeeId)) substitutionNoRow++
+  }
 
   for (const row of sheet.rows) {
     if (!row.employeeId) {
@@ -57,6 +63,14 @@ export function monthProblems(store: AppStore, sheet: MonthSheet): MonthProblem[
       severity: 'info',
       messageKey: 'problems.unfilled',
       count: unfilled,
+    })
+  }
+  if (substitutionNoRow > 0) {
+    problems.push({
+      id: 'substitutionNoRow',
+      severity: 'warn',
+      messageKey: 'problems.substitutionNoRow',
+      count: substitutionNoRow,
     })
   }
 

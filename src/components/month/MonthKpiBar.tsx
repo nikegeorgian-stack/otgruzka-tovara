@@ -22,7 +22,7 @@ export function MonthKpiBar({ stats }: Props) {
       {items.map((item) => (
         <div
           key={item.label}
-          className="rounded-lg border border-grid bg-white px-3 py-2 shadow-sm"
+          className="rounded-sm border border-grid bg-white px-3 py-2 shadow-sm"
         >
           <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
             {item.label}

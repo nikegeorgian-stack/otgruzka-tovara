@@ -13,7 +13,7 @@ import { VoiceControlBar } from '@/components/voice/VoiceControlBar'
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition'
 import { describeVoiceAction, voiceActionNeedsConfirm } from '@/lib/voiceConfirm'
 import { parseVoiceCommand, type VoiceAction } from '@/lib/voiceCommands'
-import type { DayCode, Group2x2, ShiftMode, ViewId } from '@/lib/types'
+import type { DayCode, Group2x2, ScheduleType, ShiftMode, ViewId } from '@/lib/types'
 import type { PrintVariant } from '@/components/print/PrintPreviewModal'
 
 export type VoiceHandlers = {
@@ -30,7 +30,7 @@ export type VoiceHandlers = {
   onClearSearch?: () => void
   onClearFilters?: () => void
   onFilterBrigade?: (query: string) => string | void
-  onFilterSchedule?: (schedule: '5/2 8ч' | '2/2 11ч' | '') => void
+  onFilterSchedule?: (schedule: ScheduleType | '') => void
   onAssignByName?: (name: string, brigadeQuery?: string) => string | void
   onUnassignByName?: (name: string) => string | void
   onReplaceInBrigade?: (args: {
@@ -42,12 +42,12 @@ export type VoiceHandlers = {
   onChangeSchedule?: (args: {
     name: string
     fromDay: number
-    schedule: '5/2 8ч' | '2/2 11ч'
+    schedule: ScheduleType
   }) => string | void
   onChangeEmployeeShift?: (args: {
     name: string
     fromDay: number
-    schedule?: '5/2 8ч' | '2/2 11ч'
+    schedule?: ScheduleType
     group2x2?: Group2x2
     shiftMode?: ShiftMode
   }) => string | void

@@ -19,7 +19,7 @@ export function OnboardingTour({ step, onNext, onSkip }: Props) {
   if (step >= STEPS.length) return null
 
   return (
-    <div className="fixed bottom-6 right-6 z-[115] max-w-sm rounded-xl border border-accent/30 bg-white p-4 shadow-2xl">
+    <div className="fixed bottom-6 right-6 z-[115] max-w-sm rounded-sm border border-accent/30 bg-white p-4 shadow-sm">
       <p className="text-xs font-semibold uppercase text-accent">
         {t('tour.title')} {step + 1}/{STEPS.length}
       </p>
@@ -27,14 +27,14 @@ export function OnboardingTour({ step, onNext, onSkip }: Props) {
       <div className="mt-4 flex gap-2">
         <button
           type="button"
-          className="flex-1 rounded-lg border border-grid py-2 text-xs"
+          className="flex-1 rounded-sm border border-grid py-2 text-xs"
           onClick={onSkip}
         >
           {t('tour.skip')}
         </button>
         <button
           type="button"
-          className="flex-1 rounded-lg bg-accent py-2 text-xs font-semibold text-white"
+          className="flex-1 rounded-sm bg-accent py-2 text-xs font-semibold text-white"
           onClick={onNext}
         >
           {step + 1 >= STEPS.length ? t('tour.done') : t('tour.next')}

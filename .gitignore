@@ -1,5 +1,8 @@
 # Local backups may contain personal data — keep private
 data/*.json
+data/tabel.db
+data/tabel.db-wal
+data/tabel.db-shm
 !data/example-tabel.json
 data/xlsx-cols.txt
 data/xlsx-row-dump.txt
@@ -17,7 +20,15 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
 fst-web/.env
+fst-web/.env.production
+fst-web/.env.vercel
+fst-web/.env.production.vercel
 fst-web/dist
 .firebase
 .vercel
@@ -34,3 +45,10 @@ fst-web/dist
 *.sw?
 
 .vercel
+
+.vercel
+
+.vercel
+
+# graphify knowledge graph (regenerated via: graphify update .)
+graphify-out/

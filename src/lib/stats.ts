@@ -1,5 +1,7 @@
 import { hoursForCode } from './codes'
 import { daysInMonth, parseMonthKey } from './dates'
+import { getFactExtraHours } from './factExtra'
+import { NO_STRUCTURAL_UNIT_ID } from './monthViewOptions'
 import type { DayCode, Employee, MonthSheet } from './types'
 
 export type RowStats = {
@@ -9,6 +11,7 @@ export type RowStats = {
   factShifts: number
   v: number
   ot: number
+  oo: number
   b: number
   x: number
   pr: number
@@ -69,7 +72,7 @@ export function rowStats(
     const p = plan[key] ?? ''
     const f = getFactMark(sheet, rowId, key)
     factAgg[key] = f
-    factHours += hoursForCode(f)
+    factHours += hoursForCode(f) + getFactExtraHours(sheet, rowId, key)
     if (f === '8' || f === '11' || f === 'Н' || f === '22') factShifts++
     if (p !== f) mismatches++
   }
@@ -81,6 +84,7 @@ export function rowStats(
     factShifts,
     v: countCode(plan, 'В'),
     ot: countCode(factAgg, 'ОТ'),
+    oo: countCode(factAgg, 'ОО'),
     b: countCode(factAgg, 'Б'),
     x: countCode(factAgg, 'X'),
     pr: countCode(factAgg, 'ПР'),
@@ -88,10 +92,15 @@ export function rowStats(
   }
 }
 
+export type MonthStatsFilter = {
+  brigades?: string[]
+  structuralUnitIds?: string[]
+}
+
 export function monthStats(
   sheet: MonthSheet,
   employees: Employee[],
-  brigades?: string[],
+  filter?: MonthStatsFilter | string[],
 ): MonthStats {
   const { year, month } = parseMonthKey(sheet.month)
   const days = daysInMonth(year, month)
@@ -103,18 +112,25 @@ export function monthStats(
   let filled = 0
   let total = 0
 
-  const brigadeSet = brigades ? new Set(brigades) : null
+  const brigadeList = Array.isArray(filter) ? filter : filter?.brigades
+  const unitList = Array.isArray(filter) ? undefined : filter?.structuralUnitIds
+  const brigadeSet = brigadeList?.length ? new Set(brigadeList) : null
+  const unitSet = unitList?.length ? new Set(unitList) : null
 
   for (const row of sheet.rows) {
     if (brigadeSet && !brigadeSet.has(row.brigade)) continue
     if (!row.employeeId) continue
     const emp = employees.find((e) => e.id === row.employeeId)
     if (!emp?.active) continue
+    if (unitSet) {
+      const unitKey = emp.structuralUnitId ?? NO_STRUCTURAL_UNIT_ID
+      if (!unitSet.has(unitKey)) continue
+    }
     const rs = rowStats(sheet, row.id, days, year, month)
     planHours += rs.planHours
     factHours += rs.factHours
     mismatches += rs.mismatches
-    absences += rs.ot + rs.b + rs.x + rs.pr
+    absences += rs.ot + rs.oo + rs.b + rs.x + rs.pr
     factShifts += rs.factShifts
     for (let d = 1; d <= days; d++) {
       total++

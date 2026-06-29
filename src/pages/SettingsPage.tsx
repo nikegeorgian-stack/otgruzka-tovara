@@ -1,24 +1,34 @@
 import { useState } from 'react'
+import { AccessAdminPanel } from '@/components/auth/AccessAdminPanel'
+import { CoachSettingsPanel } from '@/components/ai/CoachSettingsPanel'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { PageLayout } from '@/components/ui/PageLayout'
 import { useI18n } from '@/context/I18nContext'
+import { useConfirm } from '@/context/ConfirmContext'
 import { listDailyBackups, restoreDailyBackup, saveBackupToFolder } from '@/lib/backup'
-import { brigadeEmployeeCount } from '@/lib/brigadeManage'
 import { formatMonthTitle, monthKey, shiftMonth } from '@/lib/dates'
 import { isMonthArchived, listMonthKeys } from '@/lib/monthManage'
 import { exportToJson } from '@/lib/storage'
-import type { AppStore, PrintSignatures } from '@/lib/types'
+import { canManageAccess } from '@/lib/access/permissions'
+import type { AccessRoleId } from '@/lib/access/types'
+import type { AppUser } from '@/lib/access/types'
+import type { AppStore, PrintSignatures, ViewId } from '@/lib/types'
+import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
 
 type Props = {
   store: AppStore
-  isAccountant: boolean
-  onAddBrigade: (name: string) => void
-  onRenameBrigade: (oldName: string, newName: string) => void
-  onRemoveBrigade: (name: string) => void
+  currentUser: AppUser | null
+  onUpsertAppUser: (input: UpsertAppUserInput) => Promise<void>
+  onRemoveAppUser: (id: string) => void
+  onSetRoleViews: (roleId: AccessRoleId, views: ViewId[]) => void
+  onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
+  onSetRoleAllowDocumentCancel: (roleId: AccessRoleId, allowed: boolean) => void
+  onSetWarehouseMonthClosed: (month: string, closed: boolean) => void
   onAddMonth: (month: string) => void
   onRemoveMonth: (month: string) => void
   onArchiveMonth: (month: string, archived: boolean) => void
   onUpdateSettings: (patch: Partial<AppStore['settings']>) => void
-  onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
   onRestoreTrashEmployee: (deletedAt: string) => void
   onRestoreTrashMonth: (deletedAt: string) => void
   onPurgeTrashEmployee: (deletedAt: string) => void
@@ -28,15 +38,17 @@ type Props = {
 
 export function SettingsPage({
   store,
-  isAccountant,
-  onAddBrigade,
-  onRenameBrigade,
-  onRemoveBrigade,
+  currentUser,
+  onUpsertAppUser,
+  onRemoveAppUser,
+  onSetRoleViews,
+  onSetRoleAllowNegativeStock,
+  onSetRoleAllowDocumentCancel,
+  onSetWarehouseMonthClosed,
   onAddMonth,
   onRemoveMonth,
   onArchiveMonth,
   onUpdateSettings,
-  onSetBrigadeNameKa,
   onRestoreTrashEmployee,
   onRestoreTrashMonth,
   onPurgeTrashEmployee,
@@ -44,16 +56,15 @@ export function SettingsPage({
   onReplaceStore,
 }: Props) {
   const { t, tf, locale, setLocale } = useI18n()
-  const [newBrigade, setNewBrigade] = useState('')
-  const [editingBrigade, setEditingBrigade] = useState<string | null>(null)
-  const [editBrigadeName, setEditBrigadeName] = useState('')
-  const [editBrigadeKa, setEditBrigadeKa] = useState('')
-  const [newPassword, setNewPassword] = useState('')
+  const { confirm } = useConfirm()
   const [newMonth, setNewMonth] = useState(() => {
     const keys = listMonthKeys(store)
     const last = keys[keys.length - 1]
     return last ? shiftMonth(last, 1) : monthKey(new Date().getFullYear(), new Date().getMonth() + 1)
   })
+  const [newWhPeriod, setNewWhPeriod] = useState(() =>
+    monthKey(new Date().getFullYear(), new Date().getMonth() + 1),
+  )
   const [notice, setNotice] = useState<{ type: 'error' | 'success' | 'info'; message: string } | null>(
     null,
   )
@@ -63,6 +74,7 @@ export function SettingsPage({
   }
 
   const months = listMonthKeys(store)
+  const closedWhMonths = store.warehouse.closedMonths ?? []
   const dailyBackups = listDailyBackups()
   const signatures = store.settings.signatures ?? {}
 
@@ -70,26 +82,6 @@ export function SettingsPage({
     onUpdateSettings({
       signatures: { ...signatures, ...patch },
     })
-  }
-
-  function brigadeErrorMessage(err: unknown): string {
-    if (err instanceof Error) {
-      switch (err.message) {
-        case 'empty':
-          return t('settings.err.brigadeEmpty')
-        case 'duplicate':
-          return t('settings.err.brigadeDuplicate')
-        case 'last':
-          return t('settings.err.brigadeLast')
-        case 'employees':
-          return t('settings.err.brigadeEmployees')
-        case 'missing':
-          return t('settings.err.brigadeMissing')
-        default:
-          return err.message
-      }
-    }
-    return t('settings.err.generic')
   }
 
   function monthErrorMessage(err: unknown): string {
@@ -108,57 +100,6 @@ export function SettingsPage({
     return t('settings.err.generic')
   }
 
-  function handleAddBrigade(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = newBrigade.trim()
-    if (!trimmed) {
-      showNotice('error', t('settings.err.brigadeEmpty'))
-      return
-    }
-    try {
-      onAddBrigade(trimmed)
-      setNewBrigade('')
-      showNotice('success', t('settings.brigadeAdded'))
-    } catch (err) {
-      showNotice('error', brigadeErrorMessage(err))
-    }
-  }
-
-  function saveBrigadeRename(oldName: string) {
-    const trimmed = editBrigadeName.trim()
-    if (!trimmed) {
-      showNotice('error', t('settings.err.brigadeEmpty'))
-      return
-    }
-    try {
-      onRenameBrigade(oldName, trimmed)
-      if (editBrigadeKa.trim()) {
-        onSetBrigadeNameKa(trimmed, editBrigadeKa.trim())
-      }
-      setEditingBrigade(null)
-      setEditBrigadeName('')
-      setEditBrigadeKa('')
-      showNotice('success', t('settings.brigadeSaved'))
-    } catch (err) {
-      showNotice('error', brigadeErrorMessage(err))
-    }
-  }
-
-  function handleRemoveBrigade(name: string) {
-    const count = brigadeEmployeeCount(store, name)
-    if (count > 0) {
-      showNotice('error', tf('settings.confirmDeleteBrigadeBusy', { name, count }))
-      return
-    }
-    if (!confirm(tf('settings.confirmDeleteBrigade', { name }))) return
-    try {
-      onRemoveBrigade(name)
-      showNotice('success', t('settings.brigadeRemoved'))
-    } catch (err) {
-      showNotice('error', brigadeErrorMessage(err))
-    }
-  }
-
   function handleAddMonth(e: React.FormEvent) {
     e.preventDefault()
     try {
@@ -170,17 +111,18 @@ export function SettingsPage({
     }
   }
 
-  function handleRemoveMonth(month: string) {
+  async function handleRemoveMonth(month: string) {
     if (isMonthArchived(store, month)) {
       showNotice('error', t('settings.err.archiveRemove'))
       return
     }
     if (
-      !confirm(
-        tf('settings.confirmDeleteMonth', {
+      !(await confirm({
+        message: tf('settings.confirmDeleteMonth', {
           month: formatMonthTitle(month, locale),
         }),
-      )
+        danger: true,
+      }))
     ) {
       return
     }
@@ -193,11 +135,8 @@ export function SettingsPage({
   }
 
   return (
-    <div className="flex flex-col gap-8 p-5">
-      <header>
-        <h2 className="text-xl font-bold text-ink">{t('settings.title')}</h2>
-        <p className="text-sm text-ink-muted">{t('settings.subtitle')}</p>
-      </header>
+    <PageLayout className="gap-8">
+      <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
       {notice && (
         <FormNotice
@@ -207,7 +146,81 @@ export function SettingsPage({
         />
       )}
 
-      <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+      {currentUser && canManageAccess(currentUser) && (
+        <AccessAdminPanel
+          access={store.access}
+          employees={store.employees}
+          currentUser={currentUser}
+          onUpsertUser={onUpsertAppUser}
+          onRemoveUser={onRemoveAppUser}
+          onSetRoleViews={onSetRoleViews}
+          onSetRoleAllowNegativeStock={onSetRoleAllowNegativeStock}
+          onSetRoleAllowDocumentCancel={onSetRoleAllowDocumentCancel}
+        />
+      )}
+
+      {currentUser && canManageAccess(currentUser) && (
+        <CoachSettingsPanel store={store} onUpdateSettings={onUpdateSettings} />
+      )}
+
+      {currentUser && canManageAccess(currentUser) && (
+        <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+            {t('settings.warehousePeriods')}
+          </h3>
+          <p className="mt-1 text-sm text-stone-500">{t('settings.warehousePeriodsHint')}</p>
+          <form
+            className="mt-4 flex flex-wrap items-end gap-3"
+            onSubmit={(e) => {
+              e.preventDefault()
+              onSetWarehouseMonthClosed(newWhPeriod, true)
+              showNotice('success', t('settings.warehousePeriodClosed'))
+            }}
+          >
+            <label className="text-xs font-medium text-stone-500">
+              {t('settings.colWhPeriod')}
+              <input
+                type="month"
+                className="mt-1 block rounded-sm border border-grid px-3 py-2 text-sm"
+                value={newWhPeriod}
+                onChange={(e) => setNewWhPeriod(e.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              className="rounded-sm bg-stone-800 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-900"
+            >
+              {t('settings.warehousePeriodClose')}
+            </button>
+          </form>
+          {closedWhMonths.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-sm">
+              {closedWhMonths.map((month) => (
+                <li key={month} className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium capitalize">{formatMonthTitle(month, locale)}</span>
+                  <span className="rounded-sm bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">
+                    {t('settings.warehousePeriodClosedBadge')}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xs text-accent hover:underline"
+                    onClick={() => {
+                      onSetWarehouseMonthClosed(month, false)
+                      showNotice('success', t('settings.warehousePeriodOpened'))
+                    }}
+                  >
+                    {t('settings.warehousePeriodOpen')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-stone-400">{t('settings.warehousePeriodsEmpty')}</p>
+          )}
+        </section>
+      )}
+
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.language')}
         </h3>
@@ -216,7 +229,7 @@ export function SettingsPage({
             <button
               key={l}
               type="button"
-              className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+              className={`rounded-sm border px-4 py-2 text-sm font-medium ${
                 locale === l
                   ? 'border-accent bg-accent text-white'
                   : 'border-grid bg-white hover:bg-paper-dark'
@@ -229,143 +242,14 @@ export function SettingsPage({
         </div>
       </section>
 
-      {isAccountant && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
-            {t('settings.accounting')}
-          </h3>
-          <p className="mt-1 text-sm text-stone-500">{t('settings.passwordHint')}</p>
-          <form
-            className="mt-3 flex flex-wrap gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (newPassword.trim().length < 4) {
-                showNotice('error', t('settings.passwordShort'))
-                return
-              }
-              onUpdateSettings({
-                accountantPassword: newPassword.trim(),
-                passwordChanged: true,
-              })
-              setNewPassword('')
-              showNotice('success', t('settings.passwordSaved'))
-            }}
-          >
-            <input
-              type="password"
-              className="min-w-[12rem] flex-1 rounded-md border border-grid px-3 py-2 text-sm"
-              placeholder={t('settings.newPassword')}
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
-            >
-              {t('settings.savePassword')}
-            </button>
-          </form>
-        </section>
-      )}
-
-      <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.brigades')}
         </h3>
-        <p className="mt-1 text-sm text-stone-500">{t('settings.brigadesHint')}</p>
-
-        <ul className="mt-4 space-y-2">
-          {store.brigades.map((name) => (
-            <li
-              key={name}
-              className="flex flex-wrap items-center gap-2 rounded-lg border border-grid bg-paper/40 px-3 py-2"
-            >
-              {editingBrigade === name ? (
-                <>
-                  <input
-                    className="min-w-[10rem] flex-1 rounded-md border border-grid px-2 py-1 text-sm"
-                    value={editBrigadeName}
-                    onChange={(e) => setEditBrigadeName(e.target.value)}
-                    placeholder="RU"
-                    autoFocus
-                  />
-                  <input
-                    className="min-w-[10rem] flex-1 rounded-md border border-grid px-2 py-1 text-sm"
-                    value={editBrigadeKa}
-                    onChange={(e) => setEditBrigadeKa(e.target.value)}
-                    placeholder="GE"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white"
-                    onClick={() => saveBrigadeRename(name)}
-                  >
-                    {t('common.save')}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-grid px-3 py-1 text-xs"
-                    onClick={() => setEditingBrigade(null)}
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="flex-1 text-sm font-medium">
-                    {name}
-                    {store.brigadeNamesKa[name] && (
-                      <span className="ml-2 text-xs text-stone-400">
-                        / {store.brigadeNamesKa[name]}
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-xs text-stone-400">
-                    {brigadeEmployeeCount(store, name)} {t('settings.empCount')}
-                  </span>
-                  <button
-                    type="button"
-                    className="rounded-md border border-grid px-2 py-1 text-xs hover:bg-paper-dark"
-                    onClick={() => {
-                      setEditingBrigade(name)
-                      setEditBrigadeName(name)
-                      setEditBrigadeKa(store.brigadeNamesKa[name] ?? '')
-                    }}
-                  >
-                    {t('common.edit')}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                    onClick={() => handleRemoveBrigade(name)}
-                    disabled={store.brigades.length <= 1}
-                  >
-                    {t('common.delete')}
-                  </button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-
-        <form onSubmit={handleAddBrigade} className="mt-4 flex flex-wrap gap-2">
-          <input
-            className="min-w-[14rem] flex-1 rounded-md border border-grid px-3 py-2 text-sm"
-            placeholder={t('settings.newBrigade')}
-            value={newBrigade}
-            onChange={(e) => setNewBrigade(e.target.value)}
-            required
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-          >
-            {t('settings.addBrigade')}
-          </button>
-        </form>
+        <p className="mt-2 text-sm text-stone-600">{t('settings.brigadesMoved')}</p>
       </section>
 
-      <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.backup')}
         </h3>
@@ -374,14 +258,14 @@ export function SettingsPage({
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded-lg border border-grid px-3 py-2 text-sm hover:bg-paper-dark"
+            className="rounded-sm border border-grid px-3 py-2 text-sm hover:bg-paper-dark"
             onClick={() => exportToJson(store)}
           >
             JSON
           </button>
           <button
             type="button"
-            className="rounded-lg border border-grid px-3 py-2 text-sm hover:bg-paper-dark"
+            className="rounded-sm border border-grid px-3 py-2 text-sm hover:bg-paper-dark"
             onClick={async () => {
               const ok = await saveBackupToFolder(store)
               if (!ok) showNotice('error', t('settings.backupFolder'))
@@ -398,9 +282,9 @@ export function SettingsPage({
                 <button
                   type="button"
                   className="text-accent hover:underline"
-                  onClick={() => {
+                  onClick={async () => {
                     const restored = restoreDailyBackup(b.date)
-                    if (restored && confirm(tf('settings.restoreConfirm', { date: b.date }))) {
+                    if (restored && (await confirm({ message: tf('settings.restoreConfirm', { date: b.date }) }))) {
                       onReplaceStore(restored)
                     }
                   }}
@@ -414,7 +298,7 @@ export function SettingsPage({
       </section>
 
       {(store.trash.employees.length > 0 || store.trash.months.length > 0) && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
+        <section className="rounded-sm border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
           <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
             {t('settings.trash')}
           </h3>
@@ -434,8 +318,8 @@ export function SettingsPage({
                 type="button"
                 className="text-xs text-red-600 hover:underline"
                 title={t('settings.trashPurge')}
-                onClick={() => {
-                  if (confirm(t('settings.confirmPurgeTrash'))) {
+                onClick={async () => {
+                  if (await confirm({ message: t('settings.confirmPurgeTrash'), danger: true })) {
                     onPurgeTrashEmployee(item.deletedAt)
                   }
                 }}
@@ -459,8 +343,8 @@ export function SettingsPage({
                 type="button"
                 className="text-xs text-red-600 hover:underline"
                 title={t('settings.trashPurge')}
-                onClick={() => {
-                  if (confirm(t('settings.confirmPurgeTrash'))) {
+                onClick={async () => {
+                  if (await confirm({ message: t('settings.confirmPurgeTrash'), danger: true })) {
                     onPurgeTrashMonth(item.deletedAt)
                   }
                 }}
@@ -473,7 +357,7 @@ export function SettingsPage({
       )}
 
       {store.auditLog.length > 0 && (
-        <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+        <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
           <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
             {t('settings.audit')}
           </h3>
@@ -495,7 +379,7 @@ export function SettingsPage({
         </section>
       )}
 
-      <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.signatures')}
         </h3>
@@ -513,7 +397,7 @@ export function SettingsPage({
             <label key={key} className="text-xs font-medium text-stone-500">
               {t(labelKey)} ({lang})
               <input
-                className="mt-1 w-full rounded-md border border-grid px-2 py-1.5 text-sm"
+                className="mt-1 w-full rounded-sm border border-grid px-2 py-1.5 text-sm"
                 value={signatures[key] ?? ''}
                 onChange={(e) => patchSignatures({ [key]: e.target.value })}
               />
@@ -522,7 +406,7 @@ export function SettingsPage({
         </div>
       </section>
 
-      <section className="rounded-xl border border-grid bg-white p-5 shadow-sm">
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.months')}
         </h3>
@@ -545,7 +429,7 @@ export function SettingsPage({
                     <td className="px-3 py-2 font-medium capitalize">
                       {formatMonthTitle(month, locale)}
                       {archived && (
-                        <span className="ml-2 rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold uppercase text-stone-600">
+                        <span className="ml-2 rounded-sm bg-stone-200 px-2 py-0.5 text-[10px] font-semibold uppercase text-stone-600">
                           {t('month.archive')}
                         </span>
                       )}
@@ -563,7 +447,7 @@ export function SettingsPage({
                     <td className="px-3 py-2 text-right">
                       <button
                         type="button"
-                        className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-sm border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                         disabled={archived}
                         title={
                           archived
@@ -587,19 +471,19 @@ export function SettingsPage({
             {t('settings.newMonth')}
             <input
               type="month"
-              className="mt-1 block rounded-md border border-grid px-3 py-2 text-sm"
+              className="mt-1 block rounded-sm border border-grid px-3 py-2 text-sm"
               value={newMonth}
               onChange={(e) => setNewMonth(e.target.value)}
             />
           </label>
           <button
             type="submit"
-            className="rounded-lg border border-grid bg-white px-4 py-2 text-sm font-semibold hover:bg-paper-dark"
+            className="btn-add-outline px-4 py-2 text-sm font-semibold"
           >
             {t('settings.addMonth')}
           </button>
         </form>
       </section>
-    </div>
+    </PageLayout>
   )
 }

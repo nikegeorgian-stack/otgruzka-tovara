@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CloseIcon } from '@/components/ui/icons'
 import { useI18n } from '@/context/I18nContext'
+import { useConfirm } from '@/context/ConfirmContext'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
-import { formatQty, itemStockValue } from '@/lib/warehouse/stock'
+import {
+  formatIssueShortages,
+  formatQty,
+  itemStockValue,
+  toBaseQty,
+  validateIssueLines,
+} from '@/lib/warehouse/stock'
 import type { ItemBalance, WarehouseCategory, WarehouseItem } from '@/lib/warehouse/types'
 
 export type PickApplyRow = { itemId: string; quantity: number }
@@ -21,6 +29,7 @@ type Props = {
   warehouseId?: string
   docType?: 'receipt' | 'issue'
   initialSearch?: string
+  allowNegativeStock?: boolean
   onClose: () => void
   onApply: (rows: PickApplyRow[]) => void
 }
@@ -34,10 +43,12 @@ export function WarehousePickModal({
   warehouseId,
   docType = 'receipt',
   initialSearch = '',
+  allowNegativeStock = false,
   onClose,
   onApply,
 }: Props) {
   const { t } = useI18n()
+  const { confirm, alert } = useConfirm()
   const searchRef = useRef<HTMLInputElement>(null)
 
   const [search, setSearch] = useState('')
@@ -107,14 +118,39 @@ export function WarehousePickModal({
     setPicked((prev) => prev.filter((p) => p.key !== key))
   }
 
-  function apply() {
+  async function apply() {
     const rows = picked
       .map((p) => ({
         itemId: p.itemId,
         quantity: Number(p.quantity.replace(',', '.')),
       }))
       .filter((r) => r.quantity > 0)
-    if (rows.length) onApply(rows)
+    if (!rows.length) {
+      onClose()
+      return
+    }
+
+    if (docType === 'issue') {
+      const itemMap = new Map(items.map((i) => [i.id, i]))
+      const baseLines = rows.map((r) => {
+        const item = itemMap.get(r.itemId)
+        return {
+          itemId: r.itemId,
+          quantity: item ? toBaseQty(item, r.quantity) : r.quantity,
+        }
+      })
+      const validation = validateIssueLines(items, balances, baseLines)
+      if (!validation.ok) {
+        const detail = formatIssueShortages(validation.shortages)
+        if (!allowNegativeStock) {
+          await alert({ message: `${t('warehouse.issue.overdraftBlocked')}\n\n${detail}` })
+          return
+        }
+        if (!(await confirm({ message: `${t('warehouse.issue.overdraftConfirm')}\n\n${detail}`, danger: true }))) return
+      }
+    }
+
+    onApply(rows)
     onClose()
   }
 
@@ -127,7 +163,7 @@ export function WarehousePickModal({
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-3 sm:p-6">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-sm bg-white shadow-sm">
         <header className="flex items-center justify-between border-b border-grid px-5 py-4">
           <div>
             <h3 className="text-lg font-bold text-ink">{t('warehouse.pick.title')}</h3>
@@ -135,10 +171,11 @@ export function WarehousePickModal({
           </div>
           <button
             type="button"
-            className="rounded-lg px-3 py-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+            aria-label={t('common.close')}
+            className="rounded-sm px-3 py-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
             onClick={onClose}
           >
-            ×
+            <CloseIcon size={18} />
           </button>
         </header>
 
@@ -152,7 +189,7 @@ export function WarehousePickModal({
               <input
                 ref={searchRef}
                 type="search"
-                className="w-full rounded-lg border border-grid px-3 py-2 text-sm"
+                className="w-full rounded-sm border border-grid px-3 py-2 text-sm"
                 placeholder={t('warehouse.picker.placeholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -170,7 +207,7 @@ export function WarehousePickModal({
                 }}
               />
               <select
-                className="w-full rounded-lg border border-grid px-3 py-2 text-sm"
+                className="w-full rounded-sm border border-grid px-3 py-2 text-sm"
                 value={catFilter}
                 onChange={(e) => setCatFilter(e.target.value)}
               >
@@ -234,7 +271,7 @@ export function WarehousePickModal({
                             <button
                               type="button"
                               title={t('warehouse.pick.add')}
-                              className="rounded px-1.5 py-0.5 text-teal-700 hover:bg-teal-100"
+                              className="btn-add-xs rounded px-1.5 py-0.5 text-sm"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 addItem(item)
@@ -332,7 +369,7 @@ export function WarehousePickModal({
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded-lg border border-grid px-4 py-2 text-sm"
+              className="rounded-sm border border-grid px-4 py-2 text-sm"
               onClick={onClose}
             >
               {t('common.cancel')}
@@ -340,7 +377,7 @@ export function WarehousePickModal({
             <button
               type="button"
               disabled={picked.length === 0}
-              className="rounded-lg bg-teal-700 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-40"
+              className="rounded-sm bg-teal-700 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-40"
               onClick={apply}
             >
               {t('warehouse.pick.apply')}

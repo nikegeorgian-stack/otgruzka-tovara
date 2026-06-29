@@ -5,17 +5,18 @@ type Props = {
   title: string
   subtitle?: string
   tone: 'plan' | 'fact'
+  headerAction?: ReactNode
   children: ReactNode
 }
 
-export function TimesheetSection({ title, subtitle, tone, children }: Props) {
+export function TimesheetSection({ title, subtitle, tone, headerAction, children }: Props) {
   const { t } = useI18n()
   return (
     <section
-      className={`overflow-hidden rounded-xl border shadow-sm ${
+      className={`overflow-hidden rounded-sm border shadow-sm ${
         tone === 'plan'
-          ? 'border-sky-200/80 bg-gradient-to-br from-sky-50/90 to-white'
-          : 'border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white'
+          ? 'border-sky-200/80 bg-sky-50'
+          : 'border-emerald-200/80 bg-emerald-50'
       }`}
     >
       <div
@@ -37,15 +38,18 @@ export function TimesheetSection({ title, subtitle, tone, children }: Props) {
             <p className="mt-0.5 text-xs text-stone-600">{subtitle}</p>
           )}
         </div>
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
-            tone === 'plan'
-              ? 'bg-sky-200/80 text-sky-900'
-              : 'bg-emerald-200/80 text-emerald-900'
-          }`}
-        >
-          {tone === 'plan' ? t('section.editable') : t('section.factOut')}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerAction}
+          <span
+            className={`rounded-sm px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+              tone === 'plan'
+                ? 'bg-sky-200/80 text-sky-900'
+                : 'bg-emerald-200/80 text-emerald-900'
+            }`}
+          >
+            {tone === 'plan' ? t('section.editable') : t('section.factOut')}
+          </span>
+        </div>
       </div>
       {children}
     </section>

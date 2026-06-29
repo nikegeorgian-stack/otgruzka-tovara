@@ -5,6 +5,7 @@ import { formatMonthTitle } from '@/lib/dates'
 import { t } from '@/i18n'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 import { monthStats } from '@/lib/stats'
+import type { MonthGroupMode } from '@/lib/monthViewOptions'
 import type { AppStore, MonthSheet } from '@/lib/types'
 import { PrintBrandWatermark } from '@/components/brand/FiberCellBrand'
 import { PrintSheetHeader } from '@/components/brand/PrintSheetHeader'
@@ -19,6 +20,8 @@ export type PrintConfig = {
   brigades: string[]
   fitOnePage: boolean
   printLocale: Locale
+  groupMode?: import('@/lib/monthViewOptions').MonthGroupMode
+  structuralUnitIds?: string[]
 }
 
 type Props = {
@@ -30,9 +33,13 @@ type Props = {
 }
 
 export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Props) {
-  const { variant, brigades, printLocale } = config
+  const { variant, brigades, printLocale, groupMode = 'brigade', structuralUnitIds } =
+    config
   const printRef = useRef<HTMLDivElement>(null)
-  const stats = monthStats(sheet, store.employees, brigades)
+  const stats = monthStats(sheet, store.employees, {
+    brigades,
+    structuralUnitIds,
+  })
   const [pdfBusy, setPdfBusy] = useState(false)
 
   useEffect(() => {
@@ -92,14 +99,14 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="rounded-lg border border-stone-500 px-3 py-2 text-sm text-white hover:bg-stone-800"
+            className="rounded-sm border border-stone-500 px-3 py-2 text-sm text-white hover:bg-stone-800"
             onClick={onBack}
           >
             {t(printLocale, 'common.back')}
           </button>
           <button
             type="button"
-            className="rounded-lg border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+            className="rounded-sm border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
             disabled={pdfBusy}
             onClick={() => void handlePdf()}
           >
@@ -107,14 +114,14 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
           </button>
           <button
             type="button"
-            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-stone-900 hover:bg-stone-100"
+            className="rounded-sm bg-white px-4 py-2 text-sm font-semibold text-stone-900 hover:bg-stone-100"
             onClick={handlePrint}
           >
             {t(printLocale, 'print.printBtn')}
           </button>
           <button
             type="button"
-            className="rounded-lg border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+            className="rounded-sm border border-stone-500 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
             onClick={onClose}
           >
             {t(printLocale, 'print.close')}
@@ -136,6 +143,8 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
               stats={stats}
               brigades={brigades}
               printLocale={printLocale}
+              groupMode={groupMode}
+              structuralUnitIds={structuralUnitIds}
               pageBreak={variant === 'both'}
             />
           )}
@@ -147,6 +156,8 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
               stats={stats}
               brigades={brigades}
               printLocale={printLocale}
+              groupMode={groupMode}
+              structuralUnitIds={structuralUnitIds}
               pageBreak={false}
             />
           )}
@@ -165,6 +176,8 @@ type PageProps = {
   stats: ReturnType<typeof monthStats>
   brigades: string[]
   printLocale: import('@/lib/types').Locale
+  groupMode?: MonthGroupMode
+  structuralUnitIds?: string[]
   pageBreak: boolean
 }
 
@@ -175,6 +188,8 @@ function PrintSheetPage({
   stats,
   brigades,
   printLocale,
+  groupMode = 'brigade',
+  structuralUnitIds,
   pageBreak,
 }: PageProps) {
   const isPlan = mode === 'plan'
@@ -208,6 +223,8 @@ function PrintSheetPage({
           mode={mode}
           brigades={brigades}
           printLocale={printLocale}
+          groupMode={groupMode}
+          structuralUnitIds={structuralUnitIds}
           showTotals
         />
 

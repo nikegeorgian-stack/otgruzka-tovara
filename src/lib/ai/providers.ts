@@ -1,6 +1,6 @@
 import type { AiSettings } from '@/lib/types'
 
-export type AiProviderId = 'off' | 'local' | 'openai' | 'kimi' | 'custom'
+export type AiProviderId = 'off' | 'local' | 'openai' | 'gemini' | 'kimi' | 'custom'
 
 export type AiProviderPreset = {
   id: AiProviderId
@@ -28,6 +28,12 @@ export const AI_PROVIDER_PRESETS: Record<Exclude<AiProviderId, 'custom'>, AiProv
     model: 'gpt-4o-mini',
     keyPlaceholder: 'sk-…',
   },
+  gemini: {
+    id: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.0-flash-lite',
+    keyPlaceholder: 'AIza… / AQ…',
+  },
   kimi: {
     id: 'kimi',
     baseUrl: 'https://api.moonshot.ai/v1',
@@ -36,13 +42,14 @@ export const AI_PROVIDER_PRESETS: Record<Exclude<AiProviderId, 'custom'>, AiProv
   },
 }
 
-export const AI_PROVIDER_IDS: AiProviderId[] = ['off', 'local', 'openai', 'kimi', 'custom']
+export const AI_PROVIDER_IDS: AiProviderId[] = ['off', 'local', 'openai', 'gemini', 'kimi', 'custom']
 
 export function normalizeAiProvider(ai: AiSettings | undefined): AiProviderId {
   if (ai?.provider) return ai.provider
   if (ai?.enabled === false) return 'off'
   const url = (ai?.baseUrl ?? '').toLowerCase()
   if (url === 'local') return 'local'
+  if (url.includes('generativelanguage') || url.includes('gemini')) return 'gemini'
   if (url.includes('moonshot')) return 'kimi'
   if (ai?.enabled && ai?.apiKey?.trim()) return 'openai'
   return 'local'
@@ -128,6 +135,8 @@ export function providerLabelKey(provider: AiProviderId): string {
       return 'settings.aiProviderLocal'
     case 'openai':
       return 'settings.aiProviderOpenai'
+    case 'gemini':
+      return 'settings.aiProviderGemini'
     case 'kimi':
       return 'settings.aiProviderKimi'
     case 'custom':
@@ -143,6 +152,8 @@ export function providerStatusKey(provider: AiProviderId): string {
       return 'ai.providerLocal'
     case 'openai':
       return 'ai.providerOpenai'
+    case 'gemini':
+      return 'ai.providerGemini'
     case 'kimi':
       return 'ai.providerKimi'
     case 'custom':

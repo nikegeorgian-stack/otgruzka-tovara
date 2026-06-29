@@ -4,13 +4,13 @@ import { FstLoginScreen } from '@/components/web/FstLoginScreen'
 import type { ReactNode } from 'react'
 
 export function FstWebAuthGate({ children }: { children: ReactNode }) {
-  const { user, loading, isAdmin, logout } = useFstAuth()
+  const { user, loading, isAllowed, profile, logout } = useFstAuth()
 
   useEffect(() => {
-    if (user && !isAdmin) {
+    if (user && !isAllowed) {
       void logout()
     }
-  }, [user, isAdmin, logout])
+  }, [user, isAllowed, logout])
 
   if (loading) {
     return (
@@ -20,7 +20,9 @@ export function FstWebAuthGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user || !isAdmin) return <FstLoginScreen />
+  if (!user || !isAllowed || !profile) {
+    return <FstLoginScreen />
+  }
 
   return children
 }

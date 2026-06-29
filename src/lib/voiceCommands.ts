@@ -19,7 +19,7 @@ export type VoiceAction =
   | { type: 'clearSearch' }
   | { type: 'clearFilters' }
   | { type: 'filterBrigade'; query: string }
-  | { type: 'filterSchedule'; schedule: '5/2 8ч' | '2/2 11ч' | '' }
+  | { type: 'filterSchedule'; schedule: '5/2 8ч' | '2/2 11ч' | '1/1 11ч' | '' }
   | { type: 'assign'; name: string; brigadeQuery?: string }
   | { type: 'unassign'; name: string }
   | { type: 'replaceInBrigade'; brigadeQuery?: string; fromName: string; toName: string }
@@ -90,6 +90,16 @@ const CODE_WORDS: { words: string[]; code: DayCode }[] = [
   { words: ['ночная', 'ночь', 'ночную', 'ночную смену'], code: 'Н' },
   { words: ['двадцать два', '22 часа'], code: '22' },
   { words: ['выходной', 'выходной день', 'выход'], code: 'В' },
+  {
+    words: [
+      'неоплачиваемый отпуск',
+      'неоплатный отпуск',
+      'отпуск без содержания',
+      'за свой счет',
+      'за свой счёт',
+    ],
+    code: 'ОО',
+  },
   { words: ['отпуск', 'отгулы'], code: 'ОТ' },
   { words: ['больничный', 'больник', 'больной', 'болеет'], code: 'Б' },
   { words: ['прогул', 'не вышел'], code: 'X' },
@@ -137,6 +147,7 @@ function parseFromDay(text: string): number | undefined {
 
 function parseScheduleSpeech(text: string): import('./types').ScheduleType | null {
   if (/5\s*[/.\\]\s*2|пять\s*два|пятиднев|5\s*2\s*8|восьмичас/.test(text)) return '5/2 8ч'
+  if (/1\s*[/.\\]\s*1|один\s*один|через\s*день|день\s*через\s*день/.test(text)) return '1/1 11ч'
   if (/2\s*[/.\\]\s*2|два\s*два|сменн|11\s*час|одиннадцатичас/.test(text)) return '2/2 11ч'
   return null
 }
@@ -375,11 +386,12 @@ export function parseVoiceCommand(raw: string): VoiceAction | null {
   if (whBal) return { type: 'warehouseBalance', name: whBal[1].trim() }
 
   if (/^(табель|tabel)/.test(t)) return { type: 'nav', view: 'month' }
-  if (/^(сотрудники|персонал|кадры|справочник)/.test(t)) return { type: 'nav', view: 'employees' }
+  if (/^(сотрудники|персонал|кадры)/.test(t)) return { type: 'nav', view: 'directories' }
+  if (/^(справочник|справочники|номенклатур)/.test(t)) return { type: 'nav', view: 'directories' }
   if (/^(сводка|итоги|отчет)/.test(t)) return { type: 'nav', view: 'summary' }
   if (/^(оплата|зарплата|начисления|бухгалтерия)/.test(t)) return { type: 'nav', view: 'pay' }
   if (/^склад/.test(t)) return { type: 'nav', view: 'warehouse' }
-  if (/^коды/.test(t)) return { type: 'nav', view: 'codes' }
+  if (/^коды/.test(t)) return { type: 'nav', view: 'directories' }
   if (/^настройки/.test(t)) return { type: 'nav', view: 'settings' }
 
   if (/текущ(ий|его)\s*месяц|сегодняшний\s*месяц|этот\s*месяц/.test(t)) {
@@ -401,6 +413,9 @@ export function parseVoiceCommand(raw: string): VoiceAction | null {
 
   if (/график\s*(5.?2|пять.?два|пятиднев)/.test(t)) {
     return { type: 'filterSchedule', schedule: '5/2 8ч' }
+  }
+  if (/график\s*(1.?1|один.?один|через.?день)/.test(t)) {
+    return { type: 'filterSchedule', schedule: '1/1 11ч' }
   }
   if (/график\s*(2.?2|два.?два|сменн)/.test(t)) {
     return { type: 'filterSchedule', schedule: '2/2 11ч' }

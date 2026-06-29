@@ -470,7 +470,7 @@ export function createAiExecutor(args: {
           )
         }
 
-        if (schedule === '5/2 8ч' || schedule === '2/2 11ч') {
+        if (schedule === '5/2 8ч' || schedule === '2/2 11ч' || schedule === '1/1 11ч') {
           const ok = onChangeScheduleFromDay(month, empResult.employee.id, fromDay, schedule)
           if (!ok) return resultJson({ ok: false, error: 'Не удалось сменить график' })
           onOpenMonth(month)

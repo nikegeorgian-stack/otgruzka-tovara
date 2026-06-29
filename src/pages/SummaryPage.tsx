@@ -1,3 +1,5 @@
+import { PageHeader } from '@/components/ui/PageHeader'
+import { PageLayout } from '@/components/ui/PageLayout'
 import { useI18n } from '@/context/I18nContext'
 import { formatMonthTitle } from '@/lib/dates'
 import { listMonthKeys } from '@/lib/monthManage'
@@ -21,44 +23,39 @@ export function SummaryPage({ store }: Props) {
   )
 
   return (
-    <div className="flex flex-col gap-4 p-5">
-      <header>
-        <h2 className="text-xl font-bold text-ink">{t('summary.title')}</h2>
-        <p className="text-sm text-ink-muted">{t('summary.subtitle')}</p>
-      </header>
+    <PageLayout>
+      <PageHeader title={t('summary.title')} subtitle={t('summary.subtitle')} />
 
-      <div className="overflow-auto rounded-xl border border-grid bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
+      <div className="fc-table-wrap">
+        <table className="fc-table min-w-full">
+          <thead>
             <tr>
-              <th className="px-4 py-3">{t('summary.colMonth')}</th>
-              <th className="px-4 py-3">{t('stats.planH')}</th>
-              <th className="px-4 py-3">{t('stats.factH')}</th>
-              <th className="px-4 py-3">{t('stats.deviation')}</th>
-              <th className="px-4 py-3">{t('summary.colFilled')}</th>
-              <th className="px-4 py-3">{t('summary.colMismatchShort')}</th>
-              <th className="px-4 py-3">{t('stats.absences')}</th>
-              <th className="px-4 py-3">{t('stats.factShifts')}</th>
-              <th className="px-4 py-3">{t('stats.readiness')}</th>
-              <th className="px-4 py-3">{t('stats.control')}</th>
+              <th>{t('summary.colMonth')}</th>
+              <th>{t('stats.planH')}</th>
+              <th>{t('stats.factH')}</th>
+              <th>{t('stats.deviation')}</th>
+              <th>{t('summary.colFilled')}</th>
+              <th>{t('summary.colMismatchShort')}</th>
+              <th>{t('stats.absences')}</th>
+              <th>{t('stats.factShifts')}</th>
+              <th>{t('stats.readiness')}</th>
+              <th>{t('stats.control')}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ month, stats }) => (
-              <tr key={month} className="border-t border-grid">
-                <td className="px-4 py-3 font-medium capitalize">
-                  {formatMonthTitle(month, locale)}
-                </td>
-                <td className="px-4 py-3 font-mono">{stats.planHours}</td>
-                <td className="px-4 py-3 font-mono">{stats.factHours}</td>
-                <td className="px-4 py-3 font-mono">{stats.deviation}</td>
-                <td className="px-4 py-3 font-mono">{Math.round(stats.fillRate * 100)}%</td>
-                <td className="px-4 py-3 font-mono">{stats.mismatches}</td>
-                <td className="px-4 py-3 font-mono">{stats.absences}</td>
-                <td className="px-4 py-3 font-mono">{stats.factShifts}</td>
-                <td className="px-4 py-3">
+              <tr key={month}>
+                <td className="font-medium capitalize">{formatMonthTitle(month, locale)}</td>
+                <td className="font-mono">{stats.planHours}</td>
+                <td className="font-mono">{stats.factHours}</td>
+                <td className="font-mono">{stats.deviation}</td>
+                <td className="font-mono">{Math.round(stats.fillRate * 100)}%</td>
+                <td className="font-mono">{stats.mismatches}</td>
+                <td className="font-mono">{stats.absences}</td>
+                <td className="font-mono">{stats.factShifts}</td>
+                <td>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    className={`rounded-sm px-2 py-0.5 text-xs font-semibold ${
                       stats.readiness === 'ready'
                         ? 'bg-emerald-100 text-emerald-800'
                         : stats.readiness === 'review'
@@ -69,7 +66,7 @@ export function SummaryPage({ store }: Props) {
                     {statsReadiness(stats.readiness)}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td>
                   <span
                     className={`text-xs font-semibold ${
                       stats.control === 'ok' ? 'text-emerald-700' : 'text-red-700'
@@ -81,19 +78,19 @@ export function SummaryPage({ store }: Props) {
               </tr>
             ))}
             <tr className="border-t-2 border-accent/30 bg-accent-soft/20 font-semibold">
-              <td className="px-4 py-3">{t('common.total')}</td>
-              <td className="px-4 py-3 font-mono">{total.planHours}</td>
-              <td className="px-4 py-3 font-mono">{total.factHours}</td>
-              <td className="px-4 py-3 font-mono">{total.factHours - total.planHours}</td>
-              <td className="px-4 py-3">—</td>
-              <td className="px-4 py-3 font-mono">{total.mismatches}</td>
-              <td className="px-4 py-3">—</td>
-              <td className="px-4 py-3 font-mono">{total.factShifts}</td>
-              <td colSpan={2} className="px-4 py-3" />
+              <td>{t('common.total')}</td>
+              <td className="font-mono">{total.planHours}</td>
+              <td className="font-mono">{total.factHours}</td>
+              <td className="font-mono">{total.factHours - total.planHours}</td>
+              <td>—</td>
+              <td className="font-mono">{total.mismatches}</td>
+              <td>—</td>
+              <td className="font-mono">{total.factShifts}</td>
+              <td colSpan={2} />
             </tr>
           </tbody>
         </table>
       </div>
-    </div>
+    </PageLayout>
   )
 }
