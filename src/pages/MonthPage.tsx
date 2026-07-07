@@ -368,17 +368,7 @@ export function MonthPage({
   }, [allUnitKeys, selectedBrigades, selectedUnits, store.brigades.length])
 
   const sheet = store.months[month]
-
-  if (!sheet) {
-    return <div className="p-8 text-stone-500">{t('month.loading')}</div>
-  }
-
-  const stats = monthStats(sheet, store.employees, statsFilter)
-  const problems = monthProblems(store, sheet)
-  const archived = isMonthArchived(store, month)
-  const closed = isMonthClosed(store, month)
-  const closure = monthClosureInfo(store, month)
-  // Закрытый месяц всегда только для чтения, независимо от тумблера «Правка».
+  const closed = sheet ? isMonthClosed(store, month) : false
   const effectiveEditing = editing && !closed
 
   function handleRegenerateMonth() {
@@ -484,7 +474,9 @@ export function MonthPage({
   )
 
   const tableProps = useMemo(
-    () => ({
+    () => {
+      if (!sheet) return null
+      return {
       store: timesheetStore,
       sheet,
       search,
@@ -512,7 +504,8 @@ export function MonthPage({
       onMarkBrigadier,
       onMarkBrigadierMonth,
       onAddEmployee: onAddEmployeeFromTable,
-    }),
+      }
+    },
     [
       timesheetStore,
       sheet,
@@ -608,6 +601,15 @@ export function MonthPage({
       title: t('month.reopenHint'),
     },
   ]
+
+  if (!sheet) {
+    return <div className="p-8 text-stone-500">{t('month.loading')}</div>
+  }
+
+  const stats = monthStats(sheet, store.employees, statsFilter)
+  const problems = monthProblems(store, sheet)
+  const archived = isMonthArchived(store, month)
+  const closure = monthClosureInfo(store, month)
 
   return (
     <PageLayout className="month-page print:p-2">
