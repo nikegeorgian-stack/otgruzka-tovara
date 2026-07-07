@@ -8,9 +8,18 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const envFile = path.join(root, 'fst-web', '.env.production')
+const fstWeb = path.join(root, 'fst-web')
+const envTarget = path.join(fstWeb, '.env.target')
+const envFile = path.join(fstWeb, '.env.production')
+
+if (!existsSync(envFile) && existsSync(envTarget)) {
+  const { copyFileSync } = await import('node:fs')
+  copyFileSync(envTarget, envFile)
+  console.log('Copied .env.target -> .env.production')
+}
+
 if (!existsSync(envFile)) {
-  console.error('Missing fst-web/.env.production')
+  console.error('Missing fst-web/.env.production (or .env.target)')
   process.exit(1)
 }
 
@@ -33,9 +42,8 @@ for (const name of vars) {
 
 process.chdir(root)
 if (!existsSync(path.join(root, '.vercel'))) {
-  execSync('vercel link --yes --project fst-uchet --scope fb-cell-admin-s-projects', {
-    stdio: 'inherit',
-  })
+  console.error('Сначала выполните: vercel link (под nikegeorgian@gmail.com)')
+  process.exit(1)
 }
 
 for (const [name, val] of Object.entries(values)) {

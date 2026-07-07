@@ -27,8 +27,10 @@ dist-ssr
 !.env.example
 fst-web/.env
 fst-web/.env.production
+fst-web/.env.target
 fst-web/.env.vercel
 fst-web/.env.production.vercel
+fst-web/service-account*.json
 .env.vercel.*
 fst-web/dist
 .firebase

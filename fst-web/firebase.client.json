@@ -1,9 +1,9 @@
 {
-  "VITE_FIREBASE_API_KEY": "AIzaSyBLI-K47eqk02BvohchOH3E3j4AQ6CGWFg",
-  "VITE_FIREBASE_AUTH_DOMAIN": "fst-uchet-14c02.firebaseapp.com",
-  "VITE_FIREBASE_PROJECT_ID": "fst-uchet-14c02",
-  "VITE_FIREBASE_STORAGE_BUCKET": "fst-uchet-14c02.firebasestorage.app",
-  "VITE_FIREBASE_MESSAGING_SENDER_ID": "642758089685",
-  "VITE_FIREBASE_APP_ID": "1:642758089685:web:e2c7ef790e7009b7443b5c",
+  "VITE_FIREBASE_API_KEY": "AIzaSyDKYLUNoFuXSedg5lZOm-vJ_yasj2a7uPg",
+  "VITE_FIREBASE_AUTH_DOMAIN": "otgruzka-tovara.firebaseapp.com",
+  "VITE_FIREBASE_PROJECT_ID": "otgruzka-tovara",
+  "VITE_FIREBASE_STORAGE_BUCKET": "otgruzka-tovara.firebasestorage.app",
+  "VITE_FIREBASE_MESSAGING_SENDER_ID": "21018906173",
+  "VITE_FIREBASE_APP_ID": "1:21018906173:web:e9861777e79a28c9ba454",
   "VITE_FST_WEB": "true"
 }

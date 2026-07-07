@@ -3,6 +3,7 @@ import { FST_ADMIN_EMAIL } from './fstAdmin'
 /** Email из WEB_USER_DIRECTORY — держите в sync с fst-web/firestore.rules */
 export const FST_WEB_ALLOWED_EMAILS = [
   FST_ADMIN_EMAIL,
+  'nikegeorgian@gmail.com',
   'admin-dm@fibercell.net',
   'levan-admin@fibercell.net',
   'hr-nino@fibercell.net',

@@ -12,6 +12,13 @@
     "deploy:hosting": "npm run build && firebase deploy --only hosting --project fst-uchet-14c02",
     "migrate:cloud-store": "node scripts/normalize-cloud-store.mjs",
     "migrate:cloud-shards": "node scripts/migrate-cloud-shards.mjs",
+    "export:cloud-backup": "node scripts/export-cloud-backup.mjs",
+    "export:cloud-backup:admin": "node scripts/export-cloud-backup-admin.mjs",
+    "import:cloud-backup": "node scripts/import-cloud-backup.mjs",
+    "migrate:firebase-project": "node scripts/migrate-firebase-project.mjs",
+    "migrate:firebase-project:dry": "node scripts/migrate-firebase-project.mjs --dry-run",
+    "switch:firebase-project": "node scripts/switch-firebase-project.mjs",
+    "switch:firebase-project": "node scripts/switch-firebase-project.mjs",
     "clear:hr-cloud": "node scripts/clear-hr-employees.mjs",
     "clear:hr-cloud:ps1": "powershell -ExecutionPolicy Bypass -File ../scripts/clear-hr-cloud.ps1",
     "reset-local": "node ../scripts/reset-local.mjs"

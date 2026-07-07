@@ -4,6 +4,7 @@ export const FST_ADMIN_EMAIL = 'admin@fibercell.net'
 /** Все администраторы с полным доступом (роль sysadmin) в облачной версии. */
 export const FST_ADMIN_EMAILS = [
   FST_ADMIN_EMAIL,
+  'nikegeorgian@gmail.com',
   'admin-dm@fibercell.net',
   'levan-admin@fibercell.net',
 ] as const
@@ -11,6 +12,7 @@ export const FST_ADMIN_EMAILS = [
 /** Отображаемые имена администраторов (облако). */
 export const FST_ADMIN_DISPLAY_NAMES: Record<string, string> = {
   [FST_ADMIN_EMAIL]: 'Администратор',
+  'nikegeorgian@gmail.com': 'Администратор',
   'admin-dm@fibercell.net': 'Администратор',
   'levan-admin@fibercell.net': 'Горашвили Леван',
 }

@@ -6,6 +6,7 @@ service cloud.firestore {
         && request.auth.token.email != null
         && request.auth.token.email.lower() in [
           'admin@fibercell.net',
+          'nikegeorgian@gmail.com',
           'admin-dm@fibercell.net',
           'levan-admin@fibercell.net',
         ];
@@ -14,6 +15,7 @@ service cloud.firestore {
     function legacyAllowedEmails() {
       return [
         'admin@fibercell.net',
+        'nikegeorgian@gmail.com',
         'admin-dm@fibercell.net',
         'levan-admin@fibercell.net',
         'hr-nino@fibercell.net',
