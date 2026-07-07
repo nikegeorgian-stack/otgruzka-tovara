@@ -337,6 +337,8 @@ export function MonthPage({
     prevBrigadesRef.current = curr
   }, [store.brigades, workshopMasterMode, masterBrigades])
 
+  const allUnitKeysKey = allUnitKeys.join('\0')
+
   useEffect(() => {
     setSelectedUnits((selected) => {
       const next = new Set(selected)
@@ -344,9 +346,12 @@ export function MonthPage({
       for (const key of [...next]) {
         if (!allUnitKeys.includes(key)) next.delete(key)
       }
+      if (next.size === selected.size && [...next].every((key) => selected.has(key))) {
+        return selected
+      }
       return next
     })
-  }, [allUnitKeys])
+  }, [allUnitKeysKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

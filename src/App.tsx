@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { PageLoader } from '@/components/ui/PageLoader'
 import { StorageAlert } from '@/components/system/StorageAlert'
@@ -129,6 +129,15 @@ export default function App() {
       }
     },
     [app.currentUser?.id, app.updateUserViewDefaults],
+  )
+
+  const userMonthDefaults = useMemo(
+    () =>
+      resolveMonthViewDefaults(
+        app.currentUser?.viewDefaults,
+        app.currentUser?.defaultBrigades,
+      ),
+    [app.currentUser?.viewDefaults, app.currentUser?.defaultBrigades],
   )
 
   const coachAllowedViews = app.currentUser
@@ -471,10 +480,7 @@ export default function App() {
               workshopMasterLogin={app.currentUser?.login}
               workshopMasterEmployeeId={app.currentUser?.employeeId}
               userDefaultBrigades={app.currentUser?.defaultBrigades}
-              userMonthDefaults={resolveMonthViewDefaults(
-                app.currentUser?.viewDefaults,
-                app.currentUser?.defaultBrigades,
-              )}
+              userMonthDefaults={userMonthDefaults}
               currentUserId={app.currentUser?.id}
               onSaveMonthDefaults={(defaults) => saveViewDefaults('month', defaults)}
             />
