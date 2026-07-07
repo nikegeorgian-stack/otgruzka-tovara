@@ -7,6 +7,7 @@ type DailyBackup = { date: string; data: string }
 
 /** Локальные копии за последние 7 дней (без автоматического скачивания) */
 export function runDailyBackup(store: AppStore): AppStore {
+  if (import.meta.env.VITE_FST_WEB === 'true') return store
   const today = new Date().toISOString().slice(0, 10)
   if (store.settings.lastBackupDate === today) return store
 

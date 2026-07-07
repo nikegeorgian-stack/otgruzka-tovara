@@ -474,6 +474,9 @@ function tryRestoreCorruptBackup(): AppStore | null {
 }
 
 export function loadStore(): LoadStoreResult {
+  if (import.meta.env.VITE_FST_WEB === 'true') {
+    return { store: createDefaultStore() }
+  }
   try {
     let raw = localStorage.getItem(STORAGE_KEY)
     let fromLegacy = false
@@ -536,6 +539,9 @@ export function loadStoreLegacy(): AppStore {
 }
 
 export function saveStore(store: AppStore): SaveStoreResult {
+  if (import.meta.env.VITE_FST_WEB === 'true') {
+    return { ok: true }
+  }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
     return { ok: true }

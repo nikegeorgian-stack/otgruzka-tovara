@@ -54,10 +54,17 @@ export function getFirebaseAuth(): Auth {
   return auth
 }
 
-/** IndexedDB-кэш Firestore; при блокировке IndexedDB — memory cache (иначе белый экран). */
+/** FST web: только Firestore в облаке — localStorage/IndexedDB не используем (лимит квоты). */
+const isFstWeb = import.meta.env.VITE_FST_WEB === 'true'
+
+/** IndexedDB-кэш Firestore; web — memory cache (большая база fibercell-main не влезает в IndexedDB). */
 export function getFirestoreDb(): Firestore {
   if (!db) {
     const firebaseApp = getFirebaseApp()
+    if (isFstWeb) {
+      db = initializeFirestore(firebaseApp, { localCache: memoryLocalCache() })
+      return db
+    }
     try {
       db = initializeFirestore(firebaseApp, {
         localCache: persistentLocalCache({
@@ -66,9 +73,7 @@ export function getFirestoreDb(): Firestore {
       })
     } catch (err) {
       console.warn('FST: persistent Firestore cache unavailable, using memory cache', err)
-      db = initializeFirestore(firebaseApp, {
-        localCache: memoryLocalCache(),
-      })
+      db = initializeFirestore(firebaseApp, { localCache: memoryLocalCache() })
     }
   }
   return db

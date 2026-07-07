@@ -6,6 +6,7 @@ const DEFAULT_STORAGE_KEY = 'fst-month-accordion-open'
 const VALID: MonthAccordionSection[] = ['filters', 'operations', 'analytics', 'legend']
 
 function readOpen(storageKey: string): Set<MonthAccordionSection> {
+  if (import.meta.env.VITE_FST_WEB === 'true') return new Set()
   if (typeof window === 'undefined') return new Set()
   try {
     const raw = localStorage.getItem(storageKey)
@@ -18,6 +19,7 @@ function readOpen(storageKey: string): Set<MonthAccordionSection> {
 }
 
 function writeOpen(storageKey: string, open: Set<MonthAccordionSection>): void {
+  if (import.meta.env.VITE_FST_WEB === 'true') return
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(storageKey, JSON.stringify([...open]))
