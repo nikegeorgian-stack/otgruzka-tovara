@@ -137,7 +137,14 @@ export default function App() {
         app.currentUser?.viewDefaults,
         app.currentUser?.defaultBrigades,
       ),
-    [app.currentUser?.viewDefaults, app.currentUser?.defaultBrigades],
+    [
+      app.currentUser?.viewDefaults?.month?.layout,
+      app.currentUser?.viewDefaults?.month?.groupMode,
+      app.currentUser?.viewDefaults?.month?.rowSort,
+      app.currentUser?.viewDefaults?.month?.viewDisplay,
+      app.currentUser?.viewDefaults?.month?.defaultBrigades,
+      app.currentUser?.defaultBrigades,
+    ],
   )
 
   const coachAllowedViews = app.currentUser

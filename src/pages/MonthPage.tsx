@@ -288,30 +288,67 @@ export function MonthPage({
   }
 
   const prevBrigadesRef = useRef(store.brigades)
+  const defaultBrigadeFilterKey = defaultBrigadeFilter.join('\0')
+  const masterBrigadesKey = masterBrigades.join('\0')
+  const allUnitKeysKey = allUnitKeys.join('\0')
+  const monthDefaultsKey = JSON.stringify(userMonthDefaults ?? null)
 
   useEffect(() => {
     setEditing(false)
-    setGroupMode(userMonthDefaults?.groupMode ?? 'brigade')
-    setLayout(userMonthDefaults?.layout ?? 'dual')
-    setViewDisplay({
-      ...DEFAULT_MONTH_VIEW_DISPLAY,
-      ...userMonthDefaults?.viewDisplay,
-      showUnit: workshopMasterMode ? false : (userMonthDefaults?.viewDisplay?.showUnit ?? true),
+
+    const nextGroupMode = userMonthDefaults?.groupMode ?? 'brigade'
+    setGroupMode((prev) => (prev === nextGroupMode ? prev : nextGroupMode))
+
+    const nextLayout = userMonthDefaults?.layout ?? 'dual'
+    setLayout((prev) => (prev === nextLayout ? prev : nextLayout))
+
+    setViewDisplay((prev) => {
+      const next: MonthViewDisplay = {
+        ...DEFAULT_MONTH_VIEW_DISPLAY,
+        ...userMonthDefaults?.viewDisplay,
+        showUnit: workshopMasterMode ? false : (userMonthDefaults?.viewDisplay?.showUnit ?? true),
+      }
+      const same =
+        prev.showPlan === next.showPlan &&
+        prev.showFact === next.showFact &&
+        prev.showTab === next.showTab &&
+        prev.showPosition === next.showPosition &&
+        prev.showUnit === next.showUnit &&
+        prev.showSchedule === next.showSchedule &&
+        prev.showTotals === next.showTotals
+      return same ? prev : next
     })
-    setRowSort(userMonthDefaults?.rowSort ?? DEFAULT_MONTH_ROW_SORT)
-    setSelectedBrigades(new Set(defaultBrigadeFilter))
+
+    const nextRowSort = userMonthDefaults?.rowSort ?? DEFAULT_MONTH_ROW_SORT
+    setRowSort((prev) => (prev === nextRowSort ? prev : nextRowSort))
+
+    setSelectedBrigades((prev) => {
+      if (
+        prev.size === defaultBrigadeFilter.length &&
+        defaultBrigadeFilter.every((b) => prev.has(b))
+      ) {
+        return prev
+      }
+      return new Set(defaultBrigadeFilter)
+    })
+
     if (!workshopMasterMode) {
-      setSelectedUnits(new Set(allUnitKeys))
+      setSelectedUnits((prev) => {
+        if (prev.size === allUnitKeys.length && allUnitKeys.every((key) => prev.has(key))) {
+          return prev
+        }
+        return new Set(allUnitKeys)
+      })
     }
+
     prevBrigadesRef.current = store.brigades
   }, [
     month,
-    allUnitKeys,
-    defaultBrigadeFilter,
-    masterBrigades,
-    store.brigades,
+    allUnitKeysKey,
+    defaultBrigadeFilterKey,
+    masterBrigadesKey,
     workshopMasterMode,
-    userMonthDefaults,
+    monthDefaultsKey,
   ])
 
   useEffect(() => {
@@ -336,8 +373,6 @@ export function MonthPage({
     })
     prevBrigadesRef.current = curr
   }, [store.brigades, workshopMasterMode, masterBrigades])
-
-  const allUnitKeysKey = allUnitKeys.join('\0')
 
   useEffect(() => {
     setSelectedUnits((selected) => {
@@ -608,6 +643,10 @@ export function MonthPage({
   ]
 
   if (!sheet) {
+    return <div className="p-8 text-stone-500">{t('month.loading')}</div>
+  }
+
+  if (!tableProps) {
     return <div className="p-8 text-stone-500">{t('month.loading')}</div>
   }
 
