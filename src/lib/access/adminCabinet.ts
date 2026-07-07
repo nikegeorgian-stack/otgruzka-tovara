@@ -1,5 +1,6 @@
 import type { ViewId } from '@/lib/types'
 import { canAccessView, isSysAdmin, resolveView, viewsForUser } from './permissions'
+import { defaultHomeViewForRole } from './homeView'
 import type { AccessRoleId, AccessStore, AppUser } from './types'
 
 /** Какой кабинет/интерфейс смотрит admin (роль остаётся sysadmin). */
@@ -40,24 +41,8 @@ export function writeAdminCabinet(cabinet: AdminCabinetId): void {
 }
 
 export function firstViewForAdminCabinet(cabinet: AdminCabinetId): ViewId {
-  switch (cabinet) {
-    case 'hr':
-      return 'hr'
-    case 'hr_inspector':
-      return 'hr_inspector'
-    case 'finance':
-      return 'finance'
-    case 'warehouse_keeper':
-      return 'warehouse'
-    case 'procurement_manager':
-      return 'procurement'
-    case 'technologist':
-      return 'technologist'
-    case 'workshop_master':
-      return 'month'
-    default:
-      return 'month'
-  }
+  if (cabinet === 'full') return defaultHomeViewForRole('sysadmin')
+  return defaultHomeViewForRole(cabinet)
 }
 
 export function webModesFromAdminCabinet(cabinet: AdminCabinetId): {

@@ -171,8 +171,15 @@ export function useAppStore() {
   }, [])
 
   useEffect(() => {
+    if (import.meta.env.VITE_FST_WEB === 'true') return
     setStore((s) => ensureMonthReady(s, activeMonthRef.current))
   }, [])
+
+  useEffect(() => {
+    if (import.meta.env.VITE_FST_WEB !== 'true') return
+    if (view !== 'month') return
+    setStore((s) => ensureMonthReady(s, activeMonthRef.current))
+  }, [view, activeMonth])
 
   useEffect(() => {
     if (import.meta.env.VITE_FST_WEB === 'true') return
@@ -241,11 +248,14 @@ export function useAppStore() {
     if (global?.lastMonth && /^\d{4}-\d{2}$/.test(global.lastMonth)) {
       lastPersistedMonthRef.current = global.lastMonth
       setActiveMonth(global.lastMonth)
-      setStore((s) => ensureMonthReady(s, global.lastMonth!))
+      if (!skipLocalAuth) {
+        setStore((s) => ensureMonthReady(s, global.lastMonth!))
+      }
     }
     const hrDefault = currentUser.viewDefaults?.hr?.section
     if (hrDefault) setHrSection(hrDefault)
     if (
+      !skipLocalAuth &&
       global?.lastView &&
       canAccessView(access, currentUser, global.lastView) &&
       typeof window !== 'undefined' &&
@@ -367,7 +377,7 @@ export function useAppStore() {
       return
     }
 
-    // После перезагрузки сохраняем раздел из адреса, если роль имеет к нему доступ.
+    // После перезагрузки сохраняем раздел из адреса или последний раздел пользователя.
     const restored = readRouteFromLocation()
     if (restored && canAccessView(access, currentUser, restored.view)) {
       setViewState(restored.view)
@@ -375,22 +385,16 @@ export function useAppStore() {
       return
     }
 
-    setViewState(firstAllowedView(access, currentUser))
-    if (currentUser.roleId === 'hr') {
-      setHrSection('employees')
+    const savedView = currentUser.viewDefaults?.global?.lastView
+    if (savedView && canAccessView(access, currentUser, savedView)) {
+      setViewState(savedView)
+      if (savedView === 'hr' || currentUser.roleId === 'hr') setHrSection('employees')
+      return
     }
-    if (currentUser.roleId === 'finance') {
-      setViewState('finance')
-    }
-    if (currentUser.roleId === 'warehouse_keeper') {
-      setViewState('warehouse')
-    }
-    if (currentUser.roleId === 'technologist') {
-      setViewState('technologist')
-    }
-    if (currentUser.roleId === 'procurement_manager') {
-      setViewState('procurement')
-    }
+
+    const homeView = firstAllowedView(access, currentUser)
+    setViewState(homeView)
+    if (homeView === 'hr' || currentUser.roleId === 'hr') setHrSection('employees')
   }, [skipLocalAuth, currentUser, access])
 
   const adminSetupRequired = useMemo(

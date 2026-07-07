@@ -38,10 +38,17 @@ if (-not (Test-Path $target)) { throw 'Net fst-web/.env.target' }
 Copy-Item $target $prod -Force
 Write-Host '  .env.production <- .env.target (otgruzka-tovara Firebase)' -ForegroundColor DarkGray
 
-# Ubrat privyazku k fst-uchet / fb-cell-admin
+# Ubrat privyazku k fst-uchet / fb-cell-admin (bezopasno — ne padat esli net prav)
 $vercelDir = Join-Path $ProjectRoot '.vercel'
 if (Test-Path $vercelDir) {
-  Move-Item $vercelDir "$vercelDir.bak-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+  $bak = "$vercelDir.bak-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+  try {
+    if (Test-Path $bak) { Remove-Item $bak -Recurse -Force -ErrorAction Stop }
+    Move-Item $vercelDir $bak -Force -ErrorAction Stop
+    Write-Host "  .vercel -> $([IO.Path]::GetFileName($bak))" -ForegroundColor DarkGray
+  } catch {
+    Write-Host "  .vercel ne udalos pereimenovat (prodolzhaem): $($_.Exception.Message)" -ForegroundColor Yellow
+  }
 }
 
 Push-Location $ProjectRoot

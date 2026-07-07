@@ -47,6 +47,10 @@ export function createSettingsSlice(
 
     replaceStore(next: AppStore) {
       const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
+      if (import.meta.env.VITE_FST_WEB === 'true') {
+        setStore(seeded)
+        return
+      }
       setStore(ensureMonthReady(seeded, getActiveMonth()))
     },
 

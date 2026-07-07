@@ -40,6 +40,7 @@ import {
   ItOfficePage,
   WarehousePage,
   MonthLayoutLabPage,
+  prefetchView,
 } from '@/app/lazyPages'
 import { LoginScreen } from '@/components/auth/LoginScreen'
 import { WelcomeGreeting } from '@/components/auth/WelcomeGreeting'
@@ -121,6 +122,10 @@ export default function App() {
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
+
+  useEffect(() => {
+    if (isFstWeb && app.view) prefetchView(app.view)
+  }, [app.view])
 
   const saveViewDefaults = useCallback(
     <K extends keyof UserViewDefaults>(viewId: K, patch: NonNullable<UserViewDefaults[K]>) => {

@@ -52,6 +52,7 @@
     "vercel:login:nika": "powershell -ExecutionPolicy Bypass -File scripts/vercel-login-as.ps1",
     "migrate:vercel": "powershell -ExecutionPolicy Bypass -File scripts/migrate-vercel.ps1",
     "deploy:otgruzka": "powershell -ExecutionPolicy Bypass -File scripts/deploy-otgruzka-vercel.ps1",
+    "deploy:otgruzka:quick": "powershell -ExecutionPolicy Bypass -Command \"Copy-Item fst-web/.env.target fst-web/.env.production -Force; node scripts/build.mjs; vercel link --yes --project otgruzka-tovara; vercel --prod --yes\"",
     "setup:e-drive": "node scripts/setup-e-drive.mjs",
     "clear:hr-cloud": "node fst-web/scripts/clear-hr-employees.mjs",
     "clear:hr-cloud:ps1": "powershell -ExecutionPolicy Bypass -File scripts/clear-hr-cloud.ps1",

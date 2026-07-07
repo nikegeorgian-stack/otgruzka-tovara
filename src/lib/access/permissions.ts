@@ -1,6 +1,7 @@
 import type { ViewId } from '@/lib/types'
 import type { AccessRoleId, AccessStore, AppUser } from './types'
 import { MANAGED_VIEWS } from './types'
+import { defaultHomeViewForRole } from './homeView'
 
 export function isSysAdmin(user: AppUser | null | undefined): boolean {
   return user?.active === true && user.roleId === 'sysadmin'
@@ -46,6 +47,11 @@ export function firstAllowedView(
   user: AppUser | null | undefined,
 ): ViewId {
   const allowed = viewsForUser(access, user)
+  if (!user?.active) return 'month'
+
+  const home = defaultHomeViewForRole(user.roleId)
+  if (allowed.includes(home)) return home
+
   const preferred: ViewId[] = [
     'hr_inspector',
     'hr',
@@ -54,6 +60,10 @@ export function firstAllowedView(
     'technologist',
     'mixer',
     'procurement',
+    'director',
+    'production',
+    'planner',
+    'summary',
     'month',
   ]
   for (const view of preferred) {
