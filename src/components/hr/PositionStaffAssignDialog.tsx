@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
 import { employeeSearchHr } from '@/lib/hr/sync'
+import { hasIndividualSalary } from '@/lib/finance/salary'
 import {
   applyPositionToEmployee,
   isEmployeeOnPosition,
@@ -120,6 +121,11 @@ export function PositionStaffAssignDialog({
                     <span className="block truncate text-xs text-stone-500">
                       {emp.position || t('orgStructure.noPosition')}
                       {emp.department ? ` · ${emp.department}` : ''}
+                      {hasIndividualSalary(emp) ? (
+                        <span className="ml-1 font-semibold text-sky-700">
+                          · {t('finance.rates.individualShort')}
+                        </span>
+                      ) : null}
                     </span>
                   </span>
                 </label>

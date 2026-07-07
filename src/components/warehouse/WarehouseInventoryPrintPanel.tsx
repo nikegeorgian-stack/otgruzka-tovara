@@ -20,6 +20,7 @@ type Props = {
   comment: string
   site?: string
   responsible?: string
+  asOfIso?: string | null
 }
 
 export function WarehouseInventoryPrintPanel({
@@ -28,6 +29,7 @@ export function WarehouseInventoryPrintPanel({
   comment,
   site,
   responsible,
+  asOfIso,
 }: Props) {
   const { t, tf } = useI18n()
   const printRef = useRef<HTMLDivElement>(null)
@@ -53,8 +55,8 @@ export function WarehouseInventoryPrintPanel({
   )
 
   const catCounts = useMemo(
-    () => categoryItemCounts(warehouse, warehouseIds, onlyWithBalance),
-    [warehouse, warehouseIds, onlyWithBalance],
+    () => categoryItemCounts(warehouse, warehouseIds, onlyWithBalance, asOfIso ?? undefined),
+    [warehouse, warehouseIds, onlyWithBalance, asOfIso],
   )
 
   const filteredCategories = useMemo(() => {
@@ -64,8 +66,15 @@ export function WarehouseInventoryPrintPanel({
   }, [categories, categorySearch])
 
   const selectedCount = useMemo(
-    () => countItemsForSelection(warehouse, warehouseIds, categoryIds, onlyWithBalance),
-    [warehouse, warehouseIds, categoryIds, onlyWithBalance],
+    () =>
+      countItemsForSelection(
+        warehouse,
+        warehouseIds,
+        categoryIds,
+        onlyWithBalance,
+        asOfIso ?? undefined,
+      ),
+    [warehouse, warehouseIds, categoryIds, onlyWithBalance, asOfIso],
   )
 
   const payload = useMemo(
@@ -76,8 +85,9 @@ export function WarehouseInventoryPrintPanel({
         onlyWithBalance,
         groupByCategory,
         showBookBalance,
+        asOfIso: asOfIso ?? undefined,
       }),
-    [warehouse, warehouseIds, categoryIds, onlyWithBalance, groupByCategory, showBookBalance],
+    [warehouse, warehouseIds, categoryIds, onlyWithBalance, groupByCategory, showBookBalance, asOfIso],
   )
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { SalesOrderModal } from '@/components/director/SalesOrderModal'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -18,6 +18,10 @@ import {
   salesDashboardKpis,
   salesOrderMetrics,
 } from '@/lib/sales/calc'
+import { computeExecutiveKpis, type ExecutiveKpiInput } from '@/lib/erp/executiveKpis'
+import { ExecutiveKpiStrip } from '@/components/erp/ExecutiveKpiStrip'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { emptySalesOrder } from '@/lib/sales/init'
 import { buildA2LinePortugalSalesOrder } from '@/lib/sales/presets'
 import { collectOrderLoadingShipments } from '@/lib/sales/loadingLink'
@@ -62,6 +66,10 @@ type Props = {
   loadingShipments: LoadingShipment[]
   onOpenWarehouseLoading?: () => void
   onOpenPlanner?: (productionOrderId: string) => void
+  focusSalesOrderId?: string | null
+  onJournalFocusConsumed?: () => void
+  erpInput?: ExecutiveKpiInput
+  onErpNavigate?: (view: import('@/lib/types').ViewId) => void
 }
 
 function todayIso(): string {
@@ -99,17 +107,46 @@ export function DirectorPage({
   loadingShipments,
   onOpenWarehouseLoading,
   onOpenPlanner,
+  focusSalesOrderId,
+  onJournalFocusConsumed,
+  erpInput,
+  onErpNavigate,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
+  const asOf = useAsOfSnapshot()
+  const {
+    enabled: asOfEnabled,
+    setEnabled: setAsOfEnabled,
+    date: asOfDate,
+    setDate: setAsOfDate,
+    time: asOfTime,
+    setTime: setAsOfTime,
+    asOfIso,
+  } = asOf
   const [tab, setTab] = useState<Tab>('dashboard')
   const [editing, setEditing] = useState<SalesOrder | null>(null)
+
+  useEffect(() => {
+    if (!focusSalesOrderId) return
+    const order = sales.orders.find((o) => o.id === focusSalesOrderId)
+    if (order) {
+      setEditing(order)
+      setTab('orders')
+    }
+    onJournalFocusConsumed?.()
+  }, [focusSalesOrderId, sales.orders, onJournalFocusConsumed])
 
   const today = todayIso()
 
   const kpis = useMemo(
     () => salesDashboardKpis(sales.orders, plannerOrders, requests, today),
     [sales.orders, plannerOrders, requests, today],
+  )
+
+  const erpKpis = useMemo(
+    () => (erpInput ? computeExecutiveKpis(erpInput, new Date(), asOfIso ?? undefined) : null),
+    [erpInput, today, asOfIso],
   )
 
   const metricsById = useMemo(() => {
@@ -203,6 +240,18 @@ export function DirectorPage({
 
       {tab === 'dashboard' && (
         <div className="space-y-4">
+          <AsOfSnapshotBar
+            enabled={asOfEnabled}
+            onEnabledChange={setAsOfEnabled}
+            date={asOfDate}
+            onDateChange={setAsOfDate}
+            time={asOfTime}
+            onTimeChange={setAsOfTime}
+            hintKey="asOf.hintExecutive"
+          />
+          {erpKpis && (
+            <ExecutiveKpiStrip kpis={erpKpis} onNavigate={onErpNavigate} />
+          )}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard label={t('director.kpi.openOrders')} value={kpis.openOrders} />
             <KpiCard

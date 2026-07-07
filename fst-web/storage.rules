@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function legacyAllowedEmails() {
+      return [
+        'admin@fibercell.net',
+        'admin-dm@fibercell.net',
+        'levan-admin@fibercell.net',
+        'hr-nino@fibercell.net',
+        'inspektor-nata@fibercell.net',
+        'finans-lizi@fibercell.net',
+        'sklad-alexandra@fibercell.net',
+        'manager-ved-tamara@fibercell.net',
+        'technolog-lasha@fibercell.net',
+        'technolog-ekaterina@fibercell.net',
+        'technolog-annastasia@fibercell.net',
+        'technolog-maria@fibercell.net',
+        'master-karlo@fibercell.net',
+        'master-valera@fibercell.net',
+      ];
+    }
+
+    function isAllowedFstEmail() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in legacyAllowedEmails();
+    }
+
+    match /fstPhotos/{storeId}/{allPaths=**} {
+      allow read, write: if isAllowedFstEmail() && (
+        storeId == 'fibercell-main' ||
+        storeId == request.auth.uid
+      );
+    }
+  }
+}

@@ -65,6 +65,7 @@ export function buildCalendarMonth(
   planner: PlannerStore,
   requests: ProductionRequest[],
   month: string,
+  asOfIso?: string,
 ): CalendarCell[] {
   const daysInMonth = new Set<string>()
   for (const order of planner.orders) {
@@ -84,7 +85,7 @@ export function buildCalendarMonth(
           orderNumber: o.orderNumber,
           productName: o.productName,
           planMp: dp.manualPlanMp ?? dp.operationalPlanMp,
-          factMp: factMpForOrderOnDate(o, requests, date),
+          factMp: factMpForOrderOnDate(o, requests, date, asOfIso),
           status: o.status,
         }
       }),

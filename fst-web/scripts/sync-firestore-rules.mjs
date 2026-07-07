@@ -19,32 +19,57 @@ if (!match) {
   process.exit(1)
 }
 
-const adminMatch = readFileSync(adminPath, 'utf8').match(
-  /FST_ADMIN_EMAIL\s*=\s*'([^']+)'/,
-)
-const adminEmail = adminMatch?.[1]?.toLowerCase()
-if (!adminEmail) {
-  console.error('Could not parse FST_ADMIN_EMAIL from', adminPath)
-  process.exit(1)
-}
+const adminSrc = readFileSync(adminPath, 'utf8')
+const adminEmails = [...adminSrc.matchAll(/FST_ADMIN_EMAILS?\s*=\s*\[([\s\S]*?)\]/g)]
+  .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1].toLowerCase()))
+const singleAdmin = adminSrc.match(/FST_ADMIN_EMAIL\s*=\s*'([^']+)'/)?.[1]?.toLowerCase()
+if (singleAdmin) adminEmails.unshift(singleAdmin)
 
-const emails = [
-  adminEmail,
-  ...[...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1].toLowerCase()),
+const legacyEmails = [
+  ...new Set([
+    ...adminEmails,
+    ...[...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1].toLowerCase()),
+  ]),
 ]
-const unique = [...new Set(emails)]
 
-const emailLines = unique.map((e) => `          '${e}',`).join('\n')
+const adminOnlyLines = [...new Set(adminEmails)]
+  .map((e) => `          '${e}',`)
+  .join('\n')
+const legacyLines = legacyEmails.map((e) => `        '${e}',`).join('\n')
 
 const rules = `rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAllowedFstEmail() {
+    function isSysAdminEmail() {
       return request.auth != null
         && request.auth.token.email != null
         && request.auth.token.email.lower() in [
-${emailLines}
+${adminOnlyLines}
         ];
+    }
+
+    function legacyAllowedEmails() {
+      return [
+${legacyLines}
+      ];
+    }
+
+    function isAllowedFstEmail() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && (
+          isSysAdminEmail()
+          || request.auth.token.email.lower() in legacyAllowedEmails()
+          || (
+            exists(/databases/$(database)/documents/fstConfig/access)
+            && request.auth.token.email.lower() in get(/databases/$(database)/documents/fstConfig/access).data.allowedLogins
+          )
+        );
+    }
+
+    match /fstConfig/access {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow write: if isSysAdminEmail();
     }
 
     match /fstStores/{storeId} {
@@ -53,10 +78,31 @@ ${emailLines}
         storeId == 'fibercell-main'
       );
     }
+
+    match /fstSyncMeta/{storeId} {
+      allow read, write: if isAllowedFstEmail() && (
+        request.auth.uid == storeId ||
+        storeId == 'fibercell-main'
+      );
+    }
+
+    match /fstStoreShards/{shardId} {
+      allow read, write: if isAllowedFstEmail() && (
+        shardId.matches('^' + request.auth.uid + '__.*') ||
+        shardId.matches('^fibercell-main__.*')
+      );
+    }
+
+    match /fstMonthArchive/{archiveId} {
+      allow read, write: if isAllowedFstEmail() && (
+        archiveId.matches('^' + request.auth.uid + '__.*') ||
+        archiveId.matches('^fibercell-main__.*')
+      );
+    }
   }
 }
 `
 
 writeFileSync(rulesPath, rules, 'utf8')
-console.log('Updated firestore.rules with', unique.length, 'emails:')
-for (const e of unique) console.log('  -', e)
+console.log('Updated firestore.rules with', legacyEmails.length, 'legacy emails:')
+for (const e of legacyEmails) console.log('  -', e)

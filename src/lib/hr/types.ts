@@ -116,6 +116,7 @@ export type Candidate = {
   address?: string
   gender?: EmployeeGender
   photoDataUrl?: string
+  photoStoragePath?: string
   note?: string
   education?: HrEducation[]
   workExperience?: HrWorkExperience[]

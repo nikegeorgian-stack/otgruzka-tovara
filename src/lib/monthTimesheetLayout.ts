@@ -4,8 +4,9 @@ import {
   NO_STRUCTURAL_UNIT_ID,
   type MonthGroupMode,
 } from './monthViewOptions'
+import { sortTimesheetRows, type MonthRowSort } from './monthRowSort'
 import { structuralUnitName } from './hr/orgStructure'
-import type { AppStore, HrStructuralUnit, MonthSheet, TimesheetRow } from './types'
+import type { AppStore, Employee, HrStructuralUnit, MonthSheet, TimesheetRow } from './types'
 
 export type TimesheetLayoutBlock = {
   kind: 'brigade' | 'unit' | 'unit-brigade'
@@ -25,17 +26,26 @@ type BuildArgs = {
   brigadeShown: (brigade: string) => boolean
   rowVisible: (rowId: string, brigade: string, employeeId: string | null) => boolean
   searchActive: boolean
+  rowSort?: MonthRowSort
+  employeesById?: Map<string, Employee>
+  locale?: import('@/i18n/types').Locale
 }
 
 function prepareVisibleRows(
   rows: TimesheetRow[],
   rowVisible: BuildArgs['rowVisible'],
   searchActive: boolean,
+  rowSort?: MonthRowSort,
+  employeesById?: Map<string, Employee>,
+  locale?: import('@/i18n/types').Locale,
 ): TimesheetRow[] {
   let visibleRows = rows.filter((r) => rowVisible(r.id, r.brigade, r.employeeId))
   if (!visibleRows.length) {
     const emptySlots = rows.filter((r) => !r.employeeId)
     if (emptySlots.length > 0 && !searchActive) visibleRows = emptySlots
+  }
+  if (rowSort && employeesById && locale) {
+    visibleRows = sortTimesheetRows(visibleRows, employeesById, rowSort, locale)
   }
   return visibleRows
 }
@@ -53,7 +63,7 @@ export function buildTimesheetLayout(
   args: BuildArgs,
   t: (key: string) => string,
 ): TimesheetLayoutBlock[] {
-  const { store, sheet, brigades, groupMode, brigadeShown, rowVisible, searchActive } =
+  const { store, sheet, brigades, groupMode, brigadeShown, rowVisible, searchActive, rowSort, employeesById, locale } =
     args
   const units = activeStructuralUnits(store.hrStructuralUnits)
 
@@ -62,7 +72,7 @@ export function buildTimesheetLayout(
     for (const brigade of brigades) {
       if (!brigadeShown(brigade)) continue
       const rows = sheet.rows.filter((r) => r.brigade === brigade)
-      const visibleRows = prepareVisibleRows(rows, rowVisible, searchActive)
+      const visibleRows = prepareVisibleRows(rows, rowVisible, searchActive, rowSort, employeesById, locale)
       if (!visibleRows.length) continue
       blocks.push({
         kind: 'brigade',
@@ -79,13 +89,15 @@ export function buildTimesheetLayout(
 
   for (const brigade of brigades) {
     if (!brigadeShown(brigade)) continue
+    const brigadeUnitId = store.brigadeUnits?.[brigade] || undefined
     const rows = sheet.rows.filter((r) => r.brigade === brigade)
-    const visibleRows = prepareVisibleRows(rows, rowVisible, searchActive)
+    const visibleRows = prepareVisibleRows(rows, rowVisible, searchActive, rowSort, employeesById, locale)
     for (const row of visibleRows) {
       const emp = row.employeeId
         ? store.employees.find((e) => e.id === row.employeeId)
         : null
-      const unitId = emp ? employeeStructuralUnitKey(emp) : NO_STRUCTURAL_UNIT_ID
+      const unitId =
+        brigadeUnitId ?? (emp ? employeeStructuralUnitKey(emp) : NO_STRUCTURAL_UNIT_ID)
       if (!byUnit.has(unitId)) byUnit.set(unitId, new Map())
       const brigadeMap = byUnit.get(unitId)!
       if (!brigadeMap.has(brigade)) brigadeMap.set(brigade, [])
@@ -141,4 +153,34 @@ export function layoutNavRowIds(blocks: TimesheetLayoutBlock[]): string[] {
     }
   }
   return ids
+}
+
+export type TimesheetVirtualItem =
+  | { kind: 'unit'; key: string; block: TimesheetLayoutBlock }
+  | { kind: 'brigade-header'; key: string; block: TimesheetLayoutBlock }
+  | {
+      kind: 'data'
+      key: string
+      block: TimesheetLayoutBlock
+      row: TimesheetRow
+      rowIndex: number
+    }
+
+/** Плоский список строк таблицы (заголовки + данные) для виртуализации */
+export function flattenTimesheetLayout(
+  blocks: TimesheetLayoutBlock[],
+): TimesheetVirtualItem[] {
+  const out: TimesheetVirtualItem[] = []
+  for (const block of blocks) {
+    if (block.kind === 'unit') {
+      out.push({ kind: 'unit', key: `unit-${block.unitId}`, block })
+      continue
+    }
+    const headerKey = `${block.kind}-${block.unitId ?? 'x'}-${block.brigade}`
+    out.push({ kind: 'brigade-header', key: headerKey, block })
+    block.rows.forEach((row, rowIndex) => {
+      out.push({ kind: 'data', key: row.id, block, row, rowIndex })
+    })
+  }
+  return out
 }

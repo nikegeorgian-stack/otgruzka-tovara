@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useI18n } from '@/context/I18nContext'
+import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
 import { splitEmployeeName } from '@/lib/hr/displayName'
 import { employmentAgreementLabel, hrContractLabel } from '@/lib/hr/labels'
 import { employeeSearchHr } from '@/lib/hr/sync'
+import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
+import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
 import type { Employee } from '@/lib/types'
 
 type Props = {
@@ -23,6 +26,14 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
   const { t, locale, employeePositionLines } = useI18n()
   const [q, setQ] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
+  const [employeeSort, setEmployeeSort] = useState<TableSortState<EmployeeSortKey>>({
+    key: 'name',
+    dir: 'asc',
+  })
+
+  function handleEmployeeSort(key: EmployeeSortKey) {
+    setEmployeeSort((prev) => toggleTableSort(prev, key))
+  }
 
   const departments = useMemo(() => {
     const s = new Set<string>()
@@ -35,15 +46,15 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return employees
+    const list = employees
       .filter((e) => (e.hrStatus ?? 'active') !== 'fired' && e.active !== false)
       .filter((e) => {
         if (deptFilter && (e.department ?? e.brigade) !== deptFilter) return false
         if (!s) return true
         return employeeSearchHr(e).includes(s)
       })
-      .sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru'))
-  }, [employees, q, deptFilter])
+    return sortEmployees(list, employeeSort, locale)
+  }, [employees, q, deptFilter, employeeSort, locale])
 
   return (
     <div className="space-y-4">
@@ -74,9 +85,30 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
         <table className="min-w-full text-sm">
           <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
             <tr>
-              <th className="px-3 py-2">{t('workshopMaster.col.surname')}</th>
-              <th className="px-3 py-2">{t('workshopMaster.col.firstName')}</th>
-              <th className="px-3 py-2">{t('workshopMaster.col.position')}</th>
+              <SortableTableHeader
+                label={t('workshopMaster.col.surname')}
+                sortKey="surname"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+                className="px-3 py-2"
+              />
+              <SortableTableHeader
+                label={t('workshopMaster.col.firstName')}
+                sortKey="firstName"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+                className="px-3 py-2"
+              />
+              <SortableTableHeader
+                label={t('workshopMaster.col.position')}
+                sortKey="position"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+                className="px-3 py-2"
+              />
               <th className="px-3 py-2">{t('workshopMaster.col.contract')}</th>
             </tr>
           </thead>

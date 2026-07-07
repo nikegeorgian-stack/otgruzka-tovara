@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { WarehouseReceiptPrintSheet } from '@/components/warehouse/WarehouseReceiptPrintSheet'
+import { useModalScope } from '@/hooks/useModalScope'
 import { useI18n } from '@/context/I18nContext'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 import type { ReceiptPrintModel } from '@/lib/warehouse/printDocument'
@@ -13,19 +14,22 @@ type Props = {
 export function WarehouseReceiptPrintPreview({ model, onClose }: Props) {
   const { t } = useI18n()
   const printRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
 
+  const { zIndex } = useModalScope({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    initialFocus: 'none',
+  })
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
     document.body.classList.add('print-preview-open', 'print-receipt')
     return () => {
-      window.removeEventListener('keydown', onKey)
       document.body.classList.remove('print-preview-open', 'print-receipt')
     }
-  }, [onClose])
+  }, [])
 
   function handlePrint() {
     requestAnimationFrame(() => window.print())
@@ -46,7 +50,13 @@ export function WarehouseReceiptPrintPreview({ model, onClose }: Props) {
   }
 
   const content = (
-    <div className="print-modal-root fixed inset-0 z-[110] flex flex-col bg-stone-900/60">
+    <div
+      ref={panelRef}
+      className="print-modal-root fixed inset-0 flex flex-col bg-stone-900/60"
+      style={{ zIndex }}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <div>
           <h2 className="text-lg font-bold">{t('print.preview')}</h2>

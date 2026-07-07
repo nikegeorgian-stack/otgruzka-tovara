@@ -49,6 +49,7 @@ export type DirectoriesPageProps = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeUnit: (brigade: string, unitId: string | null) => void
   onUpsertCounterparty: (c: Counterparty) => void
   onRemoveCounterparty: (id: string) => void
   onUpsertFinishedProduct: (p: FinishedProduct) => void
@@ -108,6 +109,7 @@ export function DirectoriesPage({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeUnit,
   onUpsertCounterparty,
   onRemoveCounterparty,
   onUpsertFinishedProduct,
@@ -285,6 +287,7 @@ export function DirectoriesPage({
           onRenameBrigade={onRenameBrigade}
           onRemoveBrigade={onRemoveBrigade}
           onSetBrigadeNameKa={onSetBrigadeNameKa}
+          onSetBrigadeUnit={onSetBrigadeUnit}
         />
       )}
 

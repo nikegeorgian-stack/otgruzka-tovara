@@ -1,6 +1,11 @@
 import type { AppStore, Locale } from '@/lib/types'
 
-export type ExportKind = 'timesheet' | 'payroll' | 'brigades' | 'warehouse'
+export type ExportKind =
+  | 'timesheet'
+  | 'payroll'
+  | 'payroll_statement'
+  | 'brigades'
+  | 'warehouse'
 
 export async function runExport(
   kind: ExportKind,
@@ -21,6 +26,12 @@ export async function runExport(
       if (!month) return
       const { exportPayrollExcel } = await import('@/lib/excelExport')
       await exportPayrollExcel(store, month, locale)
+      break
+    }
+    case 'payroll_statement': {
+      if (!month) return
+      const { exportPayrollStatementExcel } = await import('@/lib/excelExport')
+      await exportPayrollStatementExcel(store, month, locale)
       break
     }
     case 'brigades': {

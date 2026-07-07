@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { DayCode } from '@/lib/types'
 
 export const CELL_CODE_STYLES: Record<string, string> = {
@@ -20,22 +21,26 @@ type Props = {
   dimmed?: boolean
   hasComment?: boolean
   hasSubstitution?: boolean
+  isBrigadier?: boolean
   dataCell?: string
-  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void
   onContextMenu?: (e: React.MouseEvent) => void
   title?: string
   readOnly?: boolean
   size?: 'sm' | 'lg'
   /** Доп. сверхурочные часы в факте (+1…+6) */
   extraHours?: number
+  /** Точное число отработанных часов за смену (если задано вручную) */
+  overrideHours?: number | null
 }
 
-export function DayCell({
+function DayCellInner({
   code,
   mismatch,
   dimmed,
   hasComment,
   hasSubstitution,
+  isBrigadier,
   dataCell,
   onClick,
   onContextMenu,
@@ -43,6 +48,7 @@ export function DayCell({
   readOnly = false,
   size = 'sm',
   extraHours = 0,
+  overrideHours = null,
 }: Props) {
   const sizeClass = size === 'lg' ? 'h-10 w-10 text-sm' : 'h-8 w-8 text-xs'
   return (
@@ -70,11 +76,40 @@ export function DayCell({
       {hasComment && (
         <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-sm bg-sky-500" />
       )}
-      {extraHours > 0 && (
+      {isBrigadier && (
+        <span className="absolute bottom-0 left-0 rounded-tr bg-teal-600 px-0.5 text-[7px] font-bold leading-none text-white">
+          Б
+        </span>
+      )}
+      {extraHours > 0 && overrideHours == null && (
         <span className="absolute bottom-0 right-0 rounded-tl bg-amber-500 px-0.5 text-[7px] font-bold leading-none text-white">
           +{extraHours}
+        </span>
+      )}
+      {overrideHours != null && (
+        <span className="absolute bottom-0 right-0 rounded-tl bg-rose-500 px-0.5 text-[7px] font-bold leading-none text-white">
+          {overrideHours}ч
         </span>
       )}
     </button>
   )
 }
+
+function propsEqual(prev: Props, next: Props): boolean {
+  return (
+    prev.code === next.code &&
+    prev.mismatch === next.mismatch &&
+    prev.dimmed === next.dimmed &&
+    prev.hasComment === next.hasComment &&
+    prev.hasSubstitution === next.hasSubstitution &&
+    prev.isBrigadier === next.isBrigadier &&
+    prev.dataCell === next.dataCell &&
+    prev.title === next.title &&
+    prev.readOnly === next.readOnly &&
+    prev.size === next.size &&
+    prev.extraHours === next.extraHours &&
+    prev.overrideHours === next.overrideHours
+  )
+}
+
+export const DayCell = memo(DayCellInner, propsEqual)

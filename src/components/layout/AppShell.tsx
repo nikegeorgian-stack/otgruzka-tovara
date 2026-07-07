@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { prefetchView } from '@/app/lazyPages'
 import { FiberCellBrand } from '@/components/brand/FiberCellBrand'
 import { WebAccountBar } from '@/components/web/WebAccountBar'
 import { Button } from '@/components/ui/Button'
@@ -44,6 +45,7 @@ const NAV_GROUPS: { labelKey: string; items: NavItem[] }[] = [
       labelKey: 'nav.group.data',
       items: [
         { id: 'hr', labelKey: 'nav.hr', hintKey: 'nav.hrHint' },
+        { id: 'hr_inspector', labelKey: 'nav.hrInspector', hintKey: 'nav.hrInspectorHint' },
         { id: 'finance', labelKey: 'nav.finance', hintKey: 'nav.financeHint' },
         { id: 'directories', labelKey: 'nav.directories', hintKey: 'nav.directoriesHint' },
       ],
@@ -80,6 +82,7 @@ type Props = {
   webProcurementMode?: boolean
   /** Облачный кабинет мастера цеха */
   webWorkshopMasterMode?: boolean
+  webHrInspectorMode?: boolean
   /** Облачный кабинет — email и смена учётки */
   webAccount?: { displayName: string; email: string }
   /** Предпросмотр кабинета (только sysadmin) */
@@ -105,6 +108,7 @@ export function AppShell({
   webTechnologistMode,
   webProcurementMode,
   webWorkshopMasterMode,
+  webHrInspectorMode,
   webAccount,
   adminCabinet = 'full',
   onAdminCabinetChange,
@@ -115,189 +119,46 @@ export function AppShell({
   const { confirm } = useConfirm()
   const isAdmin = isSysAdmin(currentUser)
 
-  const navGroups = webHrMode
-    ? [
-        {
-          labelKey: 'nav.group.data',
-          items: [{ id: 'hr' as ViewId, labelKey: 'nav.hr', hintKey: 'nav.hrWebHint' }],
-        },
-        {
-          labelKey: 'nav.group.system',
-          items: [
-            { id: 'journals' as ViewId, labelKey: 'nav.journals', hintKey: 'nav.journalsHint' },
-          ],
-        },
-      ]
-    : webFinanceMode
-      ? [
-          {
-            labelKey: 'nav.group.timesheet',
-            items: [
-              { id: 'finance' as ViewId, labelKey: 'nav.finance', hintKey: 'nav.financeWebHint' },
-            ],
-          },
-          {
-            labelKey: 'nav.group.system',
-            items: [
-              { id: 'journals' as ViewId, labelKey: 'nav.journals', hintKey: 'nav.journalsHint' },
-            ],
-          },
-        ]
-      : webWarehouseMode
-        ? [
-            {
-              labelKey: 'nav.group.operations',
-              items: [
-                {
-                  id: 'warehouse' as ViewId,
-                  labelKey: 'nav.warehouse',
-                  hintKey: 'nav.warehouseWebHint',
-                },
-                {
-                  id: 'procurement' as ViewId,
-                  labelKey: 'nav.procurement',
-                  hintKey: 'nav.procurementWebHint',
-                },
-              ],
-            },
-            {
-              labelKey: 'nav.group.data',
-              items: [
-                {
-                  id: 'directories' as ViewId,
-                  labelKey: 'nav.directories',
-                  hintKey: 'nav.directoriesWebHint',
-                },
-              ],
-            },
-            {
-              labelKey: 'nav.group.system',
-              items: [
-                {
-                  id: 'journals' as ViewId,
-                  labelKey: 'nav.journals',
-                  hintKey: 'nav.journalsHint',
-                },
-              ],
-            },
-          ]
-        : webTechnologistMode
-          ? [
-              {
-                labelKey: 'nav.group.operations',
-                items: [
-                  {
-                    id: 'technologist' as ViewId,
-                    labelKey: 'nav.technologist',
-                    hintKey: 'nav.technologistWebHint',
-                  },
-                ],
-              },
-              {
-                labelKey: 'nav.group.system',
-                items: [
-                  {
-                    id: 'journals' as ViewId,
-                    labelKey: 'nav.journals',
-                    hintKey: 'nav.journalsHint',
-                  },
-                ],
-              },
-            ]
-          : webProcurementMode
-            ? [
-                {
-                  labelKey: 'nav.group.operations',
-                  items: [
-                    {
-                      id: 'procurement' as ViewId,
-                      labelKey: 'nav.procurement',
-                      hintKey: 'nav.procurementWebManagerHint',
-                    },
-                  ],
-                },
-                {
-                  labelKey: 'nav.group.data',
-                  items: [
-                    {
-                      id: 'directories' as ViewId,
-                      labelKey: 'nav.directories',
-                      hintKey: 'nav.procurementDirectoriesHint',
-                    },
-                  ],
-                },
-                {
-                  labelKey: 'nav.group.system',
-                  items: [
-                    {
-                      id: 'journals' as ViewId,
-                      labelKey: 'nav.journals',
-                      hintKey: 'nav.journalsHint',
-                    },
-                  ],
-                },
-              ]
-            : webWorkshopMasterMode
-              ? [
-                  {
-                    labelKey: 'nav.group.timesheet',
-                    items: [
-                      {
-                        id: 'month' as ViewId,
-                        labelKey: 'nav.month',
-                        hintKey: 'nav.workshopMasterMonthHint',
-                      },
-                    ],
-                  },
-                  {
-                    labelKey: 'nav.group.operations',
-                    items: [
-                      {
-                        id: 'production' as ViewId,
-                        labelKey: 'nav.production',
-                        hintKey: 'nav.workshopMasterProductionHint',
-                      },
-                    ],
-                  },
-                  {
-                    labelKey: 'nav.group.data',
-                    items: [
-                      {
-                        id: 'hr' as ViewId,
-                        labelKey: 'nav.hr',
-                        hintKey: 'nav.workshopMasterHrHint',
-                      },
-                    ],
-                  },
-                  {
-                    labelKey: 'nav.group.system',
-                    items: [
-                      {
-                        id: 'journals' as ViewId,
-                        labelKey: 'nav.journals',
-                        hintKey: 'nav.journalsHint',
-                      },
-                    ],
-                  },
-                ]
-              : NAV_GROUPS
+  const navGroups = NAV_GROUPS
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [navPending, setNavPending] = useState<ViewId | null>(null)
+  const navView = navPending ?? view
+
+  useEffect(() => {
+    setNavPending(null)
+  }, [view])
+
+  const navigateView = useCallback(
+    (next: ViewId) => {
+      if (next === view && navPending === null) return
+      setNavPending(next)
+      prefetchView(next)
+      startTransition(() => {
+        onViewChange(next)
+      })
+    },
+    [view, navPending, onViewChange],
+  )
+
+  function navItemAllowed(itemId: ViewId): boolean {
+    if (isAdmin && adminCabinet !== 'full') {
+      return canShowNavItemForAdminPreview(
+        access,
+        currentUser,
+        itemId,
+        adminCabinet,
+        isFstWeb,
+      )
+    }
+    return canAccessView(access, currentUser, itemId)
+  }
 
   const flatNavItems = useMemo((): MobileNavItem[] => {
     const out: MobileNavItem[] = []
     for (const group of navGroups) {
       for (const item of group.items) {
-        const allowed =
-          isAdmin && adminCabinet !== 'full'
-            ? canShowNavItemForAdminPreview(
-                access,
-                currentUser,
-                item.id,
-                adminCabinet,
-                isFstWeb,
-              )
-            : canAccessView(access, currentUser, item.id)
+        const allowed = navItemAllowed(item.id)
         if (allowed) out.push(item)
       }
     }
@@ -306,6 +167,9 @@ export function AppShell({
 
   const cabinetMeta = useMemo(() => {
     if (webHrMode) return { title: t('web.hr.title'), subtitle: t('web.hr.subtitle') }
+    if (webHrInspectorMode) {
+      return { title: t('web.hrInspector.title'), subtitle: t('web.hrInspector.subtitle') }
+    }
     if (webFinanceMode) return { title: t('web.finance.title'), subtitle: t('web.finance.subtitle') }
     if (webWarehouseMode) return { title: t('web.warehouse.title'), subtitle: t('web.warehouse.subtitle') }
     if (webTechnologistMode) {
@@ -319,6 +183,7 @@ export function AppShell({
   }, [
     t,
     webHrMode,
+    webHrInspectorMode,
     webFinanceMode,
     webWarehouseMode,
     webTechnologistMode,
@@ -326,7 +191,7 @@ export function AppShell({
     webWorkshopMasterMode,
   ])
 
-  const activeNavItem = flatNavItems.find((item) => isNavActive(view, item.id))
+  const activeNavItem = flatNavItems.find((item) => isNavActive(navView, item.id))
   const mobileHeaderTitle = activeNavItem ? t(activeNavItem.labelKey) : cabinetMeta.title
   const mobileHeaderSubtitle = activeNavItem ? t(activeNavItem.hintKey) : cabinetMeta.subtitle
 
@@ -334,6 +199,7 @@ export function AppShell({
     isAdmin &&
     adminCabinet === 'full' &&
     !webHrMode &&
+    !webHrInspectorMode &&
     !webFinanceMode &&
     !webWarehouseMode &&
     !webTechnologistMode &&
@@ -349,6 +215,11 @@ export function AppShell({
             <>
               <h1 className="text-lg font-bold leading-tight text-ink">{t('web.hr.title')}</h1>
               <p className="mt-1 text-xs text-ink-muted">{t('web.hr.subtitle')}</p>
+            </>
+          ) : webHrInspectorMode ? (
+            <>
+              <h1 className="text-lg font-bold leading-tight text-ink">{t('web.hrInspector.title')}</h1>
+              <p className="mt-1 text-xs text-ink-muted">{t('web.hrInspector.subtitle')}</p>
             </>
           ) : webFinanceMode ? (
             <>
@@ -418,30 +289,22 @@ export function AppShell({
         </div>
         <nav className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
           {navGroups.map((group) => {
-            const items = group.items.filter((item) =>
-              isAdmin && adminCabinet !== 'full'
-                ? canShowNavItemForAdminPreview(
-                    access,
-                    currentUser,
-                    item.id,
-                    adminCabinet,
-                    isFstWeb,
-                  )
-                : canAccessView(access, currentUser, item.id),
-            )
+            const items = group.items.filter((item) => navItemAllowed(item.id))
             if (items.length === 0) return null
             return (
               <div key={group.labelKey}>
                 <p className="fc-nav-group__label">{t(group.labelKey)}</p>
                 <div className="mt-0.5 flex flex-col gap-0.5">
                   {items.map((item) => {
-                    const active = isNavActive(view, item.id)
+                    const active = isNavActive(navView, item.id)
                     return (
                       <button
                         key={item.id}
                         type="button"
                         data-coach={`nav:${item.id}`}
-                        onClick={() => onViewChange(item.id)}
+                        onMouseEnter={() => prefetchView(item.id)}
+                        onFocus={() => prefetchView(item.id)}
+                        onClick={() => navigateView(item.id)}
                         className={`fc-nav-item ${active ? 'fc-nav-item--active' : ''}`}
                       >
                         <div className="fc-nav-item__title">{t(item.labelKey)}</div>
@@ -455,7 +318,7 @@ export function AppShell({
           })}
         </nav>
         <div className="space-y-2 border-t border-stone-300/80 p-3">
-          {isAdmin && adminCabinet === 'full' && !webHrMode && !webFinanceMode && !webWarehouseMode && !webTechnologistMode && !webProcurementMode && !webWorkshopMasterMode && (
+          {isAdmin && adminCabinet === 'full' && !webHrMode && !webHrInspectorMode && !webFinanceMode && !webWarehouseMode && !webTechnologistMode && !webProcurementMode && !webWorkshopMasterMode && (
             <>
               <Button
                 variant="secondary"
@@ -514,8 +377,8 @@ export function AppShell({
 
       <WebMobileNav
         items={flatNavItems}
-        activeView={view}
-        onNavigate={onViewChange}
+        activeView={navView}
+        onNavigate={navigateView}
         onOpenMenu={() => setMobileMenuOpen(true)}
       />
 
@@ -528,8 +391,8 @@ export function AppShell({
         roleId={currentUser?.roleId}
         email={webAccount?.email}
         items={flatNavItems}
-        activeView={view}
-        onNavigate={onViewChange}
+        activeView={navView}
+        onNavigate={navigateView}
         onLogout={onLogout}
         adminCabinet={isAdmin ? adminCabinet : undefined}
         onAdminCabinetChange={isAdmin ? onAdminCabinetChange : undefined}

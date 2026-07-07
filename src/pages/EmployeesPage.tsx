@@ -3,11 +3,14 @@ import { BilingualText } from '@/components/employee/BilingualText'
 import { EmployeeEditorHost } from '@/components/hr/EmployeeEditorHost'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useEmployeeEditor } from '@/hooks/useEmployeeEditor'
 import { hrStatusLabel } from '@/lib/hr/labels'
 import { employeeSearchHr } from '@/lib/hr/sync'
+import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
+import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
 import type { HrPosition, HrStructuralUnit } from '@/lib/hr/types'
 import type { Employee } from '@/lib/types'
 
@@ -19,6 +22,8 @@ type Props = {
   onSave: (e: Employee) => void
   onRemove: (id: string) => void
   embedded?: boolean
+  /** Показать метку индивидуального оклада (финансы). */
+  showIndividualSalary?: boolean
 }
 
 export function EmployeesPage({
@@ -29,19 +34,28 @@ export function EmployeesPage({
   onSave,
   onRemove,
   embedded = false,
+  showIndividualSalary = false,
 }: Props) {
   const { t, locale, employeeNameLines, employeePositionLines } = useI18n()
   const { confirm } = useConfirm()
   const [q, setQ] = useState('')
   const [showInactive, setShowInactive] = useState(false)
+  const [employeeSort, setEmployeeSort] = useState<TableSortState<EmployeeSortKey>>({
+    key: null,
+    dir: 'asc',
+  })
   const editor = useEmployeeEditor(brigades, employees)
+
+  function handleEmployeeSort(key: EmployeeSortKey) {
+    setEmployeeSort((prev) => toggleTableSort(prev, key))
+  }
 
   const filtered = useMemo(() => {
     const list = employees.filter((e) => showInactive || e.active)
-    if (!q.trim()) return list
-    const s = q.toLowerCase()
-    return list.filter((e) => employeeSearchHr(e).includes(s))
-  }, [employees, q, showInactive])
+    const s = q.trim().toLowerCase()
+    const matched = !s ? list : list.filter((e) => employeeSearchHr(e).includes(s))
+    return sortEmployees(matched, employeeSort, locale)
+  }, [employees, q, showInactive, employeeSort, locale])
 
   return (
     <div className={`flex flex-col gap-4 ${embedded ? '' : 'p-5'}`}>
@@ -87,12 +101,48 @@ export function EmployeesPage({
         <table className="fc-table min-w-full">
           <thead>
             <tr>
-              <th>{t('employees.colTab')}</th>
-              <th>{t('employees.colName')}</th>
-              <th>{t('employees.colPosition')}</th>
-              <th>{t('employees.colBrigade')}</th>
-              <th>{t('employees.colSchedule')}</th>
-              <th>{t('employees.status')}</th>
+              <SortableTableHeader
+                label={t('employees.colTab')}
+                sortKey="tab"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
+                label={t('employees.colName')}
+                sortKey="name"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
+                label={t('employees.colPosition')}
+                sortKey="position"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
+                label={t('employees.colBrigade')}
+                sortKey="brigade"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
+                label={t('employees.colSchedule')}
+                sortKey="schedule"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
+                label={t('employees.status')}
+                sortKey="status"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
               <th>{t('employees.colGroup')}</th>
               <th>{t('employees.colPay')}</th>
               <th></th>
@@ -130,6 +180,14 @@ export function EmployeesPage({
                       : emp.hourlyRate
                         ? `${emp.hourlyRate.toLocaleString('ru-RU')} ₾/ч`
                         : '—'}
+                    {showIndividualSalary && emp.individualSalary ? (
+                      <span
+                        className="ml-1 text-[10px] font-semibold uppercase text-sky-700"
+                        title={t('finance.rates.individual')}
+                      >
+                        {t('finance.rates.individualShort')}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="text-right">
                     <div className="flex justify-end gap-2">

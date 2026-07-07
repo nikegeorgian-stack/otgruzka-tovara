@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { runDailyBackup } from '@/lib/backup'
 import { needsAdminSetup } from '@/lib/access/init'
 import {
@@ -8,13 +8,12 @@ import {
   type AdminCabinetId,
 } from '@/lib/access/adminCabinet'
 import { canAccessView, firstAllowedView, isSysAdmin } from '@/lib/access/permissions'
-import { readViewFromLocation, viewToHash } from '@/lib/nav/viewRouting'
+import { readRouteFromLocation, viewToHash } from '@/lib/nav/viewRouting'
 import { verifyPassword } from '@/lib/access/password'
 import { mergeWebAppUser } from '@/lib/access/userEmployee'
 import { SESSION_STORAGE_KEY } from '@/lib/access/types'
 import type { AccessStore } from '@/lib/access/types'
 import { useFstWebSession } from '@/context/FstWebSessionContext'
-import { webAccessStore } from '@/lib/cloud/fstWebUsers'
 import type { DirectorySection } from '@/lib/directories/types'
 import type { HrSection } from '@/lib/hr/types'
 import { USE_LOCAL_DB } from '@/lib/localDb/config'
@@ -57,6 +56,7 @@ import {
   createItOfficeSlice,
   createProcurementSlice,
   createAccessSlice,
+  createFinanceSlice,
   createWorkspaceSlice,
 } from '@/store'
 
@@ -77,8 +77,12 @@ export function useAppStore() {
     skipLocalAuth ? '__fst__' : sessionStorage.getItem(SESSION_STORAGE_KEY),
   )
   const [adminCabinet, setAdminCabinetState] = useState<AdminCabinetId>(() => readAdminCabinet())
-  const [view, setViewState] = useState<ViewId>(() => readViewFromLocation() ?? 'month')
-  const [directorySection, setDirectorySection] = useState<DirectorySection>('counterparties')
+  const bootRoute =
+    typeof window !== 'undefined' ? readRouteFromLocation() : null
+  const [view, setViewState] = useState<ViewId>(() => bootRoute?.view ?? 'month')
+  const [directorySection, setDirectorySection] = useState<DirectorySection>(
+    () => bootRoute?.directorySection ?? 'counterparties',
+  )
   const [hrSection, setHrSection] = useState<HrSection>('employees')
   const [workspacePanes, setWorkspacePanes] = useState<WorkspacePane[]>([])
   const [activeWorkspacePaneId, setActiveWorkspacePaneId] = useState<string | null>(null)
@@ -120,19 +124,27 @@ export function useAppStore() {
   const production = useMemo(() => createProductionSlice(sliceDeps), [sliceDeps])
   const directories = useMemo(() => createDirectoriesSlice(sliceDeps), [sliceDeps])
   const accessSlice = useMemo(() => createAccessSlice(sliceDeps), [sliceDeps])
+  const finance = useMemo(() => createFinanceSlice(sliceDeps), [sliceDeps])
   const settings = useMemo(
     () => createSettingsSlice(sliceDeps, { getActiveMonth, setActiveMonth }),
     [sliceDeps, getActiveMonth],
   )
 
   const setView = useCallback((v: SetStateAction<ViewId>) => {
-    setViewState((prev) => {
-      const next = typeof v === 'function' ? v(prev) : v
-      if (next === 'pay') {
-        setHrSection('pay')
-        return 'hr'
-      }
-      return next
+    startTransition(() => {
+      setViewState((prev) => {
+        const next = typeof v === 'function' ? v(prev) : v
+        if (next === 'pay') return 'finance'
+        if (next === 'employees') {
+          setDirectorySection('employees')
+          return 'directories'
+        }
+        if (next === 'codes') {
+          setDirectorySection('codes')
+          return 'directories'
+        }
+        return next
+      })
     })
   }, [])
 
@@ -201,12 +213,11 @@ export function useAppStore() {
     setStore((s) => ensureMonthReady(s, month))
   }, [])
 
-  const access: AccessStore = useMemo(() => {
-    if (skipLocalAuth && webSession.profile) {
-      return webAccessStore(store.access, webSession.profile.roleId)
-    }
-    return store.access
-  }, [store.access, webSession.profile])
+  const userBootDefaultsRef = useRef<string | null>(null)
+  const lastPersistedViewRef = useRef<ViewId | null>(null)
+  const lastPersistedMonthRef = useRef<string | null>(null)
+
+  const access: AccessStore = useMemo(() => store.access, [store.access])
 
   const currentUser = useMemo(() => {
     if (skipLocalAuth) {
@@ -217,6 +228,49 @@ export function useAppStore() {
     if (!sessionUserId) return null
     return store.access.users.find((u) => u.id === sessionUserId && u.active) ?? null
   }, [store.access, sessionUserId, webSession.appUser, skipLocalAuth])
+
+  useEffect(() => {
+    if (!currentUser) {
+      userBootDefaultsRef.current = null
+      return
+    }
+    if (userBootDefaultsRef.current === currentUser.id) return
+    userBootDefaultsRef.current = currentUser.id
+
+    const global = currentUser.viewDefaults?.global
+    if (global?.lastMonth && /^\d{4}-\d{2}$/.test(global.lastMonth)) {
+      lastPersistedMonthRef.current = global.lastMonth
+      setActiveMonth(global.lastMonth)
+      setStore((s) => ensureMonthReady(s, global.lastMonth!))
+    }
+    const hrDefault = currentUser.viewDefaults?.hr?.section
+    if (hrDefault) setHrSection(hrDefault)
+    if (
+      global?.lastView &&
+      canAccessView(access, currentUser, global.lastView) &&
+      typeof window !== 'undefined' &&
+      !readRouteFromLocation()
+    ) {
+      lastPersistedViewRef.current = global.lastView
+      setViewState(global.lastView)
+    }
+  }, [currentUser, access])
+
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) return
+    if (lastPersistedViewRef.current === view) return
+    lastPersistedViewRef.current = view
+    accessSlice.updateUserViewDefaults(userId, 'global', { lastView: view })
+  }, [view, currentUser?.id, accessSlice])
+
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) return
+    if (lastPersistedMonthRef.current === activeMonth) return
+    lastPersistedMonthRef.current = activeMonth
+    accessSlice.updateUserViewDefaults(userId, 'global', { lastMonth: activeMonth })
+  }, [activeMonth, currentUser?.id, accessSlice])
 
   const login = useCallback(
     async (loginName: string, password: string): Promise<boolean> => {
@@ -279,8 +333,12 @@ export function useAppStore() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const sync = () => {
-      const next = readViewFromLocation()
-      if (next) setViewState((prev) => (prev === next ? prev : next))
+      const route = readRouteFromLocation()
+      if (!route) return
+      if (route.directorySection) {
+        setDirectorySection(route.directorySection)
+      }
+      setViewState((prev) => (prev === route.view ? prev : route.view))
     }
     window.addEventListener('popstate', sync)
     window.addEventListener('hashchange', sync)
@@ -310,9 +368,10 @@ export function useAppStore() {
     }
 
     // После перезагрузки сохраняем раздел из адреса, если роль имеет к нему доступ.
-    const restored = readViewFromLocation()
-    if (restored && canAccessView(access, currentUser, restored)) {
-      setViewState(restored)
+    const restored = readRouteFromLocation()
+    if (restored && canAccessView(access, currentUser, restored.view)) {
+      setViewState(restored.view)
+      if (restored.directorySection) setDirectorySection(restored.directorySection)
       return
     }
 
@@ -396,6 +455,8 @@ export function useAppStore() {
     changeEmployeeAttributesFromDay: timesheet.changeEmployeeAttributesFromDay,
     setEmployeeCycleFromDay: timesheet.setEmployeeCycleFromDay,
     setBrigadier: timesheet.setBrigadier,
+    setBrigadierDay: timesheet.setBrigadierDay,
+    setBrigadierMonth: timesheet.setBrigadierMonth,
     assignPermanentToBrigade: timesheet.assignPermanentToBrigade,
     setBrigadeRoster: timesheet.setBrigadeRoster,
     captureVoiceUndo,
@@ -407,6 +468,8 @@ export function useAppStore() {
     clearSubstitution: timesheet.clearSubstitution,
     setMark: timesheet.setMark,
     setFactExtraHours: timesheet.setFactExtraHours,
+    setFactHours: timesheet.setFactHours,
+    addBrigadeDayWorker: timesheet.addBrigadeDayWorker,
     bulkHolidayV: timesheet.bulkHolidayV,
     bulkCopyPlanToFact: timesheet.bulkCopyPlanToFact,
     bulkCopyPlanToFact52: timesheet.bulkCopyPlanToFact52,
@@ -419,10 +482,14 @@ export function useAppStore() {
     addBrigade: timesheet.addBrigade,
     renameBrigade: timesheet.renameBrigade,
     setBrigadeNameKa: timesheet.setBrigadeNameKa,
+    setBrigadeUnit: timesheet.setBrigadeUnit,
     removeBrigade: timesheet.removeBrigade,
     addMonth: settings.addMonth,
     removeMonth: settings.removeMonth,
     archiveMonth: settings.archiveMonth,
+    syncMonthRosterFromHr: settings.syncMonthRosterFromHr,
+    prepareArchiveMonth: settings.prepareArchiveMonth,
+    setMonthClosed: settings.setMonthClosed,
     applyShiftTemplate: timesheet.applyShiftTemplate,
     applyShiftTemplateBrigade: timesheet.applyShiftTemplateBrigade,
     applyShiftTemplateBrigadeAndRegenerate: timesheet.applyShiftTemplateBrigadeAndRegenerate,
@@ -445,12 +512,18 @@ export function useAppStore() {
     addStockMovement: warehouse.addStockMovement,
     deleteStockMovement: warehouse.deleteStockMovement,
     postWarehouseDoc: warehouse.postWarehouseDoc,
+    saveWarehouseDocDraft: warehouse.saveWarehouseDocDraft,
+    postExistingWarehouseDoc: warehouse.postExistingWarehouseDoc,
+    unpostWarehouseDoc: warehouse.unpostWarehouseDoc,
+    removeWarehouseDraft: warehouse.removeWarehouseDraft,
     postWarehouseTransfer: warehouse.postWarehouseTransfer,
     cancelWarehouseDocument: warehouse.cancelWarehouseDocument,
     mergeWarehouseInvoiceRegistry: warehouse.mergeWarehouseInvoiceRegistry,
     runWarehouseInventory: warehouse.runWarehouseInventory,
     postWarehouseInventoryRevision: warehouse.postWarehouseInventoryRevision,
     postWarehouseOpeningBalances: warehouse.postWarehouseOpeningBalances,
+    acquireWarehouseDocumentLock: warehouse.acquireWarehouseDocumentLock,
+    releaseWarehouseDocumentLock: warehouse.releaseWarehouseDocumentLock,
     importWarehouseExcel: warehouse.importWarehouseExcel,
     setWarehouseStore: warehouse.setWarehouseStore,
     setWarehouseMonthClosed: warehouse.setWarehouseMonthClosed,
@@ -541,11 +614,20 @@ export function useAppStore() {
     addPurchaseOrderMilestone: procurement.addPurchaseOrderMilestone,
     setPurchaseOrderStatus: procurement.setPurchaseOrderStatus,
     receivePurchaseOrder: procurement.receivePurchaseOrder,
+    giveAdvance: finance.giveAdvance,
+    removeAdvance: finance.removeAdvance,
+    addAdjustment: finance.addAdjustment,
+    removeAdjustment: finance.removeAdjustment,
+    addPayout: finance.addPayout,
+    removePayout: finance.removePayout,
+    confirmSick: finance.confirmSick,
+    unconfirmSick: finance.unconfirmSick,
     upsertAppUser: accessSlice.upsertAppUser,
     removeAppUser: accessSlice.removeAppUser,
     setRoleViews: accessSlice.setRoleViews,
     setRoleAllowNegativeStock: accessSlice.setRoleAllowNegativeStock,
     setRoleAllowDocumentCancel: accessSlice.setRoleAllowDocumentCancel,
     setupInitialAdminPassword: accessSlice.setupInitialAdminPassword,
+    updateUserViewDefaults: accessSlice.updateUserViewDefaults,
   }
 }

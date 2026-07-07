@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { useI18n } from '@/context/I18nContext'
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
 import {
@@ -55,8 +56,12 @@ export function LoadingQuickProductModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-stone-900/50 p-4">
-      <div className="w-full max-w-md rounded-sm border border-grid bg-white p-5 shadow-sm">
+    <ModalBackdrop
+      open
+      onClose={onClose}
+      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
+      panelClassName="w-full max-w-md rounded-sm border border-grid bg-white p-5 shadow-sm"
+    >
         <h3 className="text-lg font-bold text-ink">{t('warehouse.loading.quickItem.title')}</h3>
         <p className="mt-1 text-sm text-stone-500">{t('warehouse.loading.quickItem.hint')}</p>
         <p className="mt-3 font-medium text-ink">{finishedProduct.name}</p>
@@ -86,7 +91,6 @@ export function LoadingQuickProductModal({
             {t('warehouse.loading.quickItem.create')}
           </Button>
         </div>
-      </div>
-    </div>
+    </ModalBackdrop>
   )
 }

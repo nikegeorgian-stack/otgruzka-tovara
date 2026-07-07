@@ -31,7 +31,7 @@ export type WarehouseDocumentPurpose =
   | 'transfer'
   | 'other'
 
-export type WarehouseDocumentStatus = 'posted' | 'cancelled'
+export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
 export type WriteoffReasonId =
   | 'defect'
@@ -114,6 +114,10 @@ export type StockMovement = {
 export type WarehouseDocumentLine = {
   itemId: string
   quantity: number
+  /** Снимок учётного остатка на момент ревизии (документ inventory) */
+  bookQty?: number
+  /** Сомнительные данные при пересчёте */
+  doubtful?: boolean
   inputUnit?: string
   /** Цена за единицу (для прихода) */
   unitPrice?: number
@@ -123,9 +127,11 @@ export type WarehouseDocumentLine = {
   expiryDate?: string
 }
 
+export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory'
+
 export type WarehouseDocument = {
   id: string
-  type: 'receipt' | 'issue'
+  type: WarehouseDocumentType
   number: string
   date: string
   warehouseId: string
@@ -140,6 +146,10 @@ export type WarehouseDocument = {
   comment?: string
   writeoffReason?: WriteoffReasonId
   status?: WarehouseDocumentStatus
+  /** Кто и когда провёл документ (draft → posted) */
+  postedAt?: string
+  postedBy?: string
+  postedByName?: string
   cancelledAt?: string
   cancelledBy?: string
   cancelledByName?: string
@@ -163,6 +173,10 @@ export type WarehouseDocument = {
   /** Связь с заявкой кладовщика на пополнение (ЗКл) */
   keeperRequestId?: string
   docRole?: 'batch_issue' | 'batch_receipt' | 'transfer_issue' | 'transfer_receipt' | 'reversal'
+  /** Блокировка редактирования черновика другим пользователем */
+  lockedBy?: string
+  lockedByName?: string
+  lockedAt?: string
   createdAt: string
 }
 
@@ -201,7 +215,9 @@ export type WarehouseAuditEntry = {
     | 'item_archive'
     | 'movement_add'
     | 'movement_delete'
+    | 'document_draft'
     | 'document_post'
+    | 'document_unpost'
     | 'document_cancel'
     | 'inventory'
     | 'import'
@@ -215,6 +231,7 @@ export type WarehouseAuditEntry = {
   actorId?: string
   actorName?: string
   batchRunId?: string
+  productionRequestId?: string
 }
 
 /** Заявка технолога на добавление позиции в номенклатуру */

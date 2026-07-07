@@ -39,8 +39,10 @@ import { createDefaultAiChat, normalizeAiChatStore } from './aiChat/init'
 import { createDefaultAccessStore, normalizeAccessStore } from './access/init'
 import { createDefaultWarehouse, normalizeWarehouse } from './warehouse/init'
 import { ensureLoadingSeeds } from './warehouse/loadingSeeds'
+import { zeroAllWarehouseBalances } from './warehouse/zeroBalances'
 import { createDefaultItOfficeStore, normalizeItOfficeStore } from './itOffice/init'
 import { createDefaultWorkwear, normalizeWorkwear } from './workwear/init'
+import { createDefaultFinanceStore, normalizeFinanceStore } from './finance/init'
 import { normalizeMonthSheet, purgeExpiredTrash } from './trash'
 import { normalizeCandidate } from './hr/candidates'
 import type { AppStore, Candidate, Employee, HrPosition, HrStructuralUnit, MonthSheet } from './types'
@@ -193,7 +195,21 @@ function withLoadingSeeds(store: AppStore): AppStore {
 
 /** Подставляет демо-документы погрузки (4 × A2LINE). Вызывать после любой загрузки store. */
 export function applyAppStoreSeeds(store: AppStore): AppStore {
-  return withLoadingSeeds(store)
+  let next = withLoadingSeeds(store)
+
+  if (!next.settings.warehouseBalancesZeroedAt) {
+    const date = new Date().toISOString().slice(0, 10)
+    next = {
+      ...next,
+      warehouse: zeroAllWarehouseBalances(next.warehouse, date),
+      settings: {
+        ...next.settings,
+        warehouseBalancesZeroedAt: new Date().toISOString(),
+      },
+    }
+  }
+
+  return next
 }
 
 export function createDefaultStore(): AppStore {
@@ -202,7 +218,10 @@ export function createDefaultStore(): AppStore {
     brigades: [...DEFAULT_BRIGADES],
     brigadeNamesKa: {},
     brigadiers: {},
+    brigadeUnits: {},
     archivedMonths: defaultArchivedMonths(),
+    closedMonths: [],
+    monthClosures: {},
     employees: (seedEmployees as unknown as Employee[]).map(normalizeEmployee),
     candidates: [],
     months: {},
@@ -225,6 +244,7 @@ export function createDefaultStore(): AppStore {
     itOffice: createDefaultItOfficeStore(),
     procurement: createDefaultProcurement(),
     access: createDefaultAccessStore(),
+    finance: createDefaultFinanceStore(),
     settings: normalizeSettings(undefined),
   }
   for (const m of defaultMonths()) {
@@ -285,9 +305,13 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
       (raw as AppStore).brigadeNamesKa ??
       {},
     brigadiers: (raw.brigadiers as Record<string, string>) ?? {},
+    brigadeUnits: (raw.brigadeUnits as Record<string, string>) ?? {},
     archivedMonths: Array.isArray(raw.archivedMonths)
       ? (raw.archivedMonths as string[])
       : defaultArchivedMonths(),
+    closedMonths: Array.isArray(raw.closedMonths) ? (raw.closedMonths as string[]) : [],
+    monthClosures:
+      (raw.monthClosures as AppStore['monthClosures']) ?? {},
     employees: oldEmployees,
     candidates: normalizeCandidates(raw.candidates),
     months,
@@ -326,6 +350,7 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
       raw.procurement as AppStore['procurement'],
     ),
     access: normalizeAccessStore(raw.access as AppStore['access']),
+    finance: normalizeFinanceStore(raw.finance),
     settings: normalizeSettings(raw.settings as AppStore['settings']),
   }
 
@@ -360,9 +385,13 @@ function migrateToV6(raw: Record<string, unknown>): AppStore {
       (raw as AppStore).brigadeNamesKa ??
       {},
     brigadiers: (raw.brigadiers as Record<string, string>) ?? {},
+    brigadeUnits: (raw.brigadeUnits as Record<string, string>) ?? {},
     archivedMonths: Array.isArray(raw.archivedMonths)
       ? (raw.archivedMonths as string[])
       : defaultArchivedMonths(),
+    closedMonths: Array.isArray(raw.closedMonths) ? (raw.closedMonths as string[]) : [],
+    monthClosures:
+      (raw.monthClosures as AppStore['monthClosures']) ?? {},
     employees: mergeEmployeesFromSeed(oldEmployees),
     candidates: normalizeCandidates(raw.candidates),
     months,
@@ -401,6 +430,7 @@ function migrateToV6(raw: Record<string, unknown>): AppStore {
       raw.procurement as AppStore['procurement'],
     ),
     access: normalizeAccessStore(raw.access as AppStore['access']),
+    finance: normalizeFinanceStore(raw.finance),
     settings: normalizeSettings(raw.settings as AppStore['settings']),
   }
 

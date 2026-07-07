@@ -1,4 +1,5 @@
 import type { ViewId } from '@/lib/types'
+import type { DirectorySection } from '@/lib/directories/types'
 
 /** Канонические разделы (без устаревших алиасов employees/codes/pay). */
 export const ROUTABLE_VIEWS: ViewId[] = [
@@ -10,6 +11,7 @@ export const ROUTABLE_VIEWS: ViewId[] = [
   'procurement',
   'technologist',
   'hr',
+  'hr_inspector',
   'finance',
   'directories',
   'journals',
@@ -20,7 +22,24 @@ export const ROUTABLE_VIEWS: ViewId[] = [
 const VIEW_ALIASES: Partial<Record<string, ViewId>> = {
   employees: 'directories',
   codes: 'directories',
-  pay: 'hr',
+  pay: 'finance',
+}
+
+export type ViewRoute = {
+  view: ViewId
+  directorySection?: DirectorySection
+}
+
+export function readRouteFromLocation(): ViewRoute | null {
+  if (typeof window === 'undefined') return null
+  const hash = window.location.hash
+  if (!hash) return null
+  const raw = hash.replace(/^#\/?/, '').split(/[/?]/)[0]?.trim()
+  if (!raw) return null
+  if (raw === 'employees') return { view: 'directories', directorySection: 'employees' }
+  if (raw === 'codes') return { view: 'directories', directorySection: 'codes' }
+  const view = hashToView(hash)
+  return view ? { view } : null
 }
 
 /**
@@ -30,7 +49,6 @@ const VIEW_ALIASES: Partial<Record<string, ViewId>> = {
  */
 export function isNavActive(view: ViewId, itemId: ViewId): boolean {
   if (view === itemId) return true
-  if (itemId === 'hr' && view === 'pay') return true
   if (itemId === 'finance' && view === 'pay') return true
   if (itemId === 'directories' && (view === 'employees' || view === 'codes')) return true
   return false
@@ -52,6 +70,5 @@ export function hashToView(hash: string): ViewId | null {
 }
 
 export function readViewFromLocation(): ViewId | null {
-  if (typeof window === 'undefined') return null
-  return hashToView(window.location.hash)
+  return readRouteFromLocation()?.view ?? null
 }

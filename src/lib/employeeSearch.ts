@@ -1,10 +1,19 @@
 import { employeeSearchText } from '@/i18n/employeeText'
+import {
+  employeeActiveInMonth,
+  employeeActiveNow,
+  employeeActiveOnDate,
+} from '@/lib/hr/employeeActive'
 import type { Employee } from '@/lib/types'
 
 export type SearchEmployeesOptions = {
   brigade?: string
   excludeId?: string
   limit?: number
+  /** Срез на дату (финансы, архив документов) */
+  asOfDate?: string
+  /** Месяц табеля YYYY-MM */
+  month?: string
 }
 
 export function searchEmployees(
@@ -12,12 +21,17 @@ export function searchEmployees(
   query: string,
   options: SearchEmployeesOptions = {},
 ): Employee[] {
-  const { brigade, excludeId, limit = 25 } = options
+  const { brigade, excludeId, limit = 25, asOfDate, month } = options
   const q = query.trim().toLowerCase()
 
-  let list = employees.filter(
-    (e) => e.active && (e.hrStatus ?? 'active') !== 'fired' && e.id !== excludeId,
-  )
+  let list = employees.filter((e) => e.id !== excludeId)
+  if (month) {
+    list = list.filter((e) => employeeActiveInMonth(e, month))
+  } else if (asOfDate) {
+    list = list.filter((e) => employeeActiveOnDate(e, asOfDate))
+  } else {
+    list = list.filter(employeeActiveNow)
+  }
 
   if (q) {
     list = list.filter((e) => {

@@ -28,8 +28,8 @@ async function buildBarcodeDataUrl(code: string): Promise<string | undefined> {
       format: 'CODE128',
       displayValue: false,
       margin: 0,
-      height: 70,
-      width: 2,
+      height: 48,
+      width: 1.6,
     })
     return canvas.toDataURL('image/png')
   } catch {
@@ -68,7 +68,7 @@ export async function buildCubeLabelModel(
         vol: run.targetVolumeL,
         at: run.mixedAt,
       }),
-      { margin: 1, width: 320 },
+      { margin: 1, width: 240 },
     )
   }
 

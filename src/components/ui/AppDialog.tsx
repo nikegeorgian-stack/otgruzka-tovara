@@ -1,5 +1,8 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalScope, type ModalInitialFocus } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
+import { useModalMinimizeOptional } from '@/context/ModalMinimizeContext'
 import { useI18n } from '@/context/I18nContext'
 
 type Props = {
@@ -11,10 +14,13 @@ type Props = {
   footer?: ReactNode
   size?: 'md' | 'lg' | 'xl' | 'preview'
   zIndex?: number
-  /** Не закрывать по клику на фон (вложенные формы) */
   blockBackdropClose?: boolean
-  /** Тонкая акцентная рамка (для важных форм) */
   accent?: boolean
+  onPrimaryAction?: () => void
+  disableEnterSubmit?: boolean
+  initialFocus?: ModalInitialFocus
+  /** Кнопка «свернуть» в панель внизу (по умолчанию для xl и preview). */
+  minimizable?: boolean
 }
 
 const WIDTH = {
@@ -32,31 +38,61 @@ export function AppDialog({
   children,
   footer,
   size = 'lg',
-  zIndex = 130,
+  zIndex: zIndexProp = 130,
   blockBackdropClose = false,
   accent = false,
+  onPrimaryAction,
+  disableEnterSubmit = false,
+  initialFocus = 'first',
+  minimizable,
 }: Props) {
   const { t } = useI18n()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dialogId = useId()
+  const minimizeApi = useModalMinimizeOptional()
+  const [minimized, setMinimized] = useState(false)
+
+  const canMinimize =
+    minimizable ?? ((size === 'xl' || size === 'preview') && Boolean(minimizeApi))
+
+  const { zIndex: stackZIndex } = useModalScope({
+    open: open && !minimized,
+    onClose,
+    containerRef: panelRef,
+    onPrimaryAction,
+    disableEnterSubmit,
+    initialFocus,
+  })
+  const zIndex = Math.max(zIndexProp, stackZIndex)
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setMinimized(false)
+      minimizeApi?.remove(dialogId)
+    }
+  }, [open, dialogId, minimizeApi])
+
+  useEffect(() => {
+    if (!open || minimized) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = prev
     }
-  }, [open])
+  }, [open, minimized])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  function handleMinimize() {
+    if (!minimizeApi) return
+    minimizeApi.minimize({
+      id: dialogId,
+      title,
+      restore: () => setMinimized(false),
+      close: onClose,
+    })
+    setMinimized(true)
+  }
 
-  if (!open) return null
+  if (!open || minimized) return null
 
   return createPortal(
     <div
@@ -69,6 +105,7 @@ export function AppDialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-dialog-title"
@@ -84,21 +121,41 @@ export function AppDialog({
               <p className="mt-1 text-sm leading-snug text-stone-500">{subtitle}</p>
             )}
           </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-sm p-2 text-stone-400 transition hover:bg-stone-100 hover:text-ink"
-            aria-label={t('common.close')}
-            onClick={onClose}
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
-              <path
-                d="M5 5l10 10M15 5L5 15"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {canMinimize && (
+              <button
+                type="button"
+                className="rounded-sm p-2 text-stone-400 transition hover:bg-stone-100 hover:text-ink"
+                aria-label={t('workspace.minimize')}
+                title={t('workspace.minimize')}
+                onClick={handleMinimize}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+                  <path
+                    d="M4 14h12"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded-sm p-2 text-stone-400 transition hover:bg-stone-100 hover:text-ink"
+              aria-label={t('common.close')}
+              onClick={onClose}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+                <path
+                  d="M5 5l10 10M15 5L5 15"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
@@ -110,6 +167,6 @@ export function AppDialog({
         )}
       </div>
     </div>,
-    document.body,
+    getModalPortalRoot(),
   )
 }

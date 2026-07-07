@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { WarehouseDocumentEditor } from '@/components/warehouse/WarehouseDocumentEditor'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppDialog } from '@/components/ui/AppDialog'
+import { WarehouseDocumentEditor, type WarehouseDocumentEditorHandle } from '@/components/warehouse/WarehouseDocumentEditor'
+import { WarehouseInventoryRevisionModal } from '@/components/warehouse/WarehouseInventoryRevisionModal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
+import { useConfirm } from '@/context/ConfirmContext'
+import { requestModalClose } from '@/lib/ui/requestModalClose'
 import type { WarehousePickDetail } from '@/lib/ai/warehousePickEvent'
 import {
   buildIssuePrintModelFromDocument,
@@ -15,6 +18,7 @@ import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssu
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
 import { buildDocumentJournalRows } from '@/lib/warehouse/documentJournal'
+import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
 import {
   documentCanBeCancelled,
   resolveCounterpartyDisplayName,
@@ -29,10 +33,18 @@ type Props = Pick<
   | 'onPostDocument'
   | 'onPostTransfer'
   | 'onCancelDocument'
+  | 'onSaveDocumentDraft'
+  | 'onPostExistingDocument'
+  | 'onUnpostDocument'
+  | 'onRemoveDocumentDraft'
+  | 'onAcquireDocumentLock'
+  | 'onReleaseDocumentLock'
+  | 'onQuickEditItem'
   | 'onMergeInvoiceRegistry'
   | 'printMeta'
   | 'allowNegativeStock'
   | 'canCancelDocuments'
+  | 'canUnpostDocuments'
   | 'counterparties'
   | 'onUpsertCounterparty'
   | 'onOpenCounterparties'
@@ -44,7 +56,15 @@ type Props = Pick<
   categoryNames: Map<string, string>
   pendingAiPick?: WarehousePickDetail | null
   onConsumeAiPick?: () => void
+  /** Открыть документ из общего журнала */
+  pendingOpenDocumentId?: string | null
+  onPendingOpenConsumed?: () => void
 }
+
+type DocModalState =
+  | { mode: 'new'; aiPick?: WarehousePickDetail | null }
+  | { mode: 'edit'; doc: WarehouseDocument }
+  | { mode: 'view'; doc: WarehouseDocument }
 
 export function WarehouseDocumentsTab({
   warehouse,
@@ -54,12 +74,22 @@ export function WarehouseDocumentsTab({
   onPostDocument,
   onPostTransfer,
   onCancelDocument,
+  onSaveDocumentDraft,
+  onPostExistingDocument,
+  onUnpostDocument,
+  onRemoveDocumentDraft,
+  onAcquireDocumentLock,
+  onReleaseDocumentLock,
+  onQuickEditItem,
   printMeta,
   onMergeInvoiceRegistry,
   pendingAiPick,
   onConsumeAiPick,
+  pendingOpenDocumentId,
+  onPendingOpenConsumed,
   allowNegativeStock = false,
   canCancelDocuments = false,
+  canUnpostDocuments = false,
   counterparties,
   onUpsertCounterparty,
   onOpenCounterparties,
@@ -68,16 +98,20 @@ export function WarehouseDocumentsTab({
   keeperName,
 }: Props) {
   const { t, tf } = useI18n()
-  const [open, setOpen] = useState(false)
-  const [aiPick, setAiPick] = useState<WarehousePickDetail | null>(null)
+  const { confirmUnsaved } = useConfirm()
+  const docEditorRef = useRef<WarehouseDocumentEditorHandle>(null)
+  const [docModal, setDocModal] = useState<DocModalState | null>(null)
   const [receiptPrintPreview, setReceiptPrintPreview] = useState<ReceiptPrintModel | null>(null)
   const [issuePrintPreview, setIssuePrintPreview] = useState<IssuePrintModel | null>(null)
-  const [filterType, setFilterType] = useState<'all' | 'receipt' | 'issue'>('all')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'posted' | 'cancelled'>('posted')
+  const [filterType, setFilterType] = useState<'all' | 'receipt' | 'issue' | 'inventory'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'posted' | 'cancelled'>(
+    'all',
+  )
   const [filterPurpose, setFilterPurpose] = useState<WarehouseDocumentPurpose | 'all'>('all')
   const [journalNotice, setJournalNotice] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<WarehouseDocument | null>(null)
   const [cancelReason, setCancelReason] = useState('')
+  const [inventoryEditDoc, setInventoryEditDoc] = useState<WarehouseDocument | null>(null)
 
   const whId = warehouseId || warehouse.locations[0]?.id || ''
   const balances = useMemo(
@@ -112,10 +146,20 @@ export function WarehouseDocumentsTab({
 
   useEffect(() => {
     if (!pendingAiPick?.query) return
-    setAiPick(pendingAiPick)
-    setOpen(true)
+    setDocModal({ mode: 'new', aiPick: pendingAiPick })
     onConsumeAiPick?.()
   }, [pendingAiPick, onConsumeAiPick])
+
+  useEffect(() => {
+    if (!pendingOpenDocumentId) return
+    const doc = warehouse.documents.find((d) => d.id === pendingOpenDocumentId)
+    if (!doc) {
+      onPendingOpenConsumed?.()
+      return
+    }
+    openDocumentForEdit(doc)
+    onPendingOpenConsumed?.()
+  }, [pendingOpenDocumentId])
 
   function handlePrint(doc: WarehouseDocument) {
     if (!printMeta) return
@@ -153,6 +197,75 @@ export function WarehouseDocumentsTab({
     setJournalNotice(t('warehouse.doc.cancelSuccess'))
   }
 
+  function handlePostExisting(doc: WarehouseDocument) {
+    if (!onPostExistingDocument) return
+    const result = onPostExistingDocument(doc.id)
+    setJournalNotice(result.ok ? t('warehouse.doc.postSuccess') : t(result.error))
+  }
+
+  function handleUnpost(doc: WarehouseDocument) {
+    if (!onUnpostDocument) return
+    const result = onUnpostDocument(doc.id)
+    setJournalNotice(result.ok ? t('warehouse.doc.unpostSuccess') : t(result.error))
+  }
+
+  function handleRemoveDraft(doc: WarehouseDocument) {
+    if (!onRemoveDocumentDraft) return
+    const result = onRemoveDocumentDraft(doc.id)
+    setJournalNotice(result.ok ? t('warehouse.doc.draftRemoved') : t(result.error))
+  }
+
+  function openDocumentForEdit(doc: WarehouseDocument) {
+    if (doc.type === 'inventory') {
+      if (isDocumentLockedByOther(doc, keeperId)) {
+        setJournalNotice(
+          tf('warehouse.inventory.lockFailed', { name: doc.lockedByName ?? '—' }),
+        )
+        return
+      }
+      setInventoryEditDoc(doc)
+      return
+    }
+    const status = doc.status ?? 'posted'
+    if (status === 'draft' && onSaveDocumentDraft) {
+      setDocModal({ mode: 'edit', doc })
+      return
+    }
+    if (status === 'posted' || status === 'cancelled') {
+      setDocModal({ mode: 'view', doc })
+    }
+  }
+
+  function closeDocModal() {
+    setDocModal(null)
+  }
+
+  function docTypeLabel(type: WarehouseDocument['type']) {
+    if (type === 'inventory') return t('warehouse.doc.type.inventory')
+    if (type === 'receipt') return t('warehouse.receipt')
+    return t('warehouse.issue')
+  }
+
+  function requestCloseNewDoc() {
+    void requestModalClose(
+      { confirmUnsaved },
+      {
+        isDirty: () => docEditorRef.current?.isDirty() ?? false,
+        save: () => docEditorRef.current?.saveDraft() ?? false,
+        close: closeDocModal,
+      },
+    )
+  }
+
+  function docModalTitle(): string {
+    if (!docModal) return ''
+    if (docModal.mode === 'new') return t('warehouse.doc.new')
+    if (docModal.mode === 'view') {
+      return tf('warehouse.doc.viewTitle', { number: docModal.doc.number || '—' })
+    }
+    return tf('warehouse.doc.editDraftTitle', { number: docModal.doc.number || '—' })
+  }
+
   return (
     <div className="space-y-4">
       {journalNotice && (
@@ -175,6 +288,7 @@ export function WarehouseDocumentsTab({
               <option value="all">{t('warehouse.allCategories')}</option>
               <option value="receipt">{t('warehouse.receipt')}</option>
               <option value="issue">{t('warehouse.issue')}</option>
+              <option value="inventory">{t('warehouse.doc.type.inventory')}</option>
             </select>
           </label>
           <label className="text-xs text-stone-500">
@@ -185,6 +299,7 @@ export function WarehouseDocumentsTab({
               onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
             >
               <option value="all">{t('warehouse.allCategories')}</option>
+              <option value="draft">{t('warehouse.doc.status.draft')}</option>
               <option value="posted">{t('warehouse.doc.status.posted')}</option>
               <option value="cancelled">{t('warehouse.doc.status.cancelled')}</option>
             </select>
@@ -219,10 +334,7 @@ export function WarehouseDocumentsTab({
         <button
           type="button"
           className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
-          onClick={() => {
-            setAiPick(null)
-            setOpen(true)
-          }}
+          onClick={() => setDocModal({ mode: 'new' })}
         >
           {t('warehouse.doc.new')}
         </button>
@@ -250,7 +362,15 @@ export function WarehouseDocumentsTab({
               {journalRows.map(({ doc: d, warehouseName, totalSum }) => (
                 <tr
                   key={d.id}
-                  className={`border-b border-grid/60 ${d.status === 'cancelled' ? 'opacity-50' : ''}`}
+                  className={`border-b border-grid/60 cursor-pointer hover:bg-stone-50 ${
+                    d.status === 'cancelled'
+                      ? 'opacity-50'
+                      : d.status === 'draft'
+                        ? 'bg-amber-50/40'
+                        : ''
+                  }`}
+                  title={t('warehouse.doc.doubleClickEdit')}
+                  onDoubleClick={() => openDocumentForEdit(d)}
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.date}</td>
                   <td className="px-3 py-2.5 font-medium font-mono text-xs">
@@ -263,8 +383,8 @@ export function WarehouseDocumentsTab({
                   </td>
                   <td className="px-3 py-2.5 text-stone-600">{warehouseName}</td>
                   <td className="px-3 py-2.5">
-                    {d.type === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
-                    {d.purpose ? (
+                    {docTypeLabel(d.type)}
+                    {d.purpose && d.type !== 'inventory' ? (
                       <span className="block text-[10px] text-stone-400">
                         {t(`warehouse.doc.purpose.${d.purpose}`)}
                       </span>
@@ -273,6 +393,12 @@ export function WarehouseDocumentsTab({
                   <td className="px-3 py-2.5">
                     {d.status === 'cancelled' ? (
                       <span className="text-red-700">{t('warehouse.doc.status.cancelled')}</span>
+                    ) : d.status === 'draft' ? (
+                      <span className="font-medium text-amber-700">
+                        {isDocumentLockedByOther(d, keeperId)
+                          ? tf('warehouse.inventory.lockedBy', { name: d.lockedByName ?? '—' })
+                          : t('warehouse.doc.status.draft')}
+                      </span>
                     ) : (
                       <span className="text-emerald-700">{t('warehouse.doc.status.posted')}</span>
                     )}
@@ -296,15 +422,49 @@ export function WarehouseDocumentsTab({
                           {t('warehouse.print.previewBtn')}
                         </button>
                       )}
-                      {onCancelDocument && canCancelDocuments && documentCanBeCancelled(d) && (
+                      {d.status === 'draft' && onPostExistingDocument && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-emerald-700 hover:underline text-left"
+                          onClick={() => handlePostExisting(d)}
+                        >
+                          {t('warehouse.doc.post')}
+                        </button>
+                      )}
+                      {d.status === 'draft' && onRemoveDocumentDraft && (
                         <button
                           type="button"
                           className="text-xs font-semibold text-red-700 hover:underline text-left"
-                          onClick={() => handleCancel(d)}
+                          onClick={() => handleRemoveDraft(d)}
                         >
-                          {t('warehouse.doc.cancel')}
+                          {t('warehouse.doc.deleteDraft')}
                         </button>
                       )}
+                      {(d.status ?? 'posted') === 'posted' &&
+                        canUnpostDocuments &&
+                        onUnpostDocument &&
+                        documentCanBeCancelled(d) &&
+                        !d.transferPairId && (
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-amber-700 hover:underline text-left"
+                            onClick={() => handleUnpost(d)}
+                          >
+                            {t('warehouse.doc.unpost')}
+                          </button>
+                        )}
+                      {onCancelDocument &&
+                        canCancelDocuments &&
+                        (d.status ?? 'posted') === 'posted' &&
+                        documentCanBeCancelled(d) && (
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-red-700 hover:underline text-left"
+                            onClick={() => handleCancel(d)}
+                          >
+                            {t('warehouse.doc.cancel')}
+                          </button>
+                        )}
                     </div>
                   </td>
                 </tr>
@@ -327,56 +487,103 @@ export function WarehouseDocumentsTab({
           </table>
         </div>
       )}
-      {open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-sm bg-white shadow-sm">
-            <div className="border-b border-grid px-6 py-4">
-              <h3 className="text-lg font-bold">{t('warehouse.doc.new')}</h3>
-            </div>
-            <div className="overflow-auto px-4 py-4">
-              <WarehouseDocumentEditor
-                warehouse={warehouse}
-                categoryNames={categoryNames}
-                balances={balances}
-                brigades={brigades}
-                warehouseId={whId}
-                variant="modal"
-                printMeta={printMeta}
-                initialType={aiPick?.type}
-                initialPickSearch={aiPick?.query}
-                initialPickOpen={Boolean(aiPick?.query)}
-                onPost={(doc) => {
-                  const result = onPostDocument(doc)
+      {inventoryEditDoc && onSaveDocumentDraft && (
+        <WarehouseInventoryRevisionModal
+          open
+          title={`${t('warehouse.doc.type.inventory')} №${inventoryEditDoc.number}`}
+          onClose={() => setInventoryEditDoc(null)}
+          warehouse={warehouse}
+          warehouseId={whId}
+          categoryNames={categoryNames}
+          document={inventoryEditDoc}
+          keeperId={keeperId}
+          keeperName={keeperName}
+          readOnly={
+            inventoryEditDoc.status === 'posted' || inventoryEditDoc.status === 'cancelled'
+          }
+          onSaveDraft={onSaveDocumentDraft}
+          onPostExistingDocument={onPostExistingDocument}
+          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onAcquireLock={onAcquireDocumentLock}
+          onReleaseLock={onReleaseDocumentLock}
+          onQuickEditItem={onQuickEditItem}
+        />
+      )}
+      {docModal && (
+        <AppDialog
+          open
+          onClose={requestCloseNewDoc}
+          title={docModalTitle()}
+          size="xl"
+          onPrimaryAction={
+            docModal.mode === 'view' ? undefined : () => docEditorRef.current?.saveDraft()
+          }
+          initialFocus="none"
+        >
+          <div className="px-4 py-4">
+            <WarehouseDocumentEditor
+              ref={docEditorRef}
+              warehouse={warehouse}
+              categoryNames={categoryNames}
+              balances={balances}
+              brigades={brigades}
+              warehouseId={whId}
+              variant="modal"
+              printMeta={printMeta}
+              initialType={docModal.mode === 'new' ? docModal.aiPick?.type : undefined}
+              initialPickSearch={docModal.mode === 'new' ? docModal.aiPick?.query : undefined}
+              initialPickOpen={docModal.mode === 'new' ? Boolean(docModal.aiPick?.query) : false}
+              existingDocument={docModal.mode !== 'new' ? docModal.doc : null}
+              readOnly={docModal.mode === 'view'}
+              onPost={(doc) => {
+                const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
+                if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
+                  const saved = onSaveDocumentDraft({ ...doc, id: draftId })
+                  if (!saved.ok) return saved
+                  const result = onPostExistingDocument(draftId)
                   if (result.ok) {
-                    setOpen(false)
-                    setAiPick(null)
+                    closeDocModal()
+                    setJournalNotice(t('warehouse.doc.postSuccess'))
                   }
                   return result
-                }}
-                onPostTransfer={(doc) => {
-                  const result = onPostTransfer?.(doc) ?? { ok: false as const, error: 'unknown' }
-                  if (result.ok) {
-                    setOpen(false)
-                    setAiPick(null)
-                  }
-                  return result
-                }}
-                onMergeInvoiceRegistry={onMergeInvoiceRegistry}
-                allowNegativeStock={allowNegativeStock}
-                counterparties={counterparties}
-                onUpsertCounterparty={onUpsertCounterparty}
-                onOpenCounterparties={onOpenCounterparties}
-                productionRequests={productionRequests}
-                keeperId={keeperId}
-                keeperName={keeperName}
-                onCancel={() => {
-                  setOpen(false)
-                  setAiPick(null)
-                }}
-              />
-            </div>
+                }
+                const result = onPostDocument(doc)
+                if (result.ok) {
+                  closeDocModal()
+                }
+                return result
+              }}
+              onSaveDraft={
+                onSaveDocumentDraft && docModal.mode !== 'view'
+                  ? (doc) => {
+                      const result = onSaveDocumentDraft(doc)
+                      if (result.ok) {
+                        closeDocModal()
+                        setJournalNotice(t('warehouse.doc.draftSaved'))
+                      }
+                      return result
+                    }
+                  : undefined
+              }
+              onPostTransfer={(doc) => {
+                const result = onPostTransfer?.(doc) ?? { ok: false as const, error: 'unknown' }
+                if (result.ok) {
+                  closeDocModal()
+                }
+                return result
+              }}
+              onMergeInvoiceRegistry={onMergeInvoiceRegistry}
+              allowNegativeStock={allowNegativeStock}
+              counterparties={counterparties}
+              onUpsertCounterparty={onUpsertCounterparty}
+              onOpenCounterparties={onOpenCounterparties}
+              productionRequests={productionRequests}
+              keeperId={keeperId}
+              keeperName={keeperName}
+              onCancel={requestCloseNewDoc}
+            />
           </div>
-        </div>
+        </AppDialog>
       )}
       {receiptPrintPreview && (
         <WarehouseReceiptPrintPreview
@@ -394,7 +601,6 @@ export function WarehouseDocumentsTab({
         <AppDialog
           open
           size="md"
-          zIndex={160}
           onClose={() => setCancelTarget(null)}
           title={t('warehouse.doc.cancelTitle')}
           footer={

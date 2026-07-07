@@ -141,8 +141,10 @@ export function WastewaterCubeLabelModal({ cube, site, onClose }: Props) {
             </div>
           </div>
         ) : (
-          <div ref={printRef} className="print-area--cube-labels min-h-0 flex-1 overflow-auto p-4">
-            <WastewaterCubeLabelSheet labels={labels} locale={locale} />
+          <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto bg-stone-300/35 p-4 sm:p-8 print:bg-white print:p-0">
+            <div ref={printRef} className="print-area--cube-labels shrink-0">
+              <WastewaterCubeLabelSheet labels={labels} locale={locale} />
+            </div>
           </div>
         )}
       </div>

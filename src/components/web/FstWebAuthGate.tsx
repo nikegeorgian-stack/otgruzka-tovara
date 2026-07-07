@@ -4,15 +4,15 @@ import { FstLoginScreen } from '@/components/web/FstLoginScreen'
 import type { ReactNode } from 'react'
 
 export function FstWebAuthGate({ children }: { children: ReactNode }) {
-  const { user, loading, isAllowed, profile, logout } = useFstAuth()
+  const { user, loading, allowlistLoading, isAllowed, logout } = useFstAuth()
 
   useEffect(() => {
-    if (user && !isAllowed) {
+    if (user && !isAllowed && !allowlistLoading) {
       void logout()
     }
-  }, [user, isAllowed, logout])
+  }, [user, isAllowed, allowlistLoading, logout])
 
-  if (loading) {
+  if (loading || (user && allowlistLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-100">
         <p className="text-sm text-stone-500">FST…</p>
@@ -20,7 +20,7 @@ export function FstWebAuthGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user || !isAllowed || !profile) {
+  if (!user || !isAllowed) {
     return <FstLoginScreen />
   }
 

@@ -169,7 +169,6 @@ export function QuickFormulationRecipeDialog({
       })}
       size="md"
       accent
-      zIndex={200}
       blockBackdropClose
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-2">

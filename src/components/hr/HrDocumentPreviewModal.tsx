@@ -22,7 +22,6 @@ export function HrDocumentPreviewModal({ doc, onClose }: Props) {
       title={doc.title}
       subtitle={doc.docType}
       size="preview"
-      zIndex={160}
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
           {google && (

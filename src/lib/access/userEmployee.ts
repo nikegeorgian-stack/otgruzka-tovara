@@ -1,5 +1,6 @@
 import type { AppUser, AccessStore } from './types'
 import type { Employee } from '@/lib/types'
+import { resolveFstWebProfile, type FstWebUserProfile } from '@/lib/cloud/fstWebUsers'
 
 /** Сотрудник, привязанный к учётной записи (если есть и активен). */
 export function linkedEmployee(
@@ -19,7 +20,7 @@ export function linkedEmployeeLabel(
   return emp?.fullName?.trim() || null
 }
 
-/** Объединить облачную сессию с записью из store (employeeId, id). */
+/** Объединить облачную сессию с записью из store (роль, сотрудник, интерфейсы). */
 export function mergeWebAppUser(
   webUser: AppUser,
   access: AccessStore,
@@ -31,7 +32,21 @@ export function mergeWebAppUser(
   return {
     ...webUser,
     id: stored.id,
-    employeeId: stored.employeeId,
+    roleId: stored.roleId,
     displayName: stored.displayName || webUser.displayName,
+    employeeId: stored.employeeId,
+    defaultBrigades: stored.defaultBrigades,
+    viewDefaults: stored.viewDefaults,
+    webViews: stored.webViews,
+    webAccount: stored.webAccount ?? true,
   }
+}
+
+/** Профиль из store для текущего e-mail (после загрузки облака). */
+export function webProfileFromAccess(
+  email: string | null | undefined,
+  uid: string | null | undefined,
+  access: AccessStore,
+): FstWebUserProfile | null {
+  return resolveFstWebProfile(email, uid, access)
 }

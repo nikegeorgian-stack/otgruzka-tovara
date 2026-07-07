@@ -1,4 +1,4 @@
-import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
+import { computeAllBalances, computeAllBalancesAsOf, formatQty } from '@/lib/warehouse/stock'
 import type { WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
 
 export type InventoryPrintOptions = {
@@ -7,6 +7,12 @@ export type InventoryPrintOptions = {
   onlyWithBalance: boolean
   groupByCategory: boolean
   showBookBalance: boolean
+  /** Остатки на момент (ISO); без — текущие */
+  asOfIso?: string
+}
+
+function resolveBalances(store: WarehouseStore, asOfIso?: string) {
+  return asOfIso ? computeAllBalancesAsOf(store, asOfIso) : computeAllBalances(store)
 }
 
 export type InventoryPrintRow = {
@@ -45,6 +51,7 @@ export function countItemsForSelection(
   warehouseIds: Set<string>,
   categoryIds: Set<string>,
   onlyWithBalance: boolean,
+  asOfIso?: string,
 ): number {
   return filterInventoryItems(store, {
     warehouseIds,
@@ -52,6 +59,7 @@ export function countItemsForSelection(
     onlyWithBalance,
     groupByCategory: true,
     showBookBalance: true,
+    asOfIso,
   }).length
 }
 
@@ -59,6 +67,7 @@ export function categoryItemCounts(
   store: WarehouseStore,
   warehouseIds: Set<string>,
   onlyWithBalance: boolean,
+  asOfIso?: string,
 ): Map<string, number> {
   const counts = new Map<string, number>()
   for (const item of filterInventoryItems(store, {
@@ -67,6 +76,7 @@ export function categoryItemCounts(
     onlyWithBalance,
     groupByCategory: false,
     showBookBalance: true,
+    asOfIso,
   })) {
     counts.set(item.categoryId, (counts.get(item.categoryId) ?? 0) + 1)
   }
@@ -77,7 +87,7 @@ export function filterInventoryItems(
   store: WarehouseStore,
   options: InventoryPrintOptions,
 ): WarehouseItem[] {
-  const balances = computeAllBalances(store)
+  const balances = resolveBalances(store, options.asOfIso)
   const whAll = options.warehouseIds.size === 0
   const catAll = options.categoryIds.size === 0
 
@@ -101,7 +111,7 @@ export function buildInventoryPrintPayload(
 ): InventoryPrintPayload {
   const catMap = new Map(store.categories.map((c) => [c.id, c]))
   const locMap = new Map(store.locations.map((l) => [l.id, l]))
-  const balances = computeAllBalances(store)
+  const balances = resolveBalances(store, options.asOfIso)
 
   const items = filterInventoryItems(store, options)
   const flatRows: InventoryPrintRow[] = items.map((item) => ({

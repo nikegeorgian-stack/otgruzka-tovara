@@ -1,5 +1,6 @@
 import { normalizeCounterparty, normalizeCounterpartyStore } from '@/lib/counterparties/init'
 import type { Counterparty } from '@/lib/counterparties/types'
+import { appendAudit } from '@/lib/audit'
 import {
   normalizeFinishedProduct,
   normalizeFinishedProductStore,
@@ -32,40 +33,55 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
           ? s.counterparties.items.map((c) => (c.id === normalized.id ? normalized : c))
           : [...s.counterparties.items, normalized]
         const nextCode = exists ? s.counterparties.nextCode : s.counterparties.nextCode + 1
-        return {
+        let next = {
           ...s,
           counterparties: normalizeCounterpartyStore({ items, nextCode }),
         }
+        next = appendAudit(next, {
+          action: 'counterparty_upsert',
+          detail: `${exists ? 'Изменён' : 'Создан'}: ${normalized.name} (${normalized.code})`,
+        })
+        return next
       })
     },
 
     removeCounterparty(id: string) {
-      setStore((s) => ({
-        ...s,
-        counterparties: {
-          ...s.counterparties,
-          items: s.counterparties.items.filter((c) => c.id !== id),
-        },
-        finishedProducts: {
-          ...s.finishedProducts,
-          items: s.finishedProducts.items.map((p) =>
-            p.defaultCounterpartyId === id
-              ? { ...p, defaultCounterpartyId: undefined }
-              : p,
-          ),
-        },
-        production: {
-          ...s.production,
-          planner: {
-            ...s.production.planner,
-            orders: s.production.planner.orders.map((o) =>
-              o.counterpartyId === id
-                ? { ...o, counterpartyId: undefined, customer: '' }
-                : o,
+      setStore((s) => {
+        const cp = s.counterparties.items.find((c) => c.id === id)
+        let next = {
+          ...s,
+          counterparties: {
+            ...s.counterparties,
+            items: s.counterparties.items.filter((c) => c.id !== id),
+          },
+          finishedProducts: {
+            ...s.finishedProducts,
+            items: s.finishedProducts.items.map((p) =>
+              p.defaultCounterpartyId === id
+                ? { ...p, defaultCounterpartyId: undefined }
+                : p,
             ),
           },
-        },
-      }))
+          production: {
+            ...s.production,
+            planner: {
+              ...s.production.planner,
+              orders: s.production.planner.orders.map((o) =>
+                o.counterpartyId === id
+                  ? { ...o, counterpartyId: undefined, customer: '' }
+                  : o,
+              ),
+            },
+          },
+        }
+        if (cp) {
+          next = appendAudit(next, {
+            action: 'counterparty_remove',
+            detail: `${cp.name} (${cp.code})`,
+          })
+        }
+        return next
+      })
     },
 
     upsertFinishedProduct(entry: FinishedProduct) {
@@ -80,32 +96,47 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
           ? s.finishedProducts.items.map((p) => (p.id === normalized.id ? normalized : p))
           : [...s.finishedProducts.items, normalized]
         const nextCode = exists ? s.finishedProducts.nextCode : s.finishedProducts.nextCode + 1
-        return {
+        let next = {
           ...s,
           finishedProducts: normalizeFinishedProductStore({ items, nextCode }),
         }
+        next = appendAudit(next, {
+          action: 'finished_product_upsert',
+          detail: `${exists ? 'Изменена' : 'Создана'} ГП: ${normalized.name} (${normalized.code})`,
+        })
+        return next
       })
     },
 
     removeFinishedProduct(id: string) {
-      setStore((s) => ({
-        ...s,
-        finishedProducts: {
-          ...s.finishedProducts,
-          items: s.finishedProducts.items.filter((p) => p.id !== id),
-        },
-        production: {
-          ...s.production,
-          planner: {
-            ...s.production.planner,
-            orders: s.production.planner.orders.map((o) =>
-              o.finishedProductId === id
-                ? { ...o, finishedProductId: undefined, productName: '' }
-                : o,
-            ),
+      setStore((s) => {
+        const fp = s.finishedProducts.items.find((p) => p.id === id)
+        let next = {
+          ...s,
+          finishedProducts: {
+            ...s.finishedProducts,
+            items: s.finishedProducts.items.filter((p) => p.id !== id),
           },
-        },
-      }))
+          production: {
+            ...s.production,
+            planner: {
+              ...s.production.planner,
+              orders: s.production.planner.orders.map((o) =>
+                o.finishedProductId === id
+                  ? { ...o, finishedProductId: undefined, productName: '' }
+                  : o,
+              ),
+            },
+          },
+        }
+        if (fp) {
+          next = appendAudit(next, {
+            action: 'finished_product_remove',
+            detail: `${fp.name} (${fp.code})`,
+          })
+        }
+        return next
+      })
     },
 
     upsertPackagingRecipe(entry: PackagingRecipe) {

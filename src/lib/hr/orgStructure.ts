@@ -1,6 +1,7 @@
 import { HR_ORG_STRUCTURE_SEED } from '@/data/hr-org-structure.seed'
 import type { HrPosition, HrStructuralUnit } from './types'
 import type { Employee } from '@/lib/types'
+import { salaryFieldsFromPosition } from '@/lib/finance/salary'
 
 export function slugUnitId(name: string): string {
   return name
@@ -179,11 +180,11 @@ export function applyPositionToEmployee(
   units: HrStructuralUnit[],
 ): Employee {
   const unit = units.find((u) => u.id === position.structuralUnitId)
+  const salaryPatch = salaryFieldsFromPosition(employee, position)
   return {
     ...employee,
     ...applyPositionToEmployeeFields(position, unit),
-    monthlySalary: position.salary,
-    currency: position.currency,
+    ...(salaryPatch ?? {}),
     contractType: position.contractType,
     probationMonths: position.probationMonths,
   }

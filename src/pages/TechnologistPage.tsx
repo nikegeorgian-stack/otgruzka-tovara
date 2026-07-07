@@ -197,13 +197,6 @@ export function TechnologistPage({
         }
       />
 
-      <TechnologistRoomClimateWidget
-        records={technologistQc.roomClimateLog}
-        operatorName={operatorName}
-        onFix={onAddRoomClimateReading}
-        onRemove={onRemoveRoomClimateReading}
-      />
-
       <TabBar tabs={tabs} value={tab} onChange={setTab} className="mb-4" />
 
       {tab === 'stock' && (
@@ -402,6 +395,13 @@ export function TechnologistPage({
           onClose={() => setLabelRun(null)}
         />
       )}
+
+      <TechnologistRoomClimateWidget
+        records={technologistQc.roomClimateLog}
+        operatorName={operatorName}
+        onFix={onAddRoomClimateReading}
+        onRemove={onRemoveRoomClimateReading}
+      />
     </PageLayout>
   )
 }

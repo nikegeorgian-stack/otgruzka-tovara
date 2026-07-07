@@ -10,7 +10,8 @@ export function createHrSlice({ setStore }: StoreSliceDeps) {
   return {
     upsertEmployee(emp: Employee) {
       setStore((s) => {
-        const exists = s.employees.some((e) => e.id === emp.id)
+        const prev = s.employees.find((e) => e.id === emp.id)
+        const exists = !!prev
         const employees = exists
           ? s.employees.map((e) => (e.id === emp.id ? emp : e))
           : [...s.employees, emp]
@@ -24,17 +25,33 @@ export function createHrSlice({ setStore }: StoreSliceDeps) {
           }
           next = { ...next, months: { ...next.months, [key]: updated } }
         }
-        return next
+        const parts = [emp.fullName]
+        if (exists && prev) {
+          if (prev.brigade !== emp.brigade) {
+            parts.push(`бригада: ${prev.brigade ?? '—'} → ${emp.brigade ?? '—'}`)
+          }
+          if (prev.position !== emp.position) {
+            parts.push(`должность: ${prev.position ?? '—'} → ${emp.position ?? '—'}`)
+          }
+        } else {
+          parts.push(emp.brigade ? `бригада ${emp.brigade}` : 'новый сотрудник')
+        }
+        return appendAudit(next, {
+          action: 'employee_upsert',
+          employeeId: emp.id,
+          detail: parts.join(' · '),
+        })
       })
     },
 
     removeEmployee(id: string) {
       setStore((s) => {
+        const emp = s.employees.find((e) => e.id === id)
         let next = trashEmployee(s, id)
         next = appendAudit(next, {
           action: 'employee_remove',
           employeeId: id,
-          detail: `employee ${id}`,
+          detail: emp?.fullName ?? `employee ${id}`,
         })
         return next
       })

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { EmployeeAvatar } from '@/components/ui/EmployeeAvatar'
+import { usePopoverZIndex } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { useI18n } from '@/context/I18nContext'
 import { searchEmployees } from '@/lib/employeeSearch'
 import type { Employee } from '@/lib/types'
@@ -13,8 +15,11 @@ type Props = {
   assignedInMonth?: Map<string, string>
   currentRowId?: string
   compact?: boolean
-  elevated?: boolean
   placeholder?: string
+  /** Срез на дату архива / as-of */
+  asOfDate?: string
+  /** Месяц табеля YYYY-MM */
+  month?: string
   onChange: (employeeId: string | null) => void
   onAddNew?: () => void
 }
@@ -27,8 +32,9 @@ export function EmployeePicker({
   assignedInMonth,
   currentRowId,
   compact = false,
-  elevated = false,
   placeholder,
+  asOfDate,
+  month,
   onChange,
   onAddNew,
 }: Props) {
@@ -41,6 +47,7 @@ export function EmployeePicker({
   const selected = value ? employees.find((e) => e.id === value) : undefined
 
   const [open, setOpen] = useState(false)
+  const popoverZ = usePopoverZIndex(open)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
   const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 280 })
@@ -49,6 +56,8 @@ export function EmployeePicker({
     brigade,
     excludeId,
     limit: 30,
+    asOfDate,
+    month,
   }).filter((emp) => {
     const takenRow = assignedInMonth?.get(emp.id)
     return !takenRow || takenRow === currentRowId
@@ -149,7 +158,7 @@ export function EmployeePicker({
         top: panelPos.top,
         left: panelPos.left,
         width: panelPos.width,
-        zIndex: elevated ? 200 : 150,
+        zIndex: popoverZ,
       }}
     >
       <div className="max-h-80 overflow-y-auto py-1">
@@ -277,7 +286,7 @@ export function EmployeePicker({
             />
           </div>
         )}
-        {panel && createPortal(panel, document.body)}
+        {panel && createPortal(panel, getModalPortalRoot())}
       </div>
     )
   }
@@ -304,7 +313,7 @@ export function EmployeePicker({
         }}
         onKeyDown={onKeyDown}
       />
-      {panel && createPortal(panel, document.body)}
+      {panel && createPortal(panel, getModalPortalRoot())}
     </div>
   )
 }

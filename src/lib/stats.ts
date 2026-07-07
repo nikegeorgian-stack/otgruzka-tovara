@@ -1,6 +1,7 @@
 import { hoursForCode } from './codes'
 import { daysInMonth, parseMonthKey } from './dates'
-import { getFactExtraHours } from './factExtra'
+import { isTransferredOut } from './dayTransfer'
+import { factWorkedHours } from './factExtra'
 import { NO_STRUCTURAL_UNIT_ID } from './monthViewOptions'
 import type { DayCode, Employee, MonthSheet } from './types'
 
@@ -72,8 +73,12 @@ export function rowStats(
     const p = plan[key] ?? ''
     const f = getFactMark(sheet, rowId, key)
     factAgg[key] = f
-    factHours += hoursForCode(f) + getFactExtraHours(sheet, rowId, key)
-    if (f === '8' || f === '11' || f === 'Н' || f === '22') factShifts++
+    if (isTransferredOut(sheet, rowId, key)) {
+      factHours += 0
+    } else {
+      factHours += factWorkedHours(sheet, rowId, key, f)
+      if (f === '8' || f === '11' || f === 'Н' || f === '22') factShifts++
+    }
     if (p !== f) mismatches++
   }
 

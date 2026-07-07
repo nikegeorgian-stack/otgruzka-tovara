@@ -23,7 +23,6 @@ export function HotkeysHelp({ onClose }: Props) {
       onClose={onClose}
       title={t('hotkeys.title')}
       size="md"
-      zIndex={120}
       footer={
         <Button variant="primary" className="w-full" onClick={onClose}>
           {t('common.cancel')}

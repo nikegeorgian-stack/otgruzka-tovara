@@ -381,7 +381,13 @@
   margin: 0;
 }
 
-/* Этикетка состава: A4 портрет, поля — внутренний padding этикетки. */
+/* Этикетка состава: 100×150 мм (куб пропитки). */
+@page cube-label-mix {
+  size: 100mm 150mm;
+  margin: 0;
+}
+
+/* Устаревший A4-формат — оставлен для совместимости превью. */
 @page cube-label {
   size: A4 portrait;
   margin: 0;
@@ -1274,7 +1280,164 @@
   padding-top: 1mm;
 }
 
-/* ═══ Этикетка пропиточного состава — отдельный формат A4 портрет ═══ */
+/* ——— Этикетка пропитки 100×150 мм (технолог / миксер) ——— */
+.cube-labels-page--mix {
+  width: auto;
+  padding: 0;
+  background: transparent;
+}
+
+.cube-labels-grid--mix {
+  display: grid;
+  grid-template-columns: 100mm;
+  gap: 4mm;
+}
+
+.cube-label--mix {
+  page: cube-label-mix;
+  position: relative;
+  width: 100mm;
+  min-height: 150mm;
+  max-height: 150mm;
+  padding: 4mm 5mm 3.5mm;
+  gap: 2mm;
+  overflow: hidden;
+  break-inside: avoid;
+  page-break-after: always;
+}
+
+.cube-label--mix .cube-label-colorbar {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 2.5mm;
+  display: block;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cube-label--mix .cube-label-brand {
+  padding-top: 1mm;
+  padding-bottom: 1.5mm;
+  border-bottom-width: 0.4mm;
+}
+
+.cube-label--mix .cube-label-kicker {
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ff5500;
+}
+
+.cube-label--mix .cube-label-product {
+  font-size: 9.5pt;
+  font-weight: 700;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cube-label-color--mix {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2mm;
+  min-height: 14mm;
+  padding: 2.5mm 3mm;
+  border-radius: 1.5mm;
+  border: 0.3mm solid transparent;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cube-label--mix .cube-label-color-tag {
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.cube-label--mix .cube-label-color-name {
+  font-size: 11pt;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.cube-label--mix .cube-label-color-code {
+  font-family: ui-monospace, monospace;
+  font-size: 8pt;
+  font-weight: 700;
+  padding: 0.8mm 1.5mm;
+  border-radius: 1mm;
+  background: rgb(255 255 255 / 0.22);
+}
+
+.cube-label--mix .cube-label-specs {
+  gap: 1.2mm;
+}
+
+.cube-label--mix .cube-label-purpose {
+  font-size: 7pt;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cube-label--mix .cube-label-meta {
+  gap: 1.5mm 2.5mm;
+  margin: 0;
+}
+
+.cube-label--mix .cube-label-meta dt {
+  font-size: 5.5pt;
+}
+
+.cube-label--mix .cube-label-meta dd {
+  font-size: 7.5pt;
+  margin-top: 0.3mm;
+}
+
+.cube-label--mix .cube-label-qr-wrap {
+  gap: 2mm;
+  padding-top: 1.5mm;
+}
+
+.cube-label--mix .cube-label-qr {
+  width: 16mm;
+  height: 16mm;
+}
+
+.cube-label--mix .cube-label-barcode {
+  max-width: 100%;
+  height: 8mm;
+  margin-top: 0.5mm;
+}
+
+.cube-label--mix .cube-label-qr-doc {
+  font-size: 8pt;
+  font-weight: 700;
+}
+
+.cube-label--mix .cube-label-footer {
+  font-size: 5.5pt;
+  padding-top: 0.5mm;
+}
+
+@media screen {
+  .print-area--cube-labels .cube-label--mix {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.06),
+      0 8px 24px rgb(0 0 0 / 0.12);
+  }
+}
+
+/* ═══ Этикетка пропиточного состава — отдельный формат A4 портрет (legacy) ═══ */
 .cube-labels-page--doc {
   width: 210mm;
   padding: 0;
@@ -1499,6 +1662,26 @@
 }
 
 @media print {
+  body.print-cube-labels.print-preview-open .cube-labels-page--mix {
+    width: auto !important;
+    padding: 0 !important;
+  }
+
+  body.print-cube-labels.print-preview-open .cube-label--mix {
+    width: 100mm !important;
+    min-height: 150mm !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-color: #ccc !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.print-cube-labels.print-preview-open .cube-label--mix:last-child {
+    page-break-after: avoid !important;
+  }
+
   body.print-cube-labels.print-preview-open .cube-labels-page {
     width: 100% !important;
     max-width: none !important;

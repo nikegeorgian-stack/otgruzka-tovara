@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { FiberCellBrand } from '@/components/brand/FiberCellBrand'
+import { useModalScope } from '@/hooks/useModalScope'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { createPortal } from 'react-dom'
@@ -87,14 +88,17 @@ export function PrintSetupModal({
   const [printLocale, setPrintLocale] = useState<Locale>(
     initialConfig?.printLocale ?? uiLocale,
   )
+  const panelRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const { zIndex } = useModalScope({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    onPrimaryAction: () => {
+      void handleContinue()
+    },
+    initialFocus: 'primary',
+  })
 
   function toggle(name: string) {
     setSelected((prev) => {
@@ -133,9 +137,12 @@ export function PrintSetupModal({
 
   const content = (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-stone-900/50 p-4"
+      ref={panelRef}
+      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
+      style={{ zIndex }}
       role="dialog"
       aria-labelledby="print-setup-title"
+      aria-modal="true"
     >
       <div className="w-full max-w-lg rounded-sm bg-white shadow-sm">
         <div className="flex items-center gap-4 border-b border-grid px-6 py-4">
@@ -383,9 +390,10 @@ export function PrintSetupModal({
           </button>
           <button
             type="button"
+            data-modal-primary
             className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
             disabled={filled.length === 0}
-            onClick={handleContinue}
+            onClick={() => void handleContinue()}
           >
             {t('print.continue')}
           </button>

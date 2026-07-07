@@ -1,17 +1,18 @@
 import { addBrigadeRow, normalizeBrigadeSlots } from './brigadeRows'
 import { syncPlanRow } from './monthSheet'
+import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
 import type { Employee, MonthSheet } from './types'
 
 /** Активные сотрудники, у которых в карточке указана эта бригада. */
 export function employeesInBrigadeFromHr(
   employees: Employee[],
   brigade: string,
+  month?: string,
 ): Employee[] {
   return employees
     .filter(
       (e) =>
-        e.active &&
-        (e.hrStatus ?? 'active') !== 'fired' &&
+        (month ? employeeActiveInMonth(e, month) : e.active && (e.hrStatus ?? 'active') !== 'fired') &&
         e.brigade === brigade,
     )
     .sort(

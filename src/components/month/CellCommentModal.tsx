@@ -23,7 +23,6 @@ export function CellCommentModal({ dateKey, initial, onSave, onClose }: Props) {
       title={t('comment.title')}
       subtitle={dateKey}
       size="md"
-      zIndex={110}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>

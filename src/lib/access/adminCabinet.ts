@@ -1,5 +1,5 @@
 import type { ViewId } from '@/lib/types'
-import { canAccessView, isSysAdmin, resolveView } from './permissions'
+import { canAccessView, isSysAdmin, resolveView, viewsForUser } from './permissions'
 import type { AccessRoleId, AccessStore, AppUser } from './types'
 
 /** Какой кабинет/интерфейс смотрит admin (роль остаётся sysadmin). */
@@ -11,6 +11,7 @@ export const ADMIN_CABINET_STORAGE_KEY = 'fibercell-admin-cabinet'
 export const ADMIN_CABINET_OPTIONS: AdminCabinetId[] = [
   'full',
   'hr',
+  'hr_inspector',
   'finance',
   'warehouse_keeper',
   'procurement_manager',
@@ -42,6 +43,8 @@ export function firstViewForAdminCabinet(cabinet: AdminCabinetId): ViewId {
   switch (cabinet) {
     case 'hr':
       return 'hr'
+    case 'hr_inspector':
+      return 'hr_inspector'
     case 'finance':
       return 'finance'
     case 'warehouse_keeper':
@@ -64,9 +67,11 @@ export function webModesFromAdminCabinet(cabinet: AdminCabinetId): {
   webProcurementMode: boolean
   webTechnologistMode: boolean
   webWorkshopMasterMode: boolean
+  webHrInspectorMode: boolean
 } {
   return {
     webHrMode: cabinet === 'hr',
+    webHrInspectorMode: cabinet === 'hr_inspector',
     webFinanceMode: cabinet === 'finance',
     webWarehouseMode: cabinet === 'warehouse_keeper',
     webProcurementMode: cabinet === 'procurement_manager',
@@ -87,7 +92,18 @@ export function canShowNavItemForAdminPreview(
     return canAccessView(access, user, itemId)
   }
   if (isFstWeb) {
-    return true
+    const previewUser: AppUser = {
+      id: user.id,
+      login: user.login,
+      displayName: user.displayName,
+      roleId: adminCabinet,
+      passwordHash: '',
+      passwordSalt: '',
+      active: true,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    }
+    return viewsForUser(access, previewUser).includes(resolveView(itemId))
   }
   const views = access.roleViews[adminCabinet] ?? []
   return views.includes(resolveView(itemId))

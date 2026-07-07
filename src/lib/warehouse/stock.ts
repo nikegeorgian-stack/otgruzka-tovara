@@ -6,6 +6,7 @@ import type {
   WarehouseItem,
   WarehouseStore,
 } from './types'
+import { recordsBeforeAsOf } from '@/lib/asOf/snapshot'
 
 export function movementDelta(type: StockMovementType, quantity: number): number {
   const q = Math.abs(quantity)
@@ -23,6 +24,28 @@ export function toBaseQty(item: WarehouseItem, qty: number, inputUnit?: string):
 }
 
 export function computeItemBalance(
+  itemId: string,
+  movements: StockMovement[],
+  warehouseId?: string,
+): ItemBalance {
+  return computeItemBalanceFromMovements(itemId, movements, warehouseId)
+}
+
+/** Остаток позиции на момент времени (движения с createdAt ≤ asOfIso). */
+export function computeItemBalanceAsOf(
+  itemId: string,
+  movements: StockMovement[],
+  asOfIso: string,
+  warehouseId?: string,
+): ItemBalance {
+  return computeItemBalanceFromMovements(
+    itemId,
+    recordsBeforeAsOf(movements, asOfIso),
+    warehouseId,
+  )
+}
+
+function computeItemBalanceFromMovements(
   itemId: string,
   movements: StockMovement[],
   warehouseId?: string,
@@ -60,6 +83,20 @@ export function computeAllBalances(
   const map = new Map<string, ItemBalance>()
   for (const item of warehouse.items) {
     map.set(item.id, computeItemBalance(item.id, warehouse.movements, warehouseId))
+  }
+  return map
+}
+
+/** Остатки всех позиций на момент времени. */
+export function computeAllBalancesAsOf(
+  warehouse: WarehouseStore,
+  asOfIso: string,
+  warehouseId?: string,
+): Map<string, ItemBalance> {
+  const sliced = recordsBeforeAsOf(warehouse.movements, asOfIso)
+  const map = new Map<string, ItemBalance>()
+  for (const item of warehouse.items) {
+    map.set(item.id, computeItemBalanceFromMovements(item.id, sliced, warehouseId))
   }
   return map
 }

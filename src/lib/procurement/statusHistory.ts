@@ -8,6 +8,7 @@ export function createStatusChange(
   fromStatus: PurchaseOrderStatus | undefined,
   toStatus: PurchaseOrderStatus,
   note?: string,
+  warehouseDocumentId?: string,
 ): PurchaseOrderStatusChange {
   return {
     id: crypto.randomUUID(),
@@ -15,6 +16,7 @@ export function createStatusChange(
     fromStatus,
     toStatus,
     note: note?.trim() || undefined,
+    warehouseDocumentId,
   }
 }
 
@@ -27,6 +29,7 @@ export function normalizeStatusChange(
     fromStatus: raw.fromStatus as PurchaseOrderStatus | undefined,
     toStatus: (raw.toStatus ?? 'draft') as PurchaseOrderStatus,
     note: raw.note?.trim() || undefined,
+    warehouseDocumentId: raw.warehouseDocumentId,
   }
 }
 

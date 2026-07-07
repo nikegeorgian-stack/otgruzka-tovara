@@ -19,6 +19,8 @@ type Props = {
   onApplyShiftTemplate: (templateId: string, brigade: string) => void
   onExportExcel: () => void
   onShowHotkeys: () => void
+  /** Поиск вынесен в панель виджетов */
+  hideSearch?: boolean
 }
 
 export function MonthToolsBar({
@@ -36,6 +38,7 @@ export function MonthToolsBar({
   onApplyShiftTemplate,
   onExportExcel,
   onShowHotkeys,
+  hideSearch = false,
 }: Props) {
   const { t } = useI18n()
   const [copyScope, setCopyScope] = useState<CopyPlanToFactScope>('all')
@@ -46,12 +49,14 @@ export function MonthToolsBar({
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-sm border border-grid bg-white/90 px-3 py-2 text-sm shadow-sm">
-      <input
-        className="min-w-[10rem] flex-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
-        placeholder={t('month.searchEmployee')}
-        value={search}
-        onChange={(e) => onSearch(e.target.value)}
-      />
+      {!hideSearch ? (
+        <input
+          className="min-w-[10rem] flex-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+          placeholder={t('month.searchEmployee')}
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+        />
+      ) : null}
       <select
         className="rounded-sm border border-grid px-2 py-1.5 text-xs"
         value={filterSchedule}

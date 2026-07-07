@@ -2,6 +2,15 @@ import { normalizeAccessStore } from '@/lib/access/init'
 import { hashPassword } from '@/lib/access/password'
 import type { AccessRoleId, AppUser } from '@/lib/access/types'
 import { SYSTEM_ADMIN_USER_ID } from '@/lib/access/types'
+import { appendAudit } from '@/lib/audit'
+import {
+  createFirebaseWebUser,
+  updateFirebaseWebUser,
+} from '@/lib/cloud/webUserAdmin'
+import { syncWebAccessAllowlistFromStore } from '@/lib/cloud/webAccessConfig'
+import { isKnownWebFirebaseEmail } from '@/lib/cloud/fstWebUsers'
+import type { UserViewDefaults } from '@/lib/viewDefaults/types'
+import { mergeUserViewDefaults } from '@/lib/viewDefaults/types'
 import type { ViewId } from '@/lib/types'
 import type { GetStore, SetStore } from '../storeApi'
 
@@ -13,11 +22,17 @@ export type UpsertAppUserInput = {
   password?: string
   active: boolean
   employeeId?: string | null
+  defaultBrigades?: string[]
+  webViews?: ViewId[]
+  /** Учётка уже есть в Firebase — только привязать в store */
+  skipFirebaseCreate?: boolean
 }
+
+const isWebApp = import.meta.env.VITE_FST_WEB === 'true'
 
 export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; getStore: GetStore }) {
   return {
-    async upsertAppUser(input: UpsertAppUserInput): Promise<void> {
+    async upsertAppUser(input: UpsertAppUserInput): Promise<{ allowlistSyncFailed?: boolean }> {
       const login = input.login.trim().toLowerCase()
       if (!login) throw new Error('login_required')
       const now = new Date().toISOString()
@@ -29,7 +44,15 @@ export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; 
 
       let passwordHash = existing?.passwordHash ?? ''
       let passwordSalt = existing?.passwordSalt ?? ''
-      if (input.password?.trim()) {
+      if (isWebApp) {
+        const skipFirebase =
+          input.skipFirebaseCreate === true || isKnownWebFirebaseEmail(login)
+        if (!existing && !input.password?.trim() && !skipFirebase) {
+          throw new Error('password_required')
+        }
+        passwordHash = ''
+        passwordSalt = ''
+      } else if (input.password?.trim()) {
         const hashed = await hashPassword(input.password.trim())
         passwordHash = hashed.hash
         passwordSalt = hashed.salt
@@ -38,6 +61,12 @@ export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; 
       }
 
       const employeeId = input.employeeId?.trim() || undefined
+      const defaultBrigades =
+        input.defaultBrigades?.filter((b) => b.trim()).length
+          ? input.defaultBrigades.filter((b) => b.trim())
+          : undefined
+      const webViews =
+        input.webViews && input.webViews.length > 0 ? [...new Set(input.webViews)] : undefined
 
       const user: AppUser = {
         id: existing?.id ?? crypto.randomUUID(),
@@ -48,8 +77,46 @@ export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; 
         passwordSalt,
         active: input.active,
         employeeId,
+        defaultBrigades,
+        webAccount: isWebApp ? true : existing?.webAccount,
+        webViews,
+        viewDefaults: existing?.viewDefaults,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
+      }
+
+      if (isWebApp) {
+        const skipFirebase =
+          input.skipFirebaseCreate === true || isKnownWebFirebaseEmail(login)
+        const password = input.password?.trim()
+        if (!existing && password && !skipFirebase) {
+          const created = await createFirebaseWebUser({
+            email: login,
+            password,
+            displayName: user.displayName,
+          })
+          if (!created.ok && created.error !== 'email_exists') {
+            if (created.error === 'unauthorized') throw new Error('firebase_unauthorized')
+            throw new Error('firebase_create_failed')
+          }
+        } else if (existing) {
+          const patch: Parameters<typeof updateFirebaseWebUser>[0] = { email: login }
+          if (password) patch.password = password
+          if (input.active !== existing.active) patch.disabled = !input.active
+          if (user.displayName !== existing.displayName) patch.displayName = user.displayName
+          if (patch.password || patch.disabled !== undefined || patch.displayName) {
+            const updated = await updateFirebaseWebUser(patch)
+            if (!updated.ok) {
+              if (updated.error === 'user_not_found' && !password) {
+                /* только store — Firebase ещё не создан */
+              } else if (updated.error === 'unauthorized') {
+                throw new Error('firebase_unauthorized')
+              } else if (updated.error !== 'user_not_found') {
+                throw new Error('firebase_update_failed')
+              }
+            }
+          }
+        }
       }
 
       setStore((prev) => {
@@ -64,11 +131,69 @@ export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; 
               : u,
           )
         }
-        return { ...prev, access: { ...acc, users } }
+        let next = { ...prev, access: { ...acc, users } }
+        if (existing) {
+          const changes: string[] = []
+          if (existing.roleId !== user.roleId) {
+            changes.push(`роль: ${existing.roleId} → ${user.roleId}`)
+          }
+          if (existing.active !== user.active) {
+            changes.push(user.active ? 'активирован' : 'деактивирован')
+          }
+          if (existing.displayName !== user.displayName) {
+            changes.push(`имя: ${existing.displayName} → ${user.displayName}`)
+          }
+          next = appendAudit(next, {
+            action: 'user_upsert',
+            detail: `${user.displayName} (${login}) · ${changes.join(' · ') || 'изменён'}`,
+          })
+        } else {
+          next = appendAudit(next, {
+            action: 'user_upsert',
+            detail: `Создан: ${user.displayName} (${login}) · ${user.roleId}`,
+          })
+        }
+        return next
+      })
+
+      let allowlistSyncFailed = false
+      if (isWebApp) {
+        try {
+          await syncWebAccessAllowlistFromStore(getStore().access)
+        } catch (err) {
+          console.error('FST: sync web access allowlist failed', err)
+          allowlistSyncFailed = true
+        }
+      }
+      return { allowlistSyncFailed: allowlistSyncFailed || undefined }
+    },
+
+    updateUserViewDefaults<K extends keyof UserViewDefaults>(
+      userId: string,
+      viewId: K,
+      patch: NonNullable<UserViewDefaults[K]>,
+    ) {
+      const now = new Date().toISOString()
+      setStore((s) => {
+        const access = normalizeAccessStore(s.access)
+        const users = access.users.map((u) => {
+          if (u.id !== userId) return u
+          const viewDefaults = mergeUserViewDefaults(u.viewDefaults, viewId, patch)
+          const defaultBrigades = viewDefaults.month?.defaultBrigades?.filter((b) => b.trim()).length
+            ? viewDefaults.month.defaultBrigades.filter((b) => b.trim())
+            : u.defaultBrigades
+          return {
+            ...u,
+            defaultBrigades,
+            viewDefaults,
+            updatedAt: now,
+          }
+        })
+        return { ...s, access: { ...access, users } }
       })
     },
 
-    removeAppUser(id: string) {
+    async removeAppUser(id: string) {
       if (id === SYSTEM_ADMIN_USER_ID) throw new Error('cannot_remove_sysadmin')
       setStore((s) => {
         const access = normalizeAccessStore(s.access)
@@ -80,30 +205,47 @@ export function createAccessSlice({ setStore, getStore }: { setStore: SetStore; 
           )
           if (admins.length === 0) throw new Error('last_sysadmin')
         }
-        return {
-          ...s,
-          access: {
-            ...access,
-            users: access.users.filter((u) => u.id !== id),
+        return appendAudit(
+          {
+            ...s,
+            access: {
+              ...access,
+              users: access.users.filter((u) => u.id !== id),
+            },
           },
-        }
+          {
+            action: 'user_remove',
+            detail: `${target.displayName} (${target.login}) · ${target.roleId}`,
+          },
+        )
       })
+      if (isWebApp) {
+        await syncWebAccessAllowlistFromStore(getStore().access).catch((err) => {
+          console.error('FST: sync web access allowlist failed', err)
+        })
+      }
     },
 
     setRoleViews(roleId: AccessRoleId, views: ViewId[]) {
       if (roleId === 'sysadmin') return
       setStore((s) => {
         const access = normalizeAccessStore(s.access)
-        return {
+        const nextViews = [...new Set(views)]
+        let next = {
           ...s,
           access: {
             ...access,
             roleViews: {
               ...access.roleViews,
-              [roleId]: [...new Set(views)],
+              [roleId]: nextViews,
             },
           },
         }
+        next = appendAudit(next, {
+          action: 'role_views',
+          detail: `${roleId}: ${nextViews.join(', ') || '—'}`,
+        })
+        return next
       })
     },
 

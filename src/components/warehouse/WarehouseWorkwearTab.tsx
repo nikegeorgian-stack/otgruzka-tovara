@@ -9,7 +9,8 @@ import { TabBar } from '@/components/ui/TabBar'
 import { useI18n } from '@/context/I18nContext'
 import { employmentAgreementLabel } from '@/lib/hr/labels'
 import { calcWorkwearAmortization, calcWorkwearWithholding } from '@/lib/workwear/amortization'
-import { checkWorkwearEligibility, isActiveEmployee } from '@/lib/workwear/eligibility'
+import { checkWorkwearEligibility } from '@/lib/workwear/eligibility'
+import { filterEmployeesForDate } from '@/lib/hr/employeeActive'
 import {
   workwearSeasonLabel,
   workwearPpeCategoryLabel,
@@ -39,6 +40,8 @@ type Props = {
   employees: Employee[]
   keeperId?: string
   keeperName?: string
+  /** Срез на дату архива — фильтр списка сотрудников */
+  asOfDate?: string
   onUpsertCatalogItem: (item: WorkwearCatalogItem) => void
   onArchiveCatalogItem: (id: string, archived: boolean) => void
   onPostIssuance: (
@@ -90,6 +93,7 @@ export function WarehouseWorkwearTab({
   employees,
   keeperId,
   keeperName,
+  asOfDate,
   onUpsertCatalogItem,
   onArchiveCatalogItem,
   onPostIssuance,
@@ -112,10 +116,9 @@ export function WarehouseWorkwearTab({
 
   const activeEmployees = useMemo(
     () =>
-      employees
-        .filter(isActiveEmployee)
+      filterEmployeesForDate(employees, asOfDate)
         .sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru')),
-    [employees],
+    [employees, asOfDate],
   )
 
   const filteredEmployees = useMemo(() => {
@@ -128,7 +131,9 @@ export function WarehouseWorkwearTab({
     ? employees.find((e) => e.id === selectedEmployeeId) ?? null
     : null
 
-  const eligibility = selectedEmployee ? checkWorkwearEligibility(selectedEmployee) : null
+  const eligibility = selectedEmployee
+    ? checkWorkwearEligibility(selectedEmployee, asOfDate ?? issueDate)
+    : null
 
   const catalogItems = useMemo(
     () => [...workwear.catalog].sort((a, b) => a.sortOrder - b.sortOrder),

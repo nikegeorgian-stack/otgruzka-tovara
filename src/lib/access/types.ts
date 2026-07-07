@@ -1,3 +1,4 @@
+import type { UserViewDefaults } from '@/lib/viewDefaults/types'
 import type { ViewId } from '@/lib/types'
 
 /** Роль / должность в системе */
@@ -5,6 +6,7 @@ export type AccessRoleId =
   | 'sysadmin'
   | 'warehouse_keeper'
   | 'hr'
+  | 'hr_inspector'
   | 'operations_director'
   | 'workshop_master'
   | 'procurement_manager'
@@ -24,6 +26,14 @@ export type AppUser = {
   active: boolean
   /** Привязка к карточке сотрудника в HR */
   employeeId?: string
+  /** Бригады по умолчанию в табеле / перекличке (фильтр при открытии) */
+  defaultBrigades?: string[]
+  /** Настройки отображения по разделам (личные) */
+  viewDefaults?: UserViewDefaults
+  /** Облачная учётка (Firebase Auth) — пароль не хранится локально */
+  webAccount?: boolean
+  /** Индивидуальные разделы (если заданы — вместо roleViews для роли) */
+  webViews?: import('@/lib/types').ViewId[]
   createdAt: string
   updatedAt: string
 }
@@ -41,8 +51,8 @@ export type AccessStore = {
 /** Роли, для которых администратор может включить сторно документов */
 export const DOCUMENT_CANCEL_ROLES: AccessRoleId[] = ['warehouse_keeper']
 
-/** Роли, для которых администратор может включить отрицательный остаток */
-export const NEGATIVE_STOCK_ROLES: AccessRoleId[] = ['technologist', 'warehouse_keeper']
+/** Отрицательный остаток отключён глобально. */
+export const NEGATIVE_STOCK_ROLES: AccessRoleId[] = []
 
 /** Разделы приложения, которыми управляет администратор */
 export const MANAGED_VIEWS: ViewId[] = [
@@ -53,6 +63,7 @@ export const MANAGED_VIEWS: ViewId[] = [
   'warehouse',
   'procurement',
   'hr',
+  'hr_inspector',
   'finance',
   'directories',
   'technologist',

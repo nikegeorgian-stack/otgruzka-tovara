@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/Button'
 
 import { FormNotice } from '@/components/ui/FormNotice'
 
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
+
 import { RollWidthQuickPick } from '@/components/ui/RollWidthQuickPick'
 
 import { useI18n } from '@/context/I18nContext'
@@ -335,11 +337,12 @@ export function LoadingPickProductModal({
 
 
   return (
-
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-stone-900/50 p-4">
-
-      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-sm border border-grid bg-white shadow-sm">
-
+    <ModalBackdrop
+      open
+      onClose={onClose}
+      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
+      panelClassName="flex max-h-[90vh] w-full max-w-lg flex-col rounded-sm border border-grid bg-white shadow-sm"
+    >
         <div className="border-b border-grid px-5 py-4">
 
           <h3 className="text-lg font-bold text-ink">{t('warehouse.loading.pickProductTitle')}</h3>
@@ -658,10 +661,7 @@ export function LoadingPickProductModal({
 
         </div>
 
-      </div>
-
-    </div>
-
+    </ModalBackdrop>
   )
 
 }

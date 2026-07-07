@@ -1,13 +1,16 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HotkeysHelp } from '@/components/help/HotkeysHelp'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { PageActionOverflow } from '@/components/ui/PageActionOverflow'
+import { monthProblems } from '@/lib/problems'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { TabBar } from '@/components/ui/TabBar'
 import { useEmployeeEditor } from '@/hooks/useEmployeeEditor'
 import { OnboardingTour } from '@/components/help/OnboardingTour'
 import { BrigadesManageModal } from '@/components/month/BrigadesManageModal'
+import { DayRollCallModal } from '@/components/month/DayRollCallModal'
 import { BrigadeFillModal } from '@/components/month/BrigadeFillModal'
 import { EmployeeEditorHost } from '@/components/hr/EmployeeEditorHost'
 import { AttendanceLogPrintModal } from '@/components/hr/AttendanceLogPrintModal'
@@ -19,6 +22,11 @@ import { MonthDisplayBar } from '@/components/month/MonthDisplayBar'
 import { MonthKpiBar } from '@/components/month/MonthKpiBar'
 import { MonthProblemsBar } from '@/components/month/MonthProblemsBar'
 import { MonthToolsBar } from '@/components/month/MonthToolsBar'
+import { MonthViewDefaultsDialog } from '@/components/month/MonthViewDefaultsDialog'
+import {
+  MonthWorkspaceAccordion,
+  useMonthAccordionSections,
+} from '@/components/month/MonthWorkspaceAccordion'
 import { PlanEditorWindow } from '@/components/month/PlanEditorWindow'
 import { PlanFactTable } from '@/components/month/PlanFactTable'
 import { TimesheetSection } from '@/components/month/TimesheetSection'
@@ -28,7 +36,7 @@ import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { getCellComment, type CopyPlanToFactScope } from '@/lib/bulkOps'
 import { formatMonthTitle } from '@/lib/dates'
-import { isMonthArchived } from '@/lib/monthManage'
+import { isMonthArchived, isMonthClosed, monthClosureInfo } from '@/lib/monthManage'
 import {
   DEFAULT_MONTH_VIEW_DISPLAY,
   singleSelectedBrigade,
@@ -45,9 +53,14 @@ import {
   resolveWorkshopMasterBrigades,
   timesheetStructuralUnits,
 } from '@/lib/workshopMasterScope'
+import type { MonthViewDefaults, MonthViewLayout } from '@/lib/viewDefaults/types'
+import {
+  DEFAULT_MONTH_ROW_SORT,
+  type MonthRowSort,
+} from '@/lib/monthRowSort'
 import type { AppStore, DaySubstitution, Employee } from '@/lib/types'
 
-export type MonthViewLayout = 'dual' | 'plan' | 'fact'
+export type { MonthViewLayout }
 
 type Props = {
   store: AppStore
@@ -83,6 +96,7 @@ type Props = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeUnit: (brigade: string, unitId: string | null) => void
   onSetBrigadeRoster: (
     brigade: string,
     employeeIds: string[],
@@ -96,11 +110,31 @@ type Props = {
     variant: 'first' | 'last',
   ) => void
   onSetBrigadier: (brigade: string, employeeId: string | null) => void
+  onMarkBrigadier: (rowId: string, dateKey: string, on: boolean) => void
+  onMarkBrigadierMonth: (rowId: string, on: boolean) => void
+  onSetFactHours: (rowId: string, dateKey: string, hours: number | null) => void
+  onAddDayWorker: (
+    brigade: string,
+    employeeId: string,
+    dateKey: string,
+    code: import('@/lib/types').DayCode,
+  ) => void
+  onAssignPermanent: (employeeId: string, brigade: string) => void
   onUpsertEmployee: (employee: Employee) => void
   onTourComplete: () => void
+  /** Закрыть месяц (зафиксировать план/факт) */
+  onCloseMonth?: () => void
+  /** Переоткрыть закрытый месяц (только директор/админ) */
+  onReopenMonth?: () => void
+  /** Может ли текущий пользователь переоткрывать закрытый месяц */
+  canReopen?: boolean
   workshopMasterMode?: boolean
   workshopMasterLogin?: string
   workshopMasterEmployeeId?: string
+  userDefaultBrigades?: string[]
+  userMonthDefaults?: MonthViewDefaults
+  currentUserId?: string
+  onSaveMonthDefaults?: (defaults: MonthViewDefaults) => void
 }
 
 export function MonthPage({
@@ -129,30 +163,60 @@ export function MonthPage({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeUnit,
   onSetBrigadeRoster,
   onChangeGroup2x2,
   onSetCycleFromDay,
   onSetBrigadier,
+  onMarkBrigadier,
+  onMarkBrigadierMonth,
+  onSetFactHours,
+  onAddDayWorker,
+  onAssignPermanent,
   onUpsertEmployee,
+  onCloseMonth,
+  onReopenMonth,
+  canReopen = false,
   workshopMasterMode = false,
   workshopMasterLogin,
   workshopMasterEmployeeId,
+  userDefaultBrigades,
+  userMonthDefaults,
+  currentUserId,
+  onSaveMonthDefaults,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
-  const [layout, setLayout] = useState<MonthViewLayout>('dual')
+  const [layout, setLayout] = useState<MonthViewLayout>(userMonthDefaults?.layout ?? 'dual')
   const [printStep, setPrintStep] = useState<'off' | 'setup' | 'preview'>('off')
   const [printConfig, setPrintConfig] = useState<PrintConfig | null>(null)
+  const preferredBrigades = userMonthDefaults?.defaultBrigades ?? userDefaultBrigades
   const masterBrigades = useMemo(
-    () => resolveWorkshopMasterBrigades(store, workshopMasterLogin, workshopMasterEmployeeId),
-    [store, workshopMasterLogin, workshopMasterEmployeeId],
+    () =>
+      resolveWorkshopMasterBrigades(
+        store,
+        workshopMasterLogin,
+        workshopMasterEmployeeId,
+        preferredBrigades,
+      ),
+    [store, workshopMasterLogin, workshopMasterEmployeeId, preferredBrigades],
   )
-  const [groupMode, setGroupMode] = useState<MonthGroupMode>('brigade')
+  const defaultBrigadeFilter = useMemo(() => {
+    if (preferredBrigades?.length) {
+      const mapped = preferredBrigades.filter((b) => store.brigades.includes(b))
+      if (mapped.length > 0) return mapped
+    }
+    if (workshopMasterMode) return masterBrigades
+    return store.brigades
+  }, [preferredBrigades, workshopMasterMode, masterBrigades, store.brigades])
+  const [groupMode, setGroupMode] = useState<MonthGroupMode>(
+    userMonthDefaults?.groupMode ?? 'brigade',
+  )
   const [search, setSearch] = useState('')
   const [brigadeSearch, setBrigadeSearch] = useState('')
   const [unitSearch, setUnitSearch] = useState('')
   const [selectedBrigades, setSelectedBrigades] = useState<Set<string>>(() =>
-    new Set(workshopMasterMode ? masterBrigades : store.brigades),
+    new Set(defaultBrigadeFilter),
   )
   const timesheetUnits = useMemo(
     () => timesheetStructuralUnits(store.hrStructuralUnits, workshopMasterMode),
@@ -171,9 +235,13 @@ export function MonthPage({
   const showUnassignedUnit = allUnitKeys.includes(NO_STRUCTURAL_UNIT_ID)
   const [viewDisplay, setViewDisplay] = useState<MonthViewDisplay>(() => ({
     ...DEFAULT_MONTH_VIEW_DISPLAY,
-    showUnit: !workshopMasterMode,
+    ...userMonthDefaults?.viewDisplay,
+    showUnit: workshopMasterMode ? false : (userMonthDefaults?.viewDisplay?.showUnit ?? true),
   }))
   const [filterSchedule, setFilterSchedule] = useState('')
+  const [rowSort, setRowSort] = useState<MonthRowSort>(
+    () => userMonthDefaults?.rowSort ?? DEFAULT_MONTH_ROW_SORT,
+  )
   const [showHotkeys, setShowHotkeys] = useState(false)
   const [tourStep, setTourStep] = useState(
     () => (store.settings.tourCompleted ? 99 : 0),
@@ -189,10 +257,30 @@ export function MonthPage({
   const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [brigadesOpen, setBrigadesOpen] = useState(false)
+  const [rollCallOpen, setRollCallOpen] = useState(false)
   const [fillBrigade, setFillBrigade] = useState<string | null>(null)
   const [planEditorOpen, setPlanEditorOpen] = useState(false)
   const [attendanceLogOpen, setAttendanceLogOpen] = useState(false)
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const accordion = useMonthAccordionSections()
   const employeeEditor = useEmployeeEditor(store.brigades, store.employees)
+
+  function applyMonthDefaults(defaults: MonthViewDefaults) {
+    if (defaults.layout) setLayout(defaults.layout)
+    if (defaults.groupMode && !workshopMasterMode) setGroupMode(defaults.groupMode)
+    if (defaults.viewDisplay) {
+      setViewDisplay((prev) => ({
+        ...prev,
+        ...defaults.viewDisplay,
+        showUnit: workshopMasterMode ? false : (defaults.viewDisplay?.showUnit ?? prev.showUnit),
+      }))
+    }
+    if (defaults.defaultBrigades?.length) {
+      const mapped = defaults.defaultBrigades.filter((b) => store.brigades.includes(b))
+      if (mapped.length > 0) setSelectedBrigades(new Set(mapped))
+    }
+    if (defaults.rowSort) setRowSort(defaults.rowSort)
+  }
 
   function openPlanEditor() {
     setEditing(true)
@@ -203,15 +291,28 @@ export function MonthPage({
 
   useEffect(() => {
     setEditing(false)
-    setGroupMode('brigade')
-    setSelectedBrigades(
-      new Set(workshopMasterMode ? masterBrigades : store.brigades),
-    )
+    setGroupMode(userMonthDefaults?.groupMode ?? 'brigade')
+    setLayout(userMonthDefaults?.layout ?? 'dual')
+    setViewDisplay({
+      ...DEFAULT_MONTH_VIEW_DISPLAY,
+      ...userMonthDefaults?.viewDisplay,
+      showUnit: workshopMasterMode ? false : (userMonthDefaults?.viewDisplay?.showUnit ?? true),
+    })
+    setRowSort(userMonthDefaults?.rowSort ?? DEFAULT_MONTH_ROW_SORT)
+    setSelectedBrigades(new Set(defaultBrigadeFilter))
     if (!workshopMasterMode) {
       setSelectedUnits(new Set(allUnitKeys))
     }
     prevBrigadesRef.current = store.brigades
-  }, [month, allUnitKeys, masterBrigades, store.brigades, workshopMasterMode])
+  }, [
+    month,
+    allUnitKeys,
+    defaultBrigadeFilter,
+    masterBrigades,
+    store.brigades,
+    workshopMasterMode,
+    userMonthDefaults,
+  ])
 
   useEffect(() => {
     const prev = prevBrigadesRef.current
@@ -273,7 +374,12 @@ export function MonthPage({
   }
 
   const stats = monthStats(sheet, store.employees, statsFilter)
+  const problems = monthProblems(store, sheet)
   const archived = isMonthArchived(store, month)
+  const closed = isMonthClosed(store, month)
+  const closure = monthClosureInfo(store, month)
+  // Закрытый месяц всегда только для чтения, независимо от тумблера «Правка».
+  const effectiveEditing = editing && !closed
 
   function handleRegenerateMonth() {
     onRegenerateMonth()
@@ -309,7 +415,134 @@ export function MonthPage({
     onApplyShiftTemplate(templateId, brigade)
   }
 
+  async function handleCloseMonth() {
+    if (!onCloseMonth) return
+    if (!(await confirm({ message: t('month.confirmClose'), danger: true }))) return
+    setEditing(false)
+    onCloseMonth()
+  }
+
+  async function handleReopenMonth() {
+    if (!onReopenMonth) return
+    if (!(await confirm({ message: t('month.confirmReopen'), danger: true }))) return
+    onReopenMonth()
+  }
+
   const filterBrigade = singleSelectedBrigade(selectedBrigades)
+
+  const timesheetStore = useMemo(
+    () => store,
+    [
+      store.employees,
+      store.brigades,
+      store.brigadeNamesKa,
+      store.brigadeUnits,
+      store.brigadiers,
+      store.hrStructuralUnits,
+    ],
+  )
+
+  const onCommentRequest = useCallback((rowId: string, dateKey: string) => {
+    setCommentTarget({ rowId, dateKey })
+  }, [])
+
+  const onSubstitutionRequest = useCallback((rowId: string, dateKey: string) => {
+    setSubstitutionTarget({ rowId, dateKey })
+  }, [])
+
+  const onFillBrigadeRequest = useCallback((brigade: string) => {
+    setFillBrigade(brigade)
+  }, [])
+
+  const onAddEmployeeFromTable = useCallback(
+    (rowId: string, brigade: string) => {
+      employeeEditor.openNew({ brigade, assignToRowId: rowId })
+    },
+    [employeeEditor],
+  )
+
+  const handleRowSortChange = useCallback(
+    (sort: MonthRowSort) => {
+      setRowSort(sort)
+      onSaveMonthDefaults?.({
+        ...userMonthDefaults,
+        layout,
+        groupMode,
+        defaultBrigades: [...selectedBrigades],
+        viewDisplay,
+        rowSort: sort,
+      })
+    },
+    [
+      onSaveMonthDefaults,
+      userMonthDefaults,
+      layout,
+      groupMode,
+      selectedBrigades,
+      viewDisplay,
+    ],
+  )
+
+  const tableProps = useMemo(
+    () => ({
+      store: timesheetStore,
+      sheet,
+      search,
+      selectedBrigades,
+      brigadeSearch,
+      selectedUnits,
+      allUnitKeys,
+      filterSchedule,
+      groupMode,
+      display: viewDisplay,
+      rowSort,
+      onRowSortChange: handleRowSortChange,
+      readOnly: !effectiveEditing,
+      onAssign,
+      onRegenerateRow,
+      onAddRow,
+      onRemoveRow,
+      onRemoveEmptyRow,
+      onCommentRequest,
+      onSubstitutionRequest,
+      onFillBrigade: onFillBrigadeRequest,
+      onChangeGroup2x2,
+      onSetCycleFromDay,
+      onSetBrigadier,
+      onMarkBrigadier,
+      onMarkBrigadierMonth,
+      onAddEmployee: onAddEmployeeFromTable,
+    }),
+    [
+      timesheetStore,
+      sheet,
+      search,
+      selectedBrigades,
+      brigadeSearch,
+      selectedUnits,
+      allUnitKeys,
+      filterSchedule,
+      groupMode,
+      viewDisplay,
+      rowSort,
+      handleRowSortChange,
+      effectiveEditing,
+      onAssign,
+      onRegenerateRow,
+      onAddRow,
+      onRemoveRow,
+      onRemoveEmptyRow,
+      onCommentRequest,
+      onSubstitutionRequest,
+      onFillBrigadeRequest,
+      onChangeGroup2x2,
+      onSetCycleFromDay,
+      onSetBrigadier,
+      onMarkBrigadier,
+      onMarkBrigadierMonth,
+      onAddEmployeeFromTable,
+    ],
+  )
 
   const attendanceLogEmployees = useMemo(() => {
     if (!workshopMasterMode) return store.employees
@@ -318,35 +551,63 @@ export function MonthPage({
     return employeesInBrigades(store.employees, masterBrigades)
   }, [masterBrigades, selectedBrigades, store.employees, workshopMasterMode])
 
-  const tableProps = {
-    store,
-    sheet,
-    search,
-    selectedBrigades,
-    brigadeSearch,
-    selectedUnits,
-    allUnitKeys,
-    filterSchedule,
-    groupMode,
-    display: viewDisplay,
-    readOnly: !editing,
-    onAssign,
-    onRegenerateRow,
-    onAddRow,
-    onRemoveRow,
-    onRemoveEmptyRow,
-    onCommentRequest: (rowId: string, dateKey: string) =>
-      setCommentTarget({ rowId, dateKey }),
-    onSubstitutionRequest: (rowId: string, dateKey: string) =>
-      setSubstitutionTarget({ rowId, dateKey }),
-    onFillBrigade: (brigade: string) => setFillBrigade(brigade),
-    onChangeGroup2x2,
-    onSetCycleFromDay,
-    onSetBrigadier,
-    onAddEmployee: (rowId: string, brigade: string) => {
-      employeeEditor.openNew({ brigade, assignToRowId: rowId })
+  const overflowItems = [
+    {
+      id: 'regenerate',
+      label: t('month.regenerate'),
+      onClick: handleRegenerateMonth,
+      disabled: !effectiveEditing,
+      title: !effectiveEditing ? t('month.editToChange') : undefined,
     },
-  }
+    {
+      id: 'brigades',
+      label: t('month.brigadesManage'),
+      onClick: () => setBrigadesOpen(true),
+      disabled: workshopMasterMode,
+      hidden: workshopMasterMode,
+      title: t('month.brigadesManageHint'),
+    },
+    {
+      id: 'rollcall',
+      label: t('rollcall.open'),
+      onClick: () => setRollCallOpen(true),
+      disabled: closed,
+      title: t('rollcall.hint'),
+    },
+    {
+      id: 'attendance',
+      label: t('hr.attendanceLog.open'),
+      onClick: () => setAttendanceLogOpen(true),
+      hidden: !workshopMasterMode,
+      title: t('hr.attendanceLog.panelHint'),
+    },
+    {
+      id: 'print',
+      label: t('common.print'),
+      onClick: () => setPrintStep('setup'),
+    },
+    {
+      id: 'defaults',
+      label: t('month.defaults.open'),
+      onClick: () => setDefaultsOpen(true),
+      hidden: !(currentUserId && onSaveMonthDefaults),
+      title: t('month.defaults.openHint'),
+    },
+    {
+      id: 'close',
+      label: t('month.close'),
+      onClick: handleCloseMonth,
+      hidden: closed || !onCloseMonth || workshopMasterMode,
+      title: t('month.closeHint'),
+    },
+    {
+      id: 'reopen',
+      label: t('month.reopen'),
+      onClick: handleReopenMonth,
+      hidden: !(closed && canReopen && onReopenMonth),
+      title: t('month.reopenHint'),
+    },
+  ]
 
   return (
     <PageLayout className="month-page print:p-2">
@@ -355,16 +616,28 @@ export function MonthPage({
       )}
 
       <PageHeader
-        badge={t('app.title')}
+        density="compact"
+        showBrand={false}
         title={formatMonthTitle(month, locale)}
-        subtitle={`${t('print.site')}: ${store.settings.site}${store.settings.responsible ? ` · ${store.settings.responsible}` : ''}`}
+        subtitle={store.settings.site}
         meta={
-          archived ? (
+          closed ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-sm bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+              title={t('month.closedHint')}
+            >
+              🔒 {t('month.closed')}
+            </span>
+          ) : archived ? (
             <span
               className="inline-flex rounded-sm bg-stone-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-600"
               title={t('month.archivedHint')}
             >
               {t('month.archive')}
+            </span>
+          ) : !effectiveEditing ? (
+            <span className="text-[10px] text-stone-500">
+              {workshopMasterMode ? t('month.masterViewHint') : t('month.viewModeHint')}
             </span>
           ) : undefined
         }
@@ -381,11 +654,13 @@ export function MonthPage({
               {t('month.planEditor')}
             </Button>
             <Button
-              variant={editing ? 'success' : 'primary'}
+              variant={effectiveEditing ? 'success' : 'primary'}
               size="sm"
               onClick={() => setEditing((e) => !e)}
+              disabled={closed}
+              title={closed ? t('month.closedEditBlocked') : undefined}
             >
-              {editing ? t('month.editDone') : t('month.edit')}
+              {effectiveEditing ? t('month.editDone') : t('month.edit')}
             </Button>
             <TabBar
               tabs={(
@@ -398,66 +673,120 @@ export function MonthPage({
               value={layout}
               onChange={setLayout}
             />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRegenerateMonth}
-              disabled={!editing}
-              title={!editing ? t('month.editToChange') : undefined}
-            >
-              {t('month.regenerate')}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setBrigadesOpen(true)}
-              title={t('month.brigadesManageHint')}
-              disabled={workshopMasterMode}
-              className={workshopMasterMode ? 'hidden' : undefined}
-            >
-              {t('month.brigadesManage')}
-            </Button>
-            {workshopMasterMode ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setAttendanceLogOpen(true)}
-                title={t('hr.attendanceLog.panelHint')}
-              >
-                {t('hr.attendanceLog.open')}
-              </Button>
-            ) : null}
-            <Button variant="print" size="sm" onClick={() => setPrintStep('setup')}>
-              {t('common.print')}
-            </Button>
+            <PageActionOverflow items={overflowItems} />
           </>
         }
       />
 
-      {!editing && (
-        <p className="rounded-sm border border-stone-200 bg-stone-50 px-4 py-2 text-sm text-stone-600 print:hidden">
-          {workshopMasterMode ? t('month.masterViewHint') : t('month.viewModeHint')}
+      {closed ? (
+        <p className="rounded-sm border border-amber-200 bg-amber-50/90 px-3 py-1.5 text-xs text-amber-900 print:hidden">
+          🔒{' '}
+          {closure?.byName
+            ? tf('month.closedBannerBy', {
+                who: closure.byName,
+                date: closure.at ? closure.at.slice(0, 10) : '',
+              })
+            : t('month.closedBanner')}
+          {!canReopen && ` ${t('month.closedReopenAdmin')}`}
         </p>
-      )}
+      ) : null}
 
-      <MonthToolsBar
-        brigades={store.brigades}
-        shiftTemplates={store.shiftTemplates}
-        search={search}
-        filterBrigade={filterBrigade}
-        filterSchedule={filterSchedule}
-        readOnly={!editing}
-        readOnlyHint={t('month.editToChange')}
-        onSearch={setSearch}
-        onFilterSchedule={setFilterSchedule}
-        onBulkHolidayV={handleBulkHolidayV}
-        onBulkCopyPlanToFact={handleBulkCopyPlanToFact}
-        onApplyShiftTemplate={handleApplyShiftTemplate}
-        onExportExcel={onExportExcel}
-        onShowHotkeys={() => setShowHotkeys(true)}
+      <div className="month-search-bar print:hidden">
+        <input
+          className="month-search-bar__input"
+          type="search"
+          placeholder={t('month.searchEmployee')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      <MonthWorkspaceAccordion
+        open={accordion.open}
+        onToggle={accordion.toggle}
+        items={[
+          {
+            id: 'filters',
+            label: t('workspace.widget.filters'),
+            summary: tf('workspace.chip.brigades', {
+              count: selectedBrigades.size,
+              total: store.brigades.length,
+            }),
+            children: (
+              <MonthDisplayBar
+                brigades={store.brigades}
+                brigadeNamesKa={store.brigadeNamesKa}
+                brigadeSearch={brigadeSearch}
+                selectedBrigades={selectedBrigades}
+                primaryBrigades={workshopMasterMode ? masterBrigades : undefined}
+                structuralUnits={timesheetUnits}
+                unitSearch={unitSearch}
+                selectedUnits={selectedUnits}
+                showUnassignedUnit={showUnassignedUnit}
+                groupMode={groupMode}
+                showUnitFilters={!workshopMasterMode}
+                showGroupModeToggle={!workshopMasterMode}
+                display={viewDisplay}
+                layout={layout}
+                onBrigadeSearch={setBrigadeSearch}
+                onSelectedBrigades={setSelectedBrigades}
+                onUnitSearch={setUnitSearch}
+                onSelectedUnits={setSelectedUnits}
+                onGroupMode={setGroupMode}
+                onDisplay={(patch) => setViewDisplay((prev) => ({ ...prev, ...patch }))}
+              />
+            ),
+          },
+          {
+            id: 'operations',
+            label: t('workspace.widget.operations'),
+            summary: t('month.accordion.opsSummary'),
+            children: (
+              <MonthToolsBar
+                brigades={store.brigades}
+                shiftTemplates={store.shiftTemplates}
+                search={search}
+                filterBrigade={filterBrigade}
+                filterSchedule={filterSchedule}
+                readOnly={!effectiveEditing}
+                readOnlyHint={closed ? t('month.closedEditBlocked') : t('month.editToChange')}
+                onSearch={setSearch}
+                onFilterSchedule={setFilterSchedule}
+                onBulkHolidayV={handleBulkHolidayV}
+                onBulkCopyPlanToFact={handleBulkCopyPlanToFact}
+                onApplyShiftTemplate={handleApplyShiftTemplate}
+                onExportExcel={onExportExcel}
+                onShowHotkeys={() => setShowHotkeys(true)}
+                hideSearch
+              />
+            ),
+          },
+          {
+            id: 'analytics',
+            label: t('workspace.widget.analytics'),
+            summary:
+              problems.length > 0
+                ? `${tf('workspace.chip.stats', {
+                    plan: stats.planHours,
+                    fact: stats.factHours,
+                    delta: stats.deviation,
+                  })} · ${tf('workspace.chip.problems', { count: problems.length })}`
+                : tf('workspace.chip.stats', {
+                    plan: stats.planHours,
+                    fact: stats.factHours,
+                    delta: stats.deviation,
+                  }),
+            warn: problems.length > 0,
+            children: (
+              <div className="space-y-4">
+                <MonthKpiBar stats={stats} />
+                <MonthProblemsBar store={store} sheet={sheet} />
+                <CodeLegendBar />
+              </div>
+            ),
+          },
+        ]}
       />
-
-      <MonthProblemsBar store={store} sheet={sheet} />
 
       {printStep === 'setup' && (
         <PrintSetupModal
@@ -489,32 +818,6 @@ export function MonthPage({
           onBack={() => setPrintStep('setup')}
         />
       )}
-
-      <MonthKpiBar stats={stats} />
-      <CodeLegendBar />
-
-      <MonthDisplayBar
-        brigades={store.brigades}
-        brigadeNamesKa={store.brigadeNamesKa}
-        brigadeSearch={brigadeSearch}
-        selectedBrigades={selectedBrigades}
-        primaryBrigades={workshopMasterMode ? masterBrigades : undefined}
-        structuralUnits={timesheetUnits}
-        unitSearch={unitSearch}
-        selectedUnits={selectedUnits}
-        showUnassignedUnit={showUnassignedUnit}
-        groupMode={groupMode}
-        showUnitFilters={!workshopMasterMode}
-        showGroupModeToggle={!workshopMasterMode}
-        display={viewDisplay}
-        layout={layout}
-        onBrigadeSearch={setBrigadeSearch}
-        onSelectedBrigades={setSelectedBrigades}
-        onUnitSearch={setUnitSearch}
-        onSelectedUnits={setSelectedUnits}
-        onGroupMode={setGroupMode}
-        onDisplay={(patch) => setViewDisplay((prev) => ({ ...prev, ...patch }))}
-      />
 
       {layout === 'dual' ? (
         <div className="flex flex-col gap-6">
@@ -589,12 +892,14 @@ export function MonthPage({
           onNext={() => {
             if (tourStep + 1 >= 5) {
               setTourStep(99)
-              onTourComplete()
-            } else setTourStep(tourStep + 1)
+              startTransition(() => onTourComplete())
+            } else {
+              setTourStep(tourStep + 1)
+            }
           }}
           onSkip={() => {
             setTourStep(99)
-            onTourComplete()
+            startTransition(() => onTourComplete())
           }}
         />
       )}
@@ -668,6 +973,8 @@ export function MonthPage({
           onChangeGroup2x2={onChangeGroup2x2}
           onSetCycleFromDay={onSetCycleFromDay}
           onSetBrigadier={onSetBrigadier}
+          onMarkBrigadier={onMarkBrigadier}
+          onMarkBrigadierMonth={onMarkBrigadierMonth}
           onCommentRequest={(rowId, dateKey) => setCommentTarget({ rowId, dateKey })}
           onSubstitutionRequest={(rowId, dateKey) =>
             setSubstitutionTarget({ rowId, dateKey })
@@ -698,6 +1005,30 @@ export function MonthPage({
         }}
         onClose={employeeEditor.close}
       />
+      {brigadesOpen && (
+        <BrigadesManageModal
+          store={store}
+          onClose={() => setBrigadesOpen(false)}
+          onAddBrigade={onAddBrigade}
+          onRenameBrigade={onRenameBrigade}
+          onRemoveBrigade={onRemoveBrigade}
+          onSetBrigadeNameKa={onSetBrigadeNameKa}
+          onSetBrigadeUnit={onSetBrigadeUnit}
+        />
+      )}
+      {rollCallOpen && (
+        <DayRollCallModal
+          store={store}
+          month={month}
+          defaultBrigades={defaultBrigadeFilter}
+          onClose={() => setRollCallOpen(false)}
+          onSetFact={(rowId, dateKey, code) => onSetCode(rowId, dateKey, code, 'fact')}
+          onSetFactHours={onSetFactHours}
+          onAddDayWorker={onAddDayWorker}
+          onAssignPermanent={onAssignPermanent}
+          onMarkBrigadier={onMarkBrigadier}
+        />
+      )}
       {fillBrigade && (
         <BrigadeFillModal
           store={store}
@@ -708,14 +1039,24 @@ export function MonthPage({
           onClose={() => setFillBrigade(null)}
         />
       )}
-      {brigadesOpen && (
-        <BrigadesManageModal
-          store={store}
-          onClose={() => setBrigadesOpen(false)}
-          onAddBrigade={onAddBrigade}
-          onRenameBrigade={onRenameBrigade}
-          onRemoveBrigade={onRemoveBrigade}
-          onSetBrigadeNameKa={onSetBrigadeNameKa}
+      {defaultsOpen && currentUserId && onSaveMonthDefaults && (
+        <MonthViewDefaultsDialog
+          brigades={store.brigades}
+          brigadeNamesKa={store.brigadeNamesKa}
+          workshopMasterMode={workshopMasterMode}
+          initial={{
+            layout,
+            groupMode,
+            defaultBrigades: [...selectedBrigades],
+            viewDisplay,
+            rowSort,
+          }}
+          onSave={(defaults) => {
+            onSaveMonthDefaults(defaults)
+            applyMonthDefaults(defaults)
+            setNotice(t('month.defaults.saved'))
+          }}
+          onClose={() => setDefaultsOpen(false)}
         />
       )}
     </PageLayout>

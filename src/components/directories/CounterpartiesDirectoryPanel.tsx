@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import {
@@ -199,8 +200,12 @@ export function CounterpartiesDirectoryPanel({ store, onUpsert, onRemove }: Prop
       </div>
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-sm border border-grid bg-white shadow-sm">
+        <ModalBackdrop
+          open
+          onClose={() => setEditing(null)}
+          className="fixed inset-0 flex items-center justify-center bg-black/40 p-4"
+          panelClassName="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-sm border border-grid bg-white shadow-sm"
+        >
             <div className="border-b border-grid px-5 py-4">
               <h3 className="text-lg font-bold text-ink">
                 {editing.name || t('counterparty.new')}
@@ -484,8 +489,7 @@ export function CounterpartiesDirectoryPanel({ store, onUpsert, onRemove }: Prop
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </ModalBackdrop>
       )}
     </div>
   )

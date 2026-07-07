@@ -318,6 +318,7 @@ export function OrgStructureDirectoryPanel({
                     <th className="px-3 py-2">{t('orgStructure.col.title')}</th>
                     <th className="px-3 py-2">{t('orgStructure.col.rank')}</th>
                     <th className="px-3 py-2">{t('orgStructure.col.class')}</th>
+                    <th className="px-3 py-2">{t('orgStructure.col.salary')}</th>
                     <th className="px-3 py-2">{t('orgStructure.col.staff')}</th>
                     <th className="px-3 py-2" />
                   </tr>
@@ -325,7 +326,7 @@ export function OrgStructureDirectoryPanel({
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-3 py-4 text-stone-500">
+                      <td colSpan={6} className="px-3 py-4 text-stone-500">
                         {t('orgStructure.emptyUnit')}
                       </td>
                     </tr>
@@ -344,6 +345,11 @@ export function OrgStructureDirectoryPanel({
                         </td>
                         <td className="px-3 py-2 text-stone-600">{p.rank ?? p.grade ?? '—'}</td>
                         <td className="px-3 py-2 text-stone-600">{p.qualificationClass ?? '—'}</td>
+                        <td className="px-3 py-2 font-mono text-xs tabular-nums text-stone-700">
+                          {p.salary > 0
+                            ? `${p.salary.toLocaleString('ru-RU')} ${p.currency}`
+                            : '—'}
+                        </td>
                         <td className="px-3 py-2">
                           <button
                             type="button"

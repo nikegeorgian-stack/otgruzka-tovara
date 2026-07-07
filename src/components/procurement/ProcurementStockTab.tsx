@@ -3,13 +3,15 @@ import { useI18n } from '@/context/I18nContext'
 import { computeProcurementStockRows } from '@/lib/procurement/stockOutlook'
 import type { ProcurementPageProps } from './procurementTypes'
 
-type Props = Pick<ProcurementPageProps, 'procurement' | 'warehouse'>
+type Props = Pick<ProcurementPageProps, 'procurement' | 'warehouse'> & {
+  asOfIso?: string
+}
 
-export function ProcurementStockTab({ procurement, warehouse }: Props) {
+export function ProcurementStockTab({ procurement, warehouse, asOfIso }: Props) {
   const { t } = useI18n()
   const rows = useMemo(
-    () => computeProcurementStockRows(procurement.orders, warehouse),
-    [procurement.orders, warehouse],
+    () => computeProcurementStockRows(procurement.orders, warehouse, asOfIso),
+    [procurement.orders, warehouse, asOfIso],
   )
 
   if (!rows.length) {

@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useModalScope } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { autoCropDocumentCanvas, fileToDataUrl } from '@/lib/hr/files'
 
 type Props = {
@@ -8,10 +11,18 @@ type Props = {
 }
 
 export function HrCameraModal({ mode, onCapture, onClose }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
+
+  const { zIndex } = useModalScope({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    initialFocus: 'none',
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -58,9 +69,12 @@ export function HrCameraModal({ mode, onCapture, onClose }: Props) {
     onClose()
   }
 
-  return (
-    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-lg rounded-sm bg-white p-4 shadow-sm">
+  return createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center bg-black/60 p-4"
+      style={{ zIndex }}
+    >
+      <div ref={panelRef} className="w-full max-w-lg rounded-sm bg-white p-4 shadow-sm">
         <h3 className="text-lg font-bold text-ink">
           {mode === 'photo' ? 'Фото сотрудника' : 'Скан документа'}
         </h3>
@@ -106,6 +120,7 @@ export function HrCameraModal({ mode, onCapture, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    getModalPortalRoot(),
   )
 }

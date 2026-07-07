@@ -15,6 +15,7 @@ type Props = Pick<
   | 'brigades'
   | 'onPostDocument'
   | 'onPostTransfer'
+  | 'onSaveDocumentDraft'
   | 'onMergeInvoiceRegistry'
   | 'onAddMovement'
   | 'onDeleteMovement'
@@ -30,6 +31,7 @@ type Props = Pick<
   warehouseId: string
   categoryNames: Map<string, string>
   balances: Map<string, ItemBalance>
+  asOfIso?: string | null
 }
 
 function MovementTypeBadge({ type }: { type: StockMovementType }) {
@@ -73,14 +75,18 @@ export function WarehouseMovementsTab({
   keeperName,
   onPostDocument,
   onPostTransfer,
+  onSaveDocumentDraft,
   onMergeInvoiceRegistry,
   onAddMovement,
   onDeleteMovement,
+  asOfIso,
 }: Props) {
   const { t } = useI18n()
   const { confirm } = useConfirm()
   const whId = warehouseId || warehouse.locations[0]?.id || ''
   const [mode, setMode] = useState<'document' | 'other'>('document')
+  /** null = показываем выбор «Приход / Расход», иначе открыт редактор нужного типа */
+  const [docType, setDocType] = useState<'receipt' | 'issue' | null>(null)
 
   const [itemId, setItemId] = useState<string | null>(null)
   const [opType, setOpType] = useState<StockMovementType>('adjustment')
@@ -96,9 +102,10 @@ export function WarehouseMovementsTab({
     () =>
       [...warehouse.movements]
         .filter((m) => !warehouseId || m.warehouseId === warehouseId)
+        .filter((m) => !asOfIso || m.createdAt <= asOfIso)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 40),
-    [warehouse.movements, warehouseId],
+    [warehouse.movements, warehouseId, asOfIso],
   )
 
   function submitOther(e: React.FormEvent) {
@@ -153,25 +160,82 @@ export function WarehouseMovementsTab({
         </div>
 
         {mode === 'document' ? (
-          <WarehouseDocumentEditor
-            warehouse={warehouse}
-            categoryNames={categoryNames}
-            balances={balances}
-            brigades={brigades}
-            warehouseId={whId}
-            variant="page"
-            printMeta={printMeta}
-            allowNegativeStock={allowNegativeStock}
-            counterparties={counterparties}
-            onUpsertCounterparty={onUpsertCounterparty}
-            onOpenCounterparties={onOpenCounterparties}
-            productionRequests={productionRequests}
-            keeperId={keeperId}
-            keeperName={keeperName}
-            onPost={onPostDocument}
-            onPostTransfer={onPostTransfer}
-            onMergeInvoiceRegistry={onMergeInvoiceRegistry}
-          />
+          docType === null ? (
+            <div className="rounded-sm border border-grid bg-white p-6 shadow-sm">
+              <h3 className="text-base font-bold text-ink">{t('warehouse.doc.startTitle')}</h3>
+              <p className="mt-1 text-sm text-stone-500">{t('warehouse.doc.startHint')}</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className="flex flex-col items-start gap-1 rounded-sm border-2 border-emerald-600 bg-emerald-50/50 px-5 py-4 text-left hover:bg-emerald-50"
+                  onClick={() => setDocType('receipt')}
+                >
+                  <span className="text-base font-bold text-emerald-800">
+                    {t('warehouse.doc.startReceipt')}
+                  </span>
+                  <span className="text-xs text-emerald-700/80">
+                    {t('warehouse.doc.startReceiptHint')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="flex flex-col items-start gap-1 rounded-sm border-2 border-red-600 bg-red-50/50 px-5 py-4 text-left hover:bg-red-50"
+                  onClick={() => setDocType('issue')}
+                >
+                  <span className="text-base font-bold text-red-800">
+                    {t('warehouse.doc.startIssue')}
+                  </span>
+                  <span className="text-xs text-red-700/80">
+                    {t('warehouse.doc.startIssueHint')}
+                  </span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <WarehouseDocumentEditor
+              key={docType}
+              warehouse={warehouse}
+              categoryNames={categoryNames}
+              balances={balances}
+              brigades={brigades}
+              warehouseId={whId}
+              variant="page"
+              initialType={docType}
+              printMeta={printMeta}
+              allowNegativeStock={allowNegativeStock}
+              counterparties={counterparties}
+              onUpsertCounterparty={onUpsertCounterparty}
+              onOpenCounterparties={onOpenCounterparties}
+              productionRequests={productionRequests}
+              keeperId={keeperId}
+              keeperName={keeperName}
+              onCancel={() => setDocType(null)}
+              onPost={(doc) => {
+                const result = onPostDocument(doc)
+                if (result.ok) setDocType(null)
+                return result
+              }}
+              onPostTransfer={
+                onPostTransfer
+                  ? (doc) => {
+                      const result = onPostTransfer(doc)
+                      if (result.ok) setDocType(null)
+                      return result
+                    }
+                  : undefined
+              }
+              onSaveDraft={
+                onSaveDocumentDraft
+                  ? (doc) => {
+                      const result = onSaveDocumentDraft(doc)
+                      if (result.ok) setDocType(null)
+                      return result
+                    }
+                  : undefined
+              }
+              onMergeInvoiceRegistry={onMergeInvoiceRegistry}
+            />
+          )
         ) : (
           <form
             onSubmit={submitOther}

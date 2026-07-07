@@ -148,5 +148,8 @@ export function normalizeMonthSheet(sheet: MonthSheet): MonthSheet {
     comments: sheet.comments ?? {},
     substitutions: sheet.substitutions ?? {},
     factExtraHours: sheet.factExtraHours ?? {},
+    brigadierDays: sheet.brigadierDays ?? {},
+    dayTransfers: sheet.dayTransfers ?? {},
+    factHoursOverride: sheet.factHoursOverride ?? {},
   }
 }

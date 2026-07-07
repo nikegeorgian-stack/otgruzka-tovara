@@ -100,7 +100,15 @@ export function receivePurchaseOrderInStore(
     statusHistory:
       order.status === nextStatus
         ? order.statusHistory
-        : [...order.statusHistory, createStatusChange(order.status, nextStatus, `Приход ${number}`)],
+        : [
+            ...order.statusHistory,
+            createStatusChange(
+              order.status,
+              nextStatus,
+              `Приход ${number}`,
+              documentId,
+            ),
+          ],
     updatedAt: new Date().toISOString(),
   }
 

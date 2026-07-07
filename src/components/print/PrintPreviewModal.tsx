@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { fitPrintPages, resetPrintFit } from '@/lib/printFit'
 import { createPortal } from 'react-dom'
+import { useModalScope } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { formatMonthTitle } from '@/lib/dates'
 import { t } from '@/i18n'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
@@ -36,6 +38,13 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
   const { variant, brigades, printLocale, groupMode = 'brigade', structuralUnitIds } =
     config
   const printRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const { zIndex } = useModalScope({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    initialFocus: 'none',
+  })
   const stats = monthStats(sheet, store.employees, {
     brigades,
     structuralUnitIds,
@@ -88,7 +97,11 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
       : `${brigades.length} ${t(printLocale, 'print.brigadesCount')}`
 
   const content = (
-    <div className="print-modal-root fixed inset-0 z-[100] flex flex-col bg-stone-900/60">
+    <div
+      ref={panelRef}
+      className="print-modal-root fixed inset-0 flex flex-col bg-stone-900/60"
+      style={{ zIndex }}
+    >
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <div>
           <h2 className="text-lg font-bold">{t(printLocale, 'print.preview')}</h2>
@@ -166,7 +179,7 @@ export function PrintPreviewModal({ store, sheet, config, onClose, onBack }: Pro
     </div>
   )
 
-  return createPortal(content, document.body)
+  return createPortal(content, getModalPortalRoot())
 }
 
 type PageProps = {

@@ -10,6 +10,7 @@ type Props = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeUnit?: (brigade: string, unitId: string | null) => void
 }
 
 export function BrigadesManageModal({
@@ -19,6 +20,7 @@ export function BrigadesManageModal({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeUnit,
 }: Props) {
   const { t } = useI18n()
 
@@ -29,7 +31,6 @@ export function BrigadesManageModal({
       title={t('month.brigadesManage')}
       subtitle={t('settings.brigadesHint')}
       size="lg"
-      zIndex={120}
     >
       <div className="px-5 py-4">
         <BrigadesDirectoryPanel
@@ -39,6 +40,7 @@ export function BrigadesManageModal({
           onRenameBrigade={onRenameBrigade}
           onRemoveBrigade={onRemoveBrigade}
           onSetBrigadeNameKa={onSetBrigadeNameKa}
+          onSetBrigadeUnit={onSetBrigadeUnit}
         />
       </div>
     </AppDialog>

@@ -6,7 +6,12 @@ import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { WorkwearStore } from '@/lib/workwear/types'
 import type { ImportResult } from '@/lib/warehouse/importExport'
 import type { PostWorkwearIssueResult } from '@/lib/workwear/issue'
-import type { PostDocumentResult, CancelDocumentResult } from '@/lib/warehouse/documents'
+import type {
+  PostDocumentResult,
+  CancelDocumentResult,
+  UnpostDocumentResult,
+  SaveDraftInput,
+} from '@/lib/warehouse/documents'
 import type {
   StockMovement,
   WarehouseCategory,
@@ -14,6 +19,7 @@ import type {
   WarehouseItem,
   WarehouseLocation,
 } from '@/lib/warehouse/types'
+import type { UserViewDefaults, WarehouseViewDefaults } from '@/lib/viewDefaults/types'
 
 export type WarehousePageProps = {
   warehouse: WarehouseStore
@@ -57,6 +63,14 @@ export type WarehousePageProps = {
     documentId: string,
     args?: { reason?: string },
   ) => CancelDocumentResult
+  /** Сохранить документ черновиком (без движений) */
+  onSaveDocumentDraft?: (doc: SaveDraftInput) => PostDocumentResult
+  /** Провести существующий черновик/документ */
+  onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  /** Снять проведение (вернуть в черновик) */
+  onUnpostDocument?: (documentId: string) => UnpostDocumentResult
+  /** Удалить черновик документа */
+  onRemoveDocumentDraft?: (documentId: string) => UnpostDocumentResult
   onMergeInvoiceRegistry: (registry: import('@/lib/warehouse/types').GeorgianInvoice[]) => void
   onRunInventory: (args: {
     itemId: string
@@ -77,6 +91,11 @@ export type WarehousePageProps = {
     comment?: string
     lines: { itemId: string; quantity: number }[]
   }) => { applied: number; skipped: number }
+  onAcquireDocumentLock?: (
+    documentId: string,
+  ) => { ok: boolean; error?: string; lockedByName?: string }
+  onReleaseDocumentLock?: (documentId: string) => void
+  onQuickEditItem?: (item: WarehouseItem) => void
   onImportExcel: (file: File, warehouseId?: string) => Promise<ImportResult>
   onExportExcel: (warehouseId?: string) => void
   /** Выдача за день */
@@ -86,6 +105,8 @@ export type WarehousePageProps = {
   allowNegativeStock?: boolean
   /** Разрешено сторнирование документов */
   canCancelDocuments?: boolean
+  /** Снять проведение (только администратор) */
+  canUnpostDocuments?: boolean
   counterparties?: import('@/lib/counterparties/types').Counterparty[]
   onUpsertCounterparty?: (c: import('@/lib/counterparties/types').Counterparty) => void
   onOpenCounterparties?: () => void
@@ -175,6 +196,15 @@ export type WarehousePageProps = {
       issuedByName: string
     },
   ) => PostWorkwearIssueResult
+  /** Переход из раздела «Журналы» */
+  journalNav?: Extract<import('@/lib/journals/navigate').JournalNavTarget, { view: 'warehouse' }> | null
+  onJournalNavConsumed?: () => void
+  userWarehouseDefaults?: WarehouseViewDefaults
+  currentUserId?: string
+  onSaveViewDefaults?: <K extends keyof UserViewDefaults>(
+    viewId: K,
+    patch: NonNullable<UserViewDefaults[K]>,
+  ) => void
 }
 
 export type WarehouseTab =

@@ -1,7 +1,8 @@
 import { exportLabels } from '@/lib/export/labels'
 import { loadXlsx } from '@/lib/lazy/xlsx'
 import { dayDateKey, daysInMonth, formatMonthTitle, parseMonthKey } from './dates'
-import { calculateRowPay } from './payroll'
+import { calculateRowPay, isPayableInMonth } from './payroll'
+import { monthStatement, statementTotals } from './finance/calc'
 import { formatFactCellCode, getFactExtraHours } from './factExtra'
 import { getFactMark, rowStats } from './stats'
 import type { AppStore, DayCode, Locale } from './types'
@@ -104,7 +105,7 @@ export async function exportPayrollExcel(
   for (const row of sheet.rows) {
     if (!row.employeeId) continue
     const emp = store.employees.find((e) => e.id === row.employeeId)
-    if (!emp?.active) continue
+    if (!emp || !isPayableInMonth(emp, month)) continue
     const pay = calculateRowPay(emp, sheet, row.id, y, m)
     rows.push([
       emp.fullName,
@@ -120,6 +121,112 @@ export async function exportPayrollExcel(
   const ws = XLSX.utils.aoa_to_sheet(rows)
   XLSX.utils.book_append_sheet(wb, ws, formatMonthTitle(month, locale).slice(0, 31))
   XLSX.writeFile(wb, `fibercell-pay-${month}.xlsx`)
+}
+
+const STATEMENT_HEADERS: Record<Locale, string[]> = {
+  ru: [
+    'ФИО RU',
+    'ФИО GE',
+    'Бригада',
+    'График',
+    'Факт ч',
+    'База ₾',
+    'Ночь ₾',
+    'Сверхуроч ₾',
+    'Отпускные ₾',
+    'Больничные ₾',
+    'Начислено ₾',
+    'Премии ₾',
+    'Бригадирские ₾',
+    'Штрафы ₾',
+    'Аванс ₾',
+    'К выплате ₾',
+    'Выплачено ₾',
+    'Остаток ₾',
+  ],
+  ka: [
+    'სახელი RU',
+    'სახელი GE',
+    'ბრიგადა',
+    'გრაფიკი',
+    'ფაქ.სთ',
+    'ბაზა ₾',
+    'ღამის ₾',
+    'ზეგანაკვ. ₾',
+    'შვებულება ₾',
+    'ბიულეტენი ₾',
+    'დარიცხული ₾',
+    'პრემია ₾',
+    'ბრიგადირის ₾',
+    'ჯარიმა ₾',
+    'ავანსი ₾',
+    'გასაცემი ₾',
+    'გაცემული ₾',
+    'ნაშთი ₾',
+  ],
+}
+
+/** Расширенная расчётная ведомость: начисления с разбивкой, премии/штрафы, аванс, к выплате. */
+export async function exportPayrollStatementExcel(
+  store: AppStore,
+  month: string,
+  locale: Locale,
+): Promise<void> {
+  const XLSX = await loadXlsx()
+  const stmt = monthStatement(store, month)
+  if (!stmt.length) return
+  const totals = statementTotals(stmt)
+
+  const rows: (string | number)[][] = [STATEMENT_HEADERS[locale]]
+  for (const r of stmt) {
+    rows.push([
+      r.emp.fullName,
+      r.emp.nameKa ?? '',
+      r.brigade,
+      r.schedule,
+      r.factHours,
+      r.breakdown.base,
+      r.breakdown.night,
+      r.breakdown.overtime,
+      r.breakdown.vacation,
+      r.breakdown.sick,
+      r.accrued,
+      r.bonus,
+      r.brigadierBonus,
+      r.penalty,
+      r.advance,
+      r.net,
+      r.paid,
+      r.remaining,
+    ])
+  }
+  const totalLabel = locale === 'ka' ? 'სულ' : 'Итого'
+  rows.push([
+    totalLabel,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    totals.accrued,
+    totals.bonus,
+    totals.brigadierBonus,
+    totals.penalty,
+    totals.advance,
+    totals.net,
+    totals.paid,
+    totals.remaining,
+  ])
+
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  ws['!cols'] = STATEMENT_HEADERS[locale].map((h, i) => ({ wch: i < 2 ? 22 : Math.max(8, h.length + 1) }))
+  XLSX.utils.book_append_sheet(wb, ws, formatMonthTitle(month, locale).slice(0, 31))
+  XLSX.writeFile(wb, `fibercell-statement-${month}.xlsx`)
 }
 
 export async function exportBrigadeReportExcel(
@@ -138,7 +245,7 @@ export async function exportBrigadeReportExcel(
   for (const row of sheet.rows) {
     if (!row.employeeId) continue
     const emp = store.employees.find((e) => e.id === row.employeeId)
-    if (!emp?.active) continue
+    if (!emp || !isPayableInMonth(emp, month)) continue
     const pay = calculateRowPay(emp, sheet, row.id, y, m)
     const b = emp.brigade || '—'
     const cur = byBrigade.get(b) ?? { hours: 0, amount: 0 }

@@ -1,6 +1,11 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
-import { getFirestore, type Firestore } from 'firebase/firestore'
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore'
 
 export type FstFirebaseConfig = {
   apiKey: string
@@ -48,7 +53,14 @@ export function getFirebaseAuth(): Auth {
   return auth
 }
 
+/** IndexedDB-кэш Firestore — быстрее повторные чтения, меньше ощущаемый пинг. */
 export function getFirestoreDb(): Firestore {
-  if (!db) db = getFirestore(getFirebaseApp())
+  if (!db) {
+    db = initializeFirestore(getFirebaseApp(), {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    })
+  }
   return db
 }

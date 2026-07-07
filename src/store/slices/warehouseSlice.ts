@@ -8,12 +8,22 @@ import {
   postWarehouseDocument,
   postWarehouseTransfer,
   cancelWarehouseDocument,
+  saveWarehouseDocumentDraft,
+  postExistingWarehouseDocument,
+  unpostWarehouseDocument,
+  removeWarehouseDraftDocument,
   postInventoryRevision,
   postOpeningBalances,
   runInventoryCount,
   type PostDocumentResult,
   type CancelDocumentResult,
+  type UnpostDocumentResult,
+  type SaveDraftInput,
 } from '@/lib/warehouse/documents'
+import {
+  acquireWarehouseDocumentLock as acquireDocLockInStore,
+  releaseWarehouseDocumentLock as releaseDocLockInStore,
+} from '@/lib/warehouse/documentLock'
 import {
   adjustDailyIssueLine,
   openOrResumeDailyIssue,
@@ -218,6 +228,78 @@ export function createWarehouseSlice({ setStore, getStore }: StoreSliceDeps) {
         return out.store
       })
       return result
+    },
+
+    saveWarehouseDocDraft(
+      doc: SaveDraftInput,
+      actor?: { actorId?: string; actorName?: string },
+    ): PostDocumentResult {
+      let result: PostDocumentResult = { ok: false, error: 'unknown' }
+      const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
+      patchWarehouse(setStore, (w) => {
+        const out = saveWarehouseDocumentDraft(w, enriched, actor)
+        result = out.result
+        return out.store
+      })
+      return result
+    },
+
+    postExistingWarehouseDoc(
+      documentId: string,
+      actor?: { actorId?: string; actorName?: string },
+    ): PostDocumentResult {
+      let result: PostDocumentResult = { ok: false, error: 'unknown' }
+      patchWarehouse(setStore, (w) => {
+        const out = postExistingWarehouseDocument(w, documentId, actor)
+        result = out.result
+        return out.store
+      })
+      return result
+    },
+
+    unpostWarehouseDoc(
+      documentId: string,
+      actor?: { actorId?: string; actorName?: string },
+    ): UnpostDocumentResult {
+      let result: UnpostDocumentResult = { ok: false, error: 'unknown' }
+      patchWarehouse(setStore, (w) => {
+        const out = unpostWarehouseDocument(w, documentId, actor)
+        result = out.result
+        return out.store
+      })
+      return result
+    },
+
+    removeWarehouseDraft(
+      documentId: string,
+      actor?: { actorId?: string; actorName?: string },
+    ): UnpostDocumentResult {
+      let result: UnpostDocumentResult = { ok: false, error: 'unknown' }
+      patchWarehouse(setStore, (w) => {
+        const out = removeWarehouseDraftDocument(w, documentId, actor)
+        result = out.result
+        return out.store
+      })
+      return result
+    },
+
+    acquireWarehouseDocumentLock(
+      documentId: string,
+      actor: { actorId: string; actorName?: string },
+    ): { ok: boolean; error?: string; lockedByName?: string } {
+      let result: { ok: boolean; error?: string; lockedByName?: string } = { ok: false, error: 'unknown' }
+      patchWarehouse(setStore, (w) => {
+        const out = acquireDocLockInStore(w, documentId, actor)
+        result = out.result.ok
+          ? { ok: true }
+          : { ok: false, error: out.result.error, lockedByName: out.result.lockedByName }
+        return out.store
+      })
+      return result
+    },
+
+    releaseWarehouseDocumentLock(documentId: string, actorId?: string) {
+      patchWarehouse(setStore, (w) => releaseDocLockInStore(w, documentId, actorId))
     },
 
     postWarehouseTransfer(

@@ -35,7 +35,13 @@ export function resolveWorkshopMasterBrigades(
   store: AppStore,
   userLogin: string | undefined,
   linkedEmployeeId?: string | null,
+  configuredBrigades?: string[] | null,
 ): string[] {
+  if (configuredBrigades?.length) {
+    const mapped = configuredBrigades.filter((b) => store.brigades.includes(b))
+    if (mapped.length > 0) return mapped
+  }
+
   if (linkedEmployeeId) {
     const byBrigadier = store.brigades.filter(
       (brigade) => store.brigadiers?.[brigade] === linkedEmployeeId,

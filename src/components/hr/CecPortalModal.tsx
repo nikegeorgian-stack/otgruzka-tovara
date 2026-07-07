@@ -113,7 +113,6 @@ export function CecPortalModal({ open, emp, onClose, onApply }: Props) {
       title={t('hr.cec.portal.title')}
       subtitle={t('hr.cec.portal.subtitle')}
       size="xl"
-      zIndex={140}
       blockBackdropClose
       footer={
         <div className="flex flex-wrap justify-end gap-2">

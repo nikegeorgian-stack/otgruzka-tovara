@@ -1,4 +1,5 @@
 import { createEmptyBrigadeRow } from './brigadeRows'
+import { employeeActiveInMonth } from './hr/employeeActive'
 import { buildPlanRow } from './schedule'
 import type { AppStore, MonthSheet } from './types'
 
@@ -13,8 +14,8 @@ export function mergeBrigadeIntoSheet(
   let order = startOrder
 
   const inBrigade = employees
-    .filter((e) => e.active && e.brigade === brigade)
-    .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber, 'ru'))
+    .filter((e) => employeeActiveInMonth(e, sheet.month) && e.brigade === brigade)
+    .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber, 'ru', { numeric: true }))
 
   const newRows = []
   for (const emp of inBrigade) {
@@ -100,7 +101,13 @@ export function renameBrigadeInStore(
     ]),
   )
 
-  return { ...store, brigades, employees, months }
+  let brigadeUnits = store.brigadeUnits
+  if (brigadeUnits && oldName in brigadeUnits && trimmed !== oldName) {
+    const { [oldName]: unitId, ...rest } = brigadeUnits
+    brigadeUnits = unitId ? { ...rest, [trimmed]: unitId } : rest
+  }
+
+  return { ...store, brigades, employees, months, brigadeUnits }
 }
 
 export function removeBrigadeFromStore(store: AppStore, name: string): AppStore {
@@ -136,17 +143,37 @@ export function removeBrigadeFromStore(store: AppStore, name: string): AppStore 
       const factExtraHours = Object.fromEntries(
         Object.entries(sheet.factExtraHours ?? {}).filter(([k]) => !byRowKey(k)),
       )
+      const brigadierDays = Object.fromEntries(
+        Object.entries(sheet.brigadierDays ?? {}).filter(([k]) => !byRowKey(k)),
+      )
+      const dayTransfers = Object.fromEntries(
+        Object.entries(sheet.dayTransfers ?? {}).filter(
+          ([, tr]) => !dropIds.has(tr.fromRowId) && !dropIds.has(tr.toRowId),
+        ),
+      )
       return [
         key,
-        { ...sheet, rows, plan, fact, factOverrides, comments, substitutions, factExtraHours },
+        {
+          ...sheet,
+          rows,
+          plan,
+          fact,
+          factOverrides,
+          comments,
+          substitutions,
+          factExtraHours,
+          brigadierDays,
+          dayTransfers,
+        },
       ]
     }),
   )
 
   const { [name]: _removedKa, ...brigadeNamesKa } = store.brigadeNamesKa
   const { [name]: _removedBrigadier, ...brigadiers } = store.brigadiers
+  const { [name]: _removedUnit, ...brigadeUnits } = store.brigadeUnits ?? {}
 
-  return { ...store, brigades, brigadeNamesKa, brigadiers, employees, months }
+  return { ...store, brigades, brigadeNamesKa, brigadiers, brigadeUnits, employees, months }
 }
 
 export function brigadeEmployeeCount(store: AppStore, name: string): number {

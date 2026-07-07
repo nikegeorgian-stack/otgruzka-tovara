@@ -1,8 +1,14 @@
 import { appendWarehouseAudit } from './audit'
 import { isDocumentNumberTaken, nextReversalNumber } from './docNumbering'
 import { documentCanBeCancelled, validateWarehouseDocumentInput } from './documentValidation'
-import { toBaseQty } from './stock'
+import { computeItemBalance, toBaseQty } from './stock'
 import type { StockMovement, WarehouseDocument, WarehouseStore } from './types'
+
+export function warehouseDocumentKindLabel(type: WarehouseDocument['type']): string {
+  if (type === 'receipt') return 'Приход'
+  if (type === 'issue') return 'Расход'
+  return 'Ревизия'
+}
 
 export type PostDocumentResult =
   | { ok: true; documentId: string }
@@ -11,6 +17,75 @@ export type PostDocumentResult =
 export type CancelDocumentResult =
   | { ok: true; reversalIds: string[] }
   | { ok: false; error: string }
+
+export type UnpostDocumentResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Сформировать движения склада по строкам проведённого документа.
+ * Движения помечаются `documentId`, что позволяет снимать проведение
+ * и перепроводить документ без дублей.
+ */
+function buildDocumentMovements(
+  store: WarehouseStore,
+  full: WarehouseDocument,
+): StockMovement[] {
+  const itemMap = new Map(store.items.map((i) => [i.id, i]))
+  const createdAt = new Date().toISOString()
+
+  if (full.type === 'inventory') {
+    const movements: StockMovement[] = []
+    for (const line of full.lines) {
+      const item = itemMap.get(line.itemId)
+      if (!item) continue
+      const book =
+        line.bookQty ??
+        computeItemBalance(line.itemId, store.movements, full.warehouseId).balance
+      const delta = line.quantity - book
+      if (Math.abs(delta) < 1e-9) continue
+      movements.push({
+        id: crypto.randomUUID(),
+        itemId: line.itemId,
+        warehouseId: full.warehouseId,
+        type: 'inventory',
+        quantity: delta,
+        date: full.date,
+        documentId: full.id,
+        documentNo: full.number,
+        comment: full.comment,
+        createdAt,
+      })
+    }
+    return movements
+  }
+
+  const isReceipt = full.type === 'receipt'
+  return full.lines.map((line) => {
+    const item = itemMap.get(line.itemId)
+    const qty = item ? toBaseQty(item, line.quantity, line.inputUnit) : line.quantity
+    // Цена указывается за единицу ввода — приводим к базовой единице.
+    const unitCost =
+      isReceipt && line.unitPrice != null && qty > 0
+        ? (line.unitPrice * line.quantity) / qty
+        : undefined
+    return {
+      id: crypto.randomUUID(),
+      itemId: line.itemId,
+      warehouseId: full.warehouseId,
+      type: full.type,
+      quantity: qty,
+      date: full.date,
+      documentId: full.id,
+      documentNo: full.number,
+      brigade: full.brigade,
+      comment: full.comment,
+      inputUnit: line.inputUnit,
+      unitCost,
+      batchNo: isReceipt ? line.batchNo : undefined,
+      expiryDate: isReceipt ? line.expiryDate : undefined,
+      createdAt,
+    }
+  })
+}
 
 export function isInvoiceAlreadyPosted(
   store: WarehouseStore,
@@ -53,36 +128,7 @@ export function postWarehouseDocument(
     createdAt,
   }
 
-  const itemMap = new Map(store.items.map((i) => [i.id, i]))
-  const isReceipt = full.type === 'receipt'
-  const movements: StockMovement[] = full.lines.map((line) => {
-    const item = itemMap.get(line.itemId)
-    const qty = item
-      ? toBaseQty(item, line.quantity, line.inputUnit)
-      : line.quantity
-    // Цена указывается за единицу ввода — приводим к базовой единице.
-    const unitCost =
-      isReceipt && line.unitPrice != null && qty > 0
-        ? (line.unitPrice * line.quantity) / qty
-        : undefined
-    return {
-      id: crypto.randomUUID(),
-      itemId: line.itemId,
-      warehouseId: full.warehouseId,
-      type: full.type,
-      quantity: qty,
-      date: full.date,
-      documentId: id,
-      documentNo: full.number,
-      brigade: full.brigade,
-      comment: full.comment,
-      inputUnit: line.inputUnit,
-      unitCost,
-      batchNo: isReceipt ? line.batchNo : undefined,
-      expiryDate: isReceipt ? line.expiryDate : undefined,
-      createdAt,
-    }
-  })
+  const movements: StockMovement[] = buildDocumentMovements(store, full)
 
   let next: WarehouseStore = {
     ...store,
@@ -93,13 +139,186 @@ export function postWarehouseDocument(
     next = appendWarehouseAudit(next, {
       action: full.reversesDocumentId ? 'document_cancel' : 'document_post',
       detail: full.reversesDocumentId
-        ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${full.type === 'receipt' ? 'Приход' : 'Расход'} №${full.number}`
-        : `${full.type === 'receipt' ? 'Приход' : 'Расход'} №${full.number} · ${full.lines.length} поз.`,
+        ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${warehouseDocumentKindLabel(full.type)} №${full.number}`
+        : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.`,
       actorId: full.keeperId,
       actorName: full.keeperName,
     })
   }
   return { store: next, result: { ok: true, documentId: id } }
+}
+
+export type SaveDraftInput = Omit<WarehouseDocument, 'id' | 'createdAt' | 'status'> & {
+  id?: string
+}
+
+/**
+ * Сохранить документ как ЧЕРНОВИК — без движений и без изменения остатков.
+ * Поддерживает создание нового и обновление существующего черновика.
+ * Проведённый документ так редактировать нельзя (сначала снять проведение).
+ */
+export function saveWarehouseDocumentDraft(
+  store: WarehouseStore,
+  doc: SaveDraftInput,
+  actor?: { actorId?: string; actorName?: string },
+): { store: WarehouseStore; result: PostDocumentResult } {
+  const existing = doc.id ? store.documents.find((d) => d.id === doc.id) : undefined
+  if (existing && existing.status === 'posted') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyPosted' } }
+  }
+  if (doc.number?.trim() && isDocumentNumberTaken(store.documents, doc.number, doc.id)) {
+    return {
+      store,
+      result: {
+        ok: false,
+        error: 'warehouse.doc.errDuplicateNumber',
+        fieldErrors: { number: 'warehouse.doc.errDuplicateNumber' },
+      },
+    }
+  }
+
+  const id = doc.id ?? crypto.randomUUID()
+  const createdAt = existing?.createdAt ?? new Date().toISOString()
+  const { id: _omitId, ...rest } = doc
+  const full: WarehouseDocument = {
+    ...(existing ?? {}),
+    ...rest,
+    id,
+    createdAt,
+    status: 'draft',
+  }
+
+  const documents = existing
+    ? store.documents.map((d) => (d.id === id ? full : d))
+    : [...store.documents, full]
+
+  let next: WarehouseStore = { ...store, documents }
+  // Логируем только создание черновика, чтобы не засорять аудит каждой правкой.
+  if (!existing) {
+    next = appendWarehouseAudit(next, {
+      action: 'document_draft',
+      detail: `Черновик ${warehouseDocumentKindLabel(full.type).toLowerCase()} №${full.number || '—'} · ${full.lines.length} поз.`,
+      actorId: actor?.actorId,
+      actorName: actor?.actorName,
+    })
+  }
+  return { store: next, result: { ok: true, documentId: id } }
+}
+
+/**
+ * Провести существующий документ (черновик или перепровести проведённый):
+ * удалить прежние движения этого документа, заново сформировать движения,
+ * выставить статус «Проведён». Защита от дублей — по `documentId`.
+ */
+export function postExistingWarehouseDocument(
+  store: WarehouseStore,
+  documentId: string,
+  actor?: { actorId?: string; actorName?: string },
+): { store: WarehouseStore; result: PostDocumentResult } {
+  const doc = store.documents.find((d) => d.id === documentId)
+  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
+  if (doc.status === 'cancelled') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyCancelled' } }
+  }
+
+  const { status: _status, ...docForValidation } = doc
+  const validation = validateWarehouseDocumentInput(store, docForValidation, documentId)
+  if (!validation.ok) {
+    const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
+    return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
+  }
+
+  const movements = buildDocumentMovements(store, doc)
+  const cleaned = store.movements.filter((m) => m.documentId !== documentId)
+  const now = new Date().toISOString()
+
+  const documents = store.documents.map((d) =>
+    d.id === documentId
+      ? {
+          ...d,
+          status: 'posted' as const,
+          postedAt: now,
+          postedBy: actor?.actorId,
+          postedByName: actor?.actorName,
+          lockedBy: undefined,
+          lockedByName: undefined,
+          lockedAt: undefined,
+        }
+      : d,
+  )
+
+  let next: WarehouseStore = {
+    ...store,
+    documents,
+    movements: [...cleaned, ...movements],
+  }
+  next = appendWarehouseAudit(next, {
+    action: 'document_post',
+    detail: `${warehouseDocumentKindLabel(doc.type)} №${doc.number} · ${doc.lines.length} поз. проведён`,
+    actorId: actor?.actorId,
+    actorName: actor?.actorName,
+  })
+  return { store: next, result: { ok: true, documentId } }
+}
+
+/**
+ * Снять проведение («Отменить проведение»): удалить движения документа и
+ * вернуть его в черновик (можно редактировать и провести заново).
+ * Сторно-, замес- и парные документы так снимать нельзя — для них отмена.
+ */
+export function unpostWarehouseDocument(
+  store: WarehouseStore,
+  documentId: string,
+  actor?: { actorId?: string; actorName?: string },
+): { store: WarehouseStore; result: UnpostDocumentResult } {
+  const doc = store.documents.find((d) => d.id === documentId)
+  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
+  if (doc.status !== 'posted') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errNotPosted' } }
+  }
+  if (!documentCanBeCancelled(doc) || doc.transferPairId) {
+    return { store, result: { ok: false, error: 'warehouse.doc.errCannotUnpost' } }
+  }
+
+  const documents = store.documents.map((d) =>
+    d.id === documentId
+      ? { ...d, status: 'draft' as const, postedAt: undefined, postedBy: undefined, postedByName: undefined }
+      : d,
+  )
+  const movements = store.movements.filter((m) => m.documentId !== documentId)
+
+  let next: WarehouseStore = { ...store, documents, movements }
+  next = appendWarehouseAudit(next, {
+    action: 'document_unpost',
+    detail: `Снято проведение ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number}`,
+    actorId: actor?.actorId,
+    actorName: actor?.actorName,
+  })
+  return { store: next, result: { ok: true } }
+}
+
+/** Удалить ЧЕРНОВИК документа (только не проведённый, без движений). */
+export function removeWarehouseDraftDocument(
+  store: WarehouseStore,
+  documentId: string,
+  actor?: { actorId?: string; actorName?: string },
+): { store: WarehouseStore; result: UnpostDocumentResult } {
+  const doc = store.documents.find((d) => d.id === documentId)
+  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
+  if (doc.status !== 'draft') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errNotDraft' } }
+  }
+  let next: WarehouseStore = {
+    ...store,
+    documents: store.documents.filter((d) => d.id !== documentId),
+  }
+  next = appendWarehouseAudit(next, {
+    action: 'document_draft',
+    detail: `Удалён черновик ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number || '—'}`,
+    actorId: actor?.actorId,
+    actorName: actor?.actorName,
+  })
+  return { store: next, result: { ok: true } }
 }
 
 export function runInventoryCount(
@@ -345,11 +564,92 @@ export function postWarehouseTransfer(
   })
 }
 
+function cancelInventoryDocument(
+  store: WarehouseStore,
+  doc: WarehouseDocument,
+  args: { cancelledBy?: string; cancelledByName?: string; reason?: string },
+): { store: WarehouseStore; result: CancelDocumentResult } {
+  let reversalNumber = nextReversalNumber(doc.number)
+  let suffix = 1
+  while (isDocumentNumberTaken(store.documents, reversalNumber)) {
+    suffix += 1
+    reversalNumber = `${nextReversalNumber(doc.number)}${suffix > 1 ? suffix : ''}`
+  }
+
+  const reversalId = crypto.randomUUID()
+  const now = new Date().toISOString()
+  const originalMovements = store.movements.filter(
+    (m) => m.documentId === doc.id && m.type === 'inventory',
+  )
+  const reversalMovements: StockMovement[] = originalMovements.map((m) => ({
+    ...m,
+    id: crypto.randomUUID(),
+    quantity: -m.quantity,
+    documentId: reversalId,
+    documentNo: reversalNumber,
+    comment: [`Сторно №${doc.number}`, args.reason].filter(Boolean).join(' · '),
+    createdAt: now,
+  }))
+
+  const reversalDoc: WarehouseDocument = {
+    id: reversalId,
+    type: 'inventory',
+    number: reversalNumber,
+    date: new Date().toISOString().slice(0, 10),
+    warehouseId: doc.warehouseId,
+    purpose: 'other',
+    comment: [`Сторно №${doc.number}`, args.reason].filter(Boolean).join(' · '),
+    lines: [],
+    keeperId: args.cancelledBy,
+    keeperName: args.cancelledByName,
+    reversesDocumentId: doc.id,
+    docRole: 'reversal',
+    status: 'posted',
+    postedAt: now,
+    postedBy: args.cancelledBy,
+    postedByName: args.cancelledByName,
+    createdAt: now,
+  }
+
+  const nextStore: WarehouseStore = {
+    ...store,
+    documents: [
+      ...store.documents.map((d) =>
+        d.id === doc.id
+          ? {
+              ...d,
+              status: 'cancelled' as const,
+              cancelledAt: now,
+              cancelledBy: args.cancelledBy,
+              cancelledByName: args.cancelledByName,
+              reversalDocumentId: reversalId,
+            }
+          : d,
+      ),
+      reversalDoc,
+    ],
+    movements: [...store.movements, ...reversalMovements],
+  }
+
+  const withAudit = appendWarehouseAudit(nextStore, {
+    action: 'document_cancel',
+    detail: `Отмена ревизии №${doc.number} · сторно №${reversalNumber}`,
+    actorId: args.cancelledBy,
+    actorName: args.cancelledByName,
+  })
+
+  return { store: withAudit, result: { ok: true, reversalIds: [reversalId] } }
+}
+
 function cancelSingleDocument(
   store: WarehouseStore,
   doc: WarehouseDocument,
   args: { cancelledBy?: string; cancelledByName?: string; reason?: string },
 ): { store: WarehouseStore; result: CancelDocumentResult } {
+  if (doc.type === 'inventory') {
+    return cancelInventoryDocument(store, doc, args)
+  }
+
   const reversalType = doc.type === 'receipt' ? 'issue' : 'receipt'
   let reversalNumber = nextReversalNumber(doc.number)
   let suffix = 1
@@ -396,7 +696,7 @@ function cancelSingleDocument(
 
   const withAudit = appendWarehouseAudit(nextStore, {
     action: 'document_cancel',
-    detail: `Отмена ${doc.type === 'receipt' ? 'прихода' : 'расхода'} №${doc.number} · сторно №${reversalNumber}`,
+    detail: `Отмена ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number} · сторно №${reversalNumber}`,
     actorId: args.cancelledBy,
     actorName: args.cancelledByName,
   })

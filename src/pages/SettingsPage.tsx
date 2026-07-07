@@ -8,18 +8,24 @@ import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { listDailyBackups, restoreDailyBackup, saveBackupToFolder } from '@/lib/backup'
 import { formatMonthTitle, monthKey, shiftMonth } from '@/lib/dates'
-import { isMonthArchived, listMonthKeys } from '@/lib/monthManage'
+import {
+  isMonthArchived,
+  isMonthClosed,
+  listMonthKeys,
+  monthClosureInfo,
+} from '@/lib/monthManage'
 import { exportToJson } from '@/lib/storage'
 import { canManageAccess } from '@/lib/access/permissions'
 import type { AccessRoleId } from '@/lib/access/types'
 import type { AppUser } from '@/lib/access/types'
 import type { AppStore, PrintSignatures, ViewId } from '@/lib/types'
+import { MAX_AUDIT_ENTRIES } from '@/lib/types'
 import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
 
 type Props = {
   store: AppStore
   currentUser: AppUser | null
-  onUpsertAppUser: (input: UpsertAppUserInput) => Promise<void>
+  onUpsertAppUser: (input: UpsertAppUserInput) => Promise<{ allowlistSyncFailed?: boolean }>
   onRemoveAppUser: (id: string) => void
   onSetRoleViews: (roleId: AccessRoleId, views: ViewId[]) => void
   onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
@@ -28,6 +34,9 @@ type Props = {
   onAddMonth: (month: string) => void
   onRemoveMonth: (month: string) => void
   onArchiveMonth: (month: string, archived: boolean) => void
+  onSetMonthClosed: (month: string, closed: boolean) => void
+  onSyncMonthRosterFromHr?: (month: string) => void
+  canReopenMonth?: boolean
   onUpdateSettings: (patch: Partial<AppStore['settings']>) => void
   onRestoreTrashEmployee: (deletedAt: string) => void
   onRestoreTrashMonth: (deletedAt: string) => void
@@ -48,6 +57,9 @@ export function SettingsPage({
   onAddMonth,
   onRemoveMonth,
   onArchiveMonth,
+  onSetMonthClosed,
+  onSyncMonthRosterFromHr,
+  canReopenMonth = false,
   onUpdateSettings,
   onRestoreTrashEmployee,
   onRestoreTrashMonth,
@@ -57,6 +69,10 @@ export function SettingsPage({
 }: Props) {
   const { t, tf, locale, setLocale } = useI18n()
   const { confirm } = useConfirm()
+  const auditCount = store.auditLog.length
+  const auditFillPct = Math.round((auditCount / MAX_AUDIT_ENTRIES) * 100)
+  const auditNearCap = auditCount >= MAX_AUDIT_ENTRIES * 0.9
+  const auditFull = auditCount >= MAX_AUDIT_ENTRIES
   const [newMonth, setNewMonth] = useState(() => {
     const keys = listMonthKeys(store)
     const last = keys[keys.length - 1]
@@ -134,6 +150,32 @@ export function SettingsPage({
     }
   }
 
+  const archiveBootstrapMonth = monthKey(2026, 6)
+
+  function handleSyncRoster(month: string) {
+    if (!onSyncMonthRosterFromHr) return
+    try {
+      onSyncMonthRosterFromHr(month)
+      showNotice('success', t('settings.rosterSynced'))
+    } catch (err) {
+      showNotice('error', monthErrorMessage(err))
+    }
+  }
+
+  function handleBootstrapArchiveMonth() {
+    try {
+      if (!store.months[archiveBootstrapMonth]) {
+        onAddMonth(archiveBootstrapMonth)
+      }
+      onSyncMonthRosterFromHr?.(archiveBootstrapMonth)
+      showNotice('success', tf('settings.archiveBootstrapDone', {
+        month: formatMonthTitle(archiveBootstrapMonth, locale),
+      }))
+    } catch (err) {
+      showNotice('error', monthErrorMessage(err))
+    }
+  }
+
   return (
     <PageLayout className="gap-8">
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
@@ -150,6 +192,8 @@ export function SettingsPage({
         <AccessAdminPanel
           access={store.access}
           employees={store.employees}
+          brigades={store.brigades}
+          webMode={import.meta.env.VITE_FST_WEB === 'true'}
           currentUser={currentUser}
           onUpsertUser={onUpsertAppUser}
           onRemoveUser={onRemoveAppUser}
@@ -356,11 +400,36 @@ export function SettingsPage({
         </section>
       )}
 
-      {store.auditLog.length > 0 && (
+      {(store.auditLog.length > 0 || auditNearCap) && (
         <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
-            {t('settings.audit')}
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+              {t('settings.audit')}
+            </h3>
+            <span
+              className={`rounded-sm px-2 py-0.5 text-xs font-semibold ${
+                auditFull
+                  ? 'bg-red-100 text-red-800'
+                  : auditNearCap
+                    ? 'bg-amber-100 text-amber-900'
+                    : 'bg-stone-100 text-stone-600'
+              }`}
+            >
+              {tf('settings.auditFill', {
+                count: String(auditCount),
+                max: String(MAX_AUDIT_ENTRIES),
+                pct: String(auditFillPct),
+              })}
+            </span>
+          </div>
+          {auditNearCap && (
+            <p
+              className={`mt-2 text-sm ${auditFull ? 'text-red-700' : 'text-amber-800'}`}
+            >
+              {auditFull ? t('settings.auditFull') : t('settings.auditNearCap')}
+            </p>
+          )}
+          {store.auditLog.length > 0 && (
           <div className="mt-3 max-h-48 overflow-auto text-xs">
             <table className="min-w-full">
               <tbody>
@@ -376,6 +445,7 @@ export function SettingsPage({
               </tbody>
             </table>
           </div>
+          )}
         </section>
       )}
 
@@ -406,6 +476,30 @@ export function SettingsPage({
         </div>
       </section>
 
+      <section className="rounded-sm border border-sky-200 bg-sky-50/60 p-5 shadow-sm">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-sky-900">
+          {t('settings.archiveBootstrapTitle')}
+        </h3>
+        <p className="mt-2 text-sm text-stone-600">{t('settings.archiveBootstrapHint')}</p>
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-stone-600">
+          <li>{t('settings.archiveBootstrapStep1')}</li>
+          <li>{t('settings.archiveBootstrapStep2')}</li>
+          <li>{t('settings.archiveBootstrapStep3')}</li>
+          <li>{t('settings.archiveBootstrapStep4')}</li>
+        </ol>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
+            onClick={handleBootstrapArchiveMonth}
+          >
+            {tf('settings.archiveBootstrapAction', {
+              month: formatMonthTitle(archiveBootstrapMonth, locale),
+            })}
+          </button>
+        </div>
+      </section>
+
       <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.months')}
@@ -417,6 +511,7 @@ export function SettingsPage({
             <thead className="text-left text-xs uppercase text-stone-500">
               <tr>
                 <th className="px-3 py-2">{t('settings.colMonth')}</th>
+                <th className="px-3 py-2">{t('settings.colClosed')}</th>
                 <th className="px-3 py-2">{t('settings.colArchive')}</th>
                 <th className="px-3 py-2 text-right">{t('settings.colActions')}</th>
               </tr>
@@ -424,14 +519,43 @@ export function SettingsPage({
             <tbody>
               {months.map((month) => {
                 const archived = isMonthArchived(store, month)
+                const closed = isMonthClosed(store, month)
+                const closure = monthClosureInfo(store, month)
+                const lockToggleDisabled = closed && !canReopenMonth
                 return (
                   <tr key={month} className="border-t border-grid">
                     <td className="px-3 py-2 font-medium capitalize">
                       {formatMonthTitle(month, locale)}
+                      {closed && (
+                        <span className="ml-2 rounded-sm bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                          🔒 {t('month.closed')}
+                        </span>
+                      )}
                       {archived && (
                         <span className="ml-2 rounded-sm bg-stone-200 px-2 py-0.5 text-[10px] font-semibold uppercase text-stone-600">
                           {t('month.archive')}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <label
+                        className={`inline-flex items-center gap-2 text-xs ${
+                          lockToggleDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                        }`}
+                        title={lockToggleDisabled ? t('month.closedReopenAdmin') : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={closed}
+                          disabled={lockToggleDisabled}
+                          onChange={(e) => onSetMonthClosed(month, e.target.checked)}
+                        />
+                        {t('settings.closeMonth')}
+                      </label>
+                      {closed && closure?.byName && (
+                        <div className="mt-0.5 text-[10px] text-stone-500">
+                          {closure.byName} · {closure.at ? closure.at.slice(0, 10) : ''}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-2">
@@ -445,19 +569,33 @@ export function SettingsPage({
                       </label>
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="rounded-sm border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={archived}
-                        title={
-                          archived
-                            ? t('settings.unarchiveToRemove')
-                            : t('settings.removeMonthTitle')
-                        }
-                        onClick={() => handleRemoveMonth(month)}
-                      >
-                        {t('common.delete')}
-                      </button>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {onSyncMonthRosterFromHr && (
+                          <button
+                            type="button"
+                            className="rounded-sm border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-50"
+                            title={t('settings.syncRosterHint')}
+                            onClick={() => handleSyncRoster(month)}
+                          >
+                            {t('settings.syncRoster')}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="rounded-sm border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={archived || closed}
+                          title={
+                            closed
+                              ? t('month.closedEditBlocked')
+                              : archived
+                                ? t('settings.unarchiveToRemove')
+                                : t('settings.removeMonthTitle')
+                          }
+                          onClick={() => handleRemoveMonth(month)}
+                        >
+                          {t('common.delete')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

@@ -163,6 +163,7 @@ export function postProductionRequestToWarehouse(
   store = appendWarehouseAudit(store, {
     action: 'document_post',
     detail: `Производство ${request.date} линия ${request.lineId} → склад`,
+    productionRequestId: request.id,
   })
 
   return { ok: true, store }

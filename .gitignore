@@ -29,9 +29,15 @@ fst-web/.env
 fst-web/.env.production
 fst-web/.env.vercel
 fst-web/.env.production.vercel
+.env.vercel.*
 fst-web/dist
 .firebase
+
+# Vercel local link (recreated by vercel link)
 .vercel
+
+# Stale build artifacts
+live-index.html
 
 # Editor directories and files
 .vscode/*
@@ -43,12 +49,6 @@ fst-web/dist
 *.njsproj
 *.sln
 *.sw?
-
-.vercel
-
-.vercel
-
-.vercel
 
 # graphify knowledge graph (regenerated via: graphify update .)
 graphify-out/

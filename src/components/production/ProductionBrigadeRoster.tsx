@@ -164,7 +164,6 @@ export function ProductionBrigadeRoster({
             employees={pickableEmployees}
             value={pickId}
             compact
-            elevated
             placeholder={t('production.rosterAddExtraPlaceholder')}
             onChange={(id) => addExtra(id)}
           />

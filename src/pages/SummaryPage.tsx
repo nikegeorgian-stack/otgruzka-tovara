@@ -1,15 +1,47 @@
+import { useMemo } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
+import { ExecutiveKpiStrip } from '@/components/erp/ExecutiveKpiStrip'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { useI18n } from '@/context/I18nContext'
 import { formatMonthTitle } from '@/lib/dates'
+import { computeExecutiveKpis } from '@/lib/erp/executiveKpis'
 import { listMonthKeys } from '@/lib/monthManage'
 import { monthStats } from '@/lib/stats'
-import type { AppStore } from '@/lib/types'
+import type { AppStore, ViewId } from '@/lib/types'
 
-type Props = { store: AppStore }
+type Props = {
+  store: AppStore
+  onNavigate?: (view: ViewId) => void
+}
 
-export function SummaryPage({ store }: Props) {
+export function SummaryPage({ store, onNavigate }: Props) {
   const { t, locale, statsReadiness, statsControl } = useI18n()
+  const asOf = useAsOfSnapshot()
+  const {
+    enabled: asOfEnabled,
+    setEnabled: setAsOfEnabled,
+    date: asOfDate,
+    setDate: setAsOfDate,
+    time: asOfTime,
+    setTime: setAsOfTime,
+    asOfIso,
+  } = asOf
+  const erpKpis = useMemo(
+    () =>
+      computeExecutiveKpis(
+        {
+          procurement: store.procurement,
+          warehouse: store.warehouse,
+          months: store.months,
+          employees: store.employees,
+        },
+        new Date(),
+        asOfIso ?? undefined,
+      ),
+    [store.procurement, store.warehouse, store.months, store.employees, asOfIso],
+  )
   const months = listMonthKeys(store)
   const rows = months.map((m) => ({ month: m, stats: monthStats(store.months[m], store.employees) }))
   const total = rows.reduce(
@@ -25,6 +57,19 @@ export function SummaryPage({ store }: Props) {
   return (
     <PageLayout>
       <PageHeader title={t('summary.title')} subtitle={t('summary.subtitle')} />
+
+      <AsOfSnapshotBar
+        className="mb-4"
+        enabled={asOfEnabled}
+        onEnabledChange={setAsOfEnabled}
+        date={asOfDate}
+        onDateChange={setAsOfDate}
+        time={asOfTime}
+        onTimeChange={setAsOfTime}
+        hintKey="asOf.hintExecutive"
+      />
+
+      <ExecutiveKpiStrip kpis={erpKpis} onNavigate={onNavigate} className="mb-6" />
 
       <div className="fc-table-wrap">
         <table className="fc-table min-w-full">
@@ -82,10 +127,8 @@ export function SummaryPage({ store }: Props) {
               <td className="font-mono">{total.planHours}</td>
               <td className="font-mono">{total.factHours}</td>
               <td className="font-mono">{total.factHours - total.planHours}</td>
-              <td>—</td>
-              <td className="font-mono">{total.mismatches}</td>
-              <td>—</td>
-              <td className="font-mono">{total.factShifts}</td>
+              <td colSpan={2} />
+              <td colSpan={2} />
               <td colSpan={2} />
             </tr>
           </tbody>

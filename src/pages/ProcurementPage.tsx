@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
@@ -10,6 +10,8 @@ import { ProcurementTrackingSync } from '@/components/procurement/ProcurementTra
 import { PurchaseOrderModal } from '@/components/procurement/PurchaseOrderModal'
 import { ProcurementContainersTab } from '@/components/procurement/ProcurementContainersTab'
 import { ProcurementStockTab } from '@/components/procurement/ProcurementStockTab'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import {
   PROCUREMENT_TABS,
   PROCUREMENT_WEB_TABS,
@@ -29,7 +31,11 @@ import type {
 } from '@/lib/procurement/types'
 
 export function ProcurementPage(
-  props: ProcurementPageProps & { webProcurementMode?: boolean },
+  props: ProcurementPageProps & {
+    webProcurementMode?: boolean
+    focusOrderId?: string | null
+    onJournalFocusConsumed?: () => void
+  },
 ) {
   const {
     procurement,
@@ -42,9 +48,21 @@ export function ProcurementPage(
     onUpsertWarehouseItem,
     onNavigateToDirectory,
     webProcurementMode = false,
+    focusOrderId,
+    onJournalFocusConsumed,
   } = props
 
   const { t } = useI18n()
+  const asOf = useAsOfSnapshot()
+  const {
+    enabled: asOfEnabled,
+    setEnabled: setAsOfEnabled,
+    date: asOfDate,
+    setDate: setAsOfDate,
+    time: asOfTime,
+    setTime: setAsOfTime,
+    asOfIso,
+  } = asOf
   const tabIds = webProcurementMode ? PROCUREMENT_WEB_TABS : PROCUREMENT_TABS
   const [tab, setTab] = useState<ProcurementTab>(
     webProcurementMode ? 'containers' : 'orders',
@@ -59,6 +77,17 @@ export function ProcurementPage(
   const [supplierFilter, setSupplierFilter] = useState('')
   const [editOrder, setEditOrder] = useState<PurchaseOrder | null>(null)
   const [isNew, setIsNew] = useState(false)
+
+  useEffect(() => {
+    if (!focusOrderId) return
+    const order = procurement.orders.find((o) => o.id === focusOrderId)
+    if (order) {
+      setEditOrder(order)
+      setIsNew(false)
+      setTab('orders')
+    }
+    onJournalFocusConsumed?.()
+  }, [focusOrderId])
 
   const tabLabels = useMemo(
     () =>
@@ -294,7 +323,23 @@ export function ProcurementPage(
         />
       )}
       {tab === 'stock' && (
-        <ProcurementStockTab procurement={procurement} warehouse={warehouse} />
+        <>
+          <AsOfSnapshotBar
+            className="mb-4"
+            enabled={asOfEnabled}
+            onEnabledChange={setAsOfEnabled}
+            date={asOfDate}
+            onDateChange={setAsOfDate}
+            time={asOfTime}
+            onTimeChange={setAsOfTime}
+            hintKey="asOf.hintProcurement"
+          />
+          <ProcurementStockTab
+            procurement={procurement}
+            warehouse={warehouse}
+            asOfIso={asOfIso ?? undefined}
+          />
+        </>
       )}
       {tab === 'analytics' && (
         <ProcurementAnalyticsTab orders={procurement.orders} counterparties={counterparties} />

@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { EmployeePicker } from '@/components/ui/EmployeePicker'
 import { useI18n } from '@/context/I18nContext'
 import { roleDescription, roleLabel, ACCESS_ROLES } from '@/lib/access/roles'
 import { linkedEmployeeLabel } from '@/lib/access/userEmployee'
+import { importRowToUpsertInput, buildWebUserListRows, storeUserFromRow, type WebUserListRow } from '@/lib/access/webUserList'
+import { viewsForRole, viewsForUser } from '@/lib/access/permissions'
+import { listFirebaseWebUsers } from '@/lib/cloud/webUserAdmin'
 import type { AccessRoleId, AccessStore, AppUser } from '@/lib/access/types'
 import { MANAGED_VIEWS, NEGATIVE_STOCK_ROLES, DOCUMENT_CANCEL_ROLES } from '@/lib/access/types'
 import type { Employee, ViewId } from '@/lib/types'
@@ -12,8 +16,10 @@ import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
 type Props = {
   access: AccessStore
   employees: Employee[]
+  brigades: string[]
   currentUser: AppUser
-  onUpsertUser: (input: UpsertAppUserInput) => Promise<void>
+  webMode?: boolean
+  onUpsertUser: (input: UpsertAppUserInput) => Promise<{ allowlistSyncFailed?: boolean }>
   onRemoveUser: (id: string) => void
   onSetRoleViews: (roleId: AccessRoleId, views: ViewId[]) => void
   onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
@@ -30,6 +36,7 @@ const VIEW_LABEL_KEYS: Record<ViewId, string> = {
   warehouse: 'nav.warehouse',
   procurement: 'nav.procurement',
   hr: 'nav.hr',
+  hr_inspector: 'nav.hrInspector',
   finance: 'nav.finance',
   directories: 'nav.directories',
   settings: 'nav.settings',
@@ -46,29 +53,79 @@ const VIEW_LABEL_KEYS: Record<ViewId, string> = {
 export function AccessAdminPanel({
   access,
   employees,
+  brigades,
   currentUser,
+  webMode = false,
   onUpsertUser,
   onRemoveUser,
   onSetRoleViews,
   onSetRoleAllowNegativeStock,
   onSetRoleAllowDocumentCancel,
 }: Props) {
-  const { t, locale } = useI18n()
+  const { t, tf, locale } = useI18n()
   const [tab, setTab] = useState<Tab>('users')
   const [notice, setNotice] = useState<{ type: 'info' | 'error'; message: string } | null>(null)
   const [editing, setEditing] = useState<UpsertAppUserInput | null>(null)
+  const [firebaseUsers, setFirebaseUsers] = useState<
+    import('@/lib/cloud/webUserAdmin').FirebaseWebUserRecord[]
+  >([])
+  const [firebaseLoading, setFirebaseLoading] = useState(false)
+  const [firebaseLoadError, setFirebaseLoadError] = useState(false)
+  const [userListRefresh, setUserListRefresh] = useState(0)
+
+  useEffect(() => {
+    if (!webMode) return
+    let cancelled = false
+    setFirebaseLoading(true)
+    setFirebaseLoadError(false)
+    void listFirebaseWebUsers()
+      .then((res) => {
+        if (cancelled) return
+        if (res.ok) setFirebaseUsers(res.users)
+        else setFirebaseLoadError(true)
+      })
+      .finally(() => {
+        if (!cancelled) setFirebaseLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [webMode, userListRefresh])
 
   const activeEmployees = useMemo(
     () => employees.filter((e) => e.active && (e.hrStatus ?? 'active') !== 'fired'),
     [employees],
   )
 
-  const users = useMemo(
-    () => [...access.users].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ru')),
-    [access.users],
-  )
+  const userRows = useMemo(() => {
+    if (webMode) return buildWebUserListRows(access, firebaseUsers)
+    return access.users.map((u) => ({
+      id: u.id,
+      login: u.login,
+      displayName: u.displayName,
+      roleId: u.roleId,
+      active: u.active,
+      employeeId: u.employeeId,
+      webViews: u.webViews,
+      webAccount: u.webAccount,
+      inFirebase: false,
+      assumedFirebase: false,
+      firebaseDisabled: false,
+      needsImport: false,
+      inStore: true,
+    })) satisfies WebUserListRow[]
+  }, [access, firebaseUsers, webMode])
 
   const editableRoles = ACCESS_ROLES.filter((r) => r.id !== 'sysadmin')
+
+  function openEditRow(row: WebUserListRow) {
+    const stored = storeUserFromRow(row)
+    if (stored) {
+      openEdit(stored)
+      return
+    }
+    setEditing(importRowToUpsertInput(row))
+  }
 
   function openNew() {
     setEditing({
@@ -78,6 +135,8 @@ export function AccessAdminPanel({
       password: '',
       active: true,
       employeeId: null,
+      defaultBrigades: [],
+      webViews: [],
     })
   }
 
@@ -89,15 +148,47 @@ export function AccessAdminPanel({
       roleId: u.roleId,
       active: u.active,
       employeeId: u.employeeId ?? null,
+      defaultBrigades: u.defaultBrigades ? [...u.defaultBrigades] : [],
+      webViews: u.webViews ? [...u.webViews] : [],
     })
+  }
+
+  function toggleDefaultBrigade(brigade: string) {
+    if (!editing) return
+    const current = editing.defaultBrigades ?? []
+    const next = current.includes(brigade)
+      ? current.filter((b) => b !== brigade)
+      : [...current, brigade]
+    setEditing({ ...editing, defaultBrigades: next })
+  }
+
+  function editingEffectiveViews(): ViewId[] {
+    if (!editing) return []
+    if (editing.webViews?.length) return editing.webViews
+    return viewsForRole(access, editing.roleId)
+  }
+
+  function toggleUserView(view: ViewId) {
+    if (!editing) return
+    const current = editingEffectiveViews()
+    const next = current.includes(view)
+      ? current.filter((v) => v !== view)
+      : [...current, view]
+    setEditing({ ...editing, webViews: next })
   }
 
   async function saveUser() {
     if (!editing) return
     try {
-      await onUpsertUser(editing)
+      const result = await onUpsertUser(editing)
       setEditing(null)
-      setNotice({ type: 'info', message: t('access.userSaved') })
+      setUserListRefresh((n) => n + 1)
+      setNotice({
+        type: 'info',
+        message: result.allowlistSyncFailed
+          ? t('access.userSavedAllowlistWarn')
+          : t('access.userSaved'),
+      })
     } catch (err) {
       const key =
         err instanceof Error
@@ -105,6 +196,11 @@ export function AccessAdminPanel({
               login_required: 'access.errLogin',
               login_taken: 'access.errLoginTaken',
               password_required: 'access.errPassword',
+              firebase_email_exists: 'access.errFirebaseEmail',
+              firebase_create_failed: 'access.errFirebaseCreate',
+              firebase_unauthorized: 'access.errFirebaseAuth',
+              firebase_update_failed: 'access.errFirebaseUpdate',
+              allowlist_sync_failed: 'access.errAllowlistSync',
             }[err.message] ?? 'access.errGeneric')
           : 'access.errGeneric'
       setNotice({ type: 'error', message: t(key) })
@@ -124,7 +220,9 @@ export function AccessAdminPanel({
       <h3 className="text-sm font-bold uppercase tracking-wide text-violet-900">
         {t('access.adminTitle')}
       </h3>
-      <p className="mt-1 text-sm text-stone-600">{t('access.adminHint')}</p>
+      <p className="mt-1 text-sm text-stone-600">
+        {webMode ? t('access.adminHintWeb') : t('access.adminHint')}
+      </p>
 
       {notice && (
         <div className="mt-3">
@@ -158,52 +256,123 @@ export function AccessAdminPanel({
 
       {tab === 'users' && (
         <div className="mt-4 space-y-4">
-          <div className="flex justify-end">
+          {webMode && firebaseLoadError ? (
+            <FormNotice type="info" message={t('access.firebaseListOptional')} />
+          ) : null}
+          {webMode && firebaseLoading ? (
+            <p className="text-xs text-stone-500">{t('access.firebaseListLoading')}</p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {webMode ? (
+              <p className="text-xs text-stone-500">
+                {tf('access.usersCount', { n: String(userRows.length) })}
+              </p>
+            ) : (
+              <span />
+            )}
             <button type="button" className="btn-add" onClick={openNew}>
               {t('access.addUser')}
             </button>
           </div>
           <div className="overflow-x-auto rounded-sm border border-grid bg-white">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
                 <tr>
                   <th className="px-4 py-3">{t('access.col.name')}</th>
-                  <th className="px-4 py-3">{t('access.col.login')}</th>
+                  <th className="px-4 py-3">{webMode ? t('access.col.email') : t('access.col.login')}</th>
                   <th className="px-4 py-3">{t('access.col.employee')}</th>
                   <th className="px-4 py-3">{t('access.col.role')}</th>
+                  {webMode ? <th className="px-4 py-3">{t('access.col.views')}</th> : null}
                   <th className="px-4 py-3">{t('access.col.status')}</th>
+                  {webMode ? <th className="px-4 py-3">{t('access.col.program')}</th> : null}
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
-                  <tr key={u.id} className="border-t border-grid/60">
-                    <td className="px-4 py-3 font-medium">{u.displayName}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{u.login}</td>
-                    <td className="px-4 py-3 text-stone-600">
-                      {linkedEmployeeLabel(u, employees) ?? (
-                        <span className="text-stone-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{roleLabel(u.roleId, locale)}</td>
-                    <td className="px-4 py-3">
-                      {u.active ? (
-                        <span className="text-emerald-700">{t('access.active')}</span>
-                      ) : (
-                        <span className="text-stone-400">{t('access.inactive')}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-accent hover:underline"
-                        onClick={() => openEdit(u)}
-                      >
-                        {t('counterparty.open')}
-                      </button>
+                {userRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={webMode ? 8 : 6} className="px-4 py-6 text-center text-stone-400">
+                      {t('access.noUsers')}
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  userRows.map((row) => {
+                    const viewCount = row.inStore
+                      ? viewsForUser(access, {
+                          id: row.id,
+                          login: row.login,
+                          displayName: row.displayName,
+                          roleId: row.roleId,
+                          passwordHash: '',
+                          passwordSalt: '',
+                          active: row.active,
+                          employeeId: row.employeeId,
+                          webViews: row.webViews,
+                          createdAt: '',
+                          updatedAt: '',
+                        }).length
+                      : viewsForRole(access, row.roleId).length
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`border-t border-grid/60 ${row.needsImport ? 'bg-amber-50/60' : ''}`}
+                      >
+                        <td className="px-4 py-3 font-medium">{row.displayName}</td>
+                        <td className="px-4 py-3 font-mono text-xs">{row.login}</td>
+                        <td className="px-4 py-3 text-stone-600">
+                          {row.employeeId
+                            ? linkedEmployeeLabel(
+                                {
+                                  id: row.id,
+                                  login: row.login,
+                                  displayName: row.displayName,
+                                  roleId: row.roleId,
+                                  passwordHash: '',
+                                  passwordSalt: '',
+                                  active: row.active,
+                                  employeeId: row.employeeId,
+                                  createdAt: '',
+                                  updatedAt: '',
+                                },
+                                employees,
+                              )
+                            : (
+                              <span className="text-stone-400">—</span>
+                            )}
+                        </td>
+                        <td className="px-4 py-3">{roleLabel(row.roleId, locale)}</td>
+                        {webMode ? (
+                          <td className="px-4 py-3 text-xs text-stone-600">{viewCount}</td>
+                        ) : null}
+                        <td className="px-4 py-3">
+                          {!row.active || row.firebaseDisabled ? (
+                            <span className="text-stone-400">{t('access.inactive')}</span>
+                          ) : (
+                            <span className="text-emerald-700">{t('access.active')}</span>
+                          )}
+                        </td>
+                        {webMode ? (
+                          <td className="px-4 py-3 text-xs">
+                            {row.inStore ? (
+                              <span className="text-emerald-700">{t('access.inProgram')}</span>
+                            ) : (
+                              <span className="text-amber-700">{t('access.needsImport')}</span>
+                            )}
+                          </td>
+                        ) : null}
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            className="text-sm font-medium text-accent hover:underline"
+                            onClick={() => openEditRow(row)}
+                          >
+                            {row.needsImport ? t('access.linkUser') : t('counterparty.open')}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -295,10 +464,18 @@ export function AccessAdminPanel({
       )}
 
       {editing && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-sm border border-grid bg-white p-5 shadow-sm">
+        <ModalBackdrop
+          open
+          onClose={() => setEditing(null)}
+          className="fixed inset-0 flex items-center justify-center bg-black/40 p-4"
+          panelClassName="w-full max-w-md rounded-sm border border-grid bg-white p-5 shadow-sm"
+        >
             <h4 className="text-lg font-bold text-ink">
-              {editing.id ? t('access.editUser') : t('access.newUser')}
+              {editing.id
+                ? t('access.editUser')
+                : editing.skipFirebaseCreate
+                  ? t('access.setupUser')
+                  : t('access.newUser')}
             </h4>
             <div className="mt-4 space-y-3">
               <label className="block text-xs font-medium text-stone-500">
@@ -310,12 +487,14 @@ export function AccessAdminPanel({
                 />
               </label>
               <label className="block text-xs font-medium text-stone-500">
-                {t('access.col.login')}
+                {webMode ? t('access.col.email') : t('access.col.login')}
                 <input
                   className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
                   value={editing.login}
                   onChange={(e) => setEditing({ ...editing, login: e.target.value })}
-                  disabled={editing.id === currentUser.id}
+                  disabled={!!editing.id || !!editing.skipFirebaseCreate}
+                  type={webMode ? 'email' : 'text'}
+                  autoComplete="off"
                 />
               </label>
               <label className="block text-xs font-medium text-stone-500">
@@ -347,15 +526,77 @@ export function AccessAdminPanel({
                   ))}
                 </select>
               </label>
-              <label className="block text-xs font-medium text-stone-500">
-                {editing.id ? t('access.passwordOptional') : t('access.password')}
-                <input
-                  type="password"
-                  className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                  value={editing.password ?? ''}
-                  onChange={(e) => setEditing({ ...editing, password: e.target.value })}
-                />
-              </label>
+              {brigades.length > 0 ? (
+                <div className="block text-xs font-medium text-stone-500">
+                  {t('access.defaultBrigades')}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {brigades.map((b) => (
+                      <label
+                        key={b}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-sm border border-grid px-2 py-1 text-xs text-stone-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={(editing.defaultBrigades ?? []).includes(b)}
+                          onChange={() => toggleDefaultBrigade(b)}
+                        />
+                        {b}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-stone-400">
+                    {t('access.defaultBrigadesHint')}
+                  </p>
+                </div>
+              ) : null}
+              {!webMode ? (
+                <label className="block text-xs font-medium text-stone-500">
+                  {editing.id ? t('access.passwordOptional') : t('access.password')}
+                  <input
+                    type="password"
+                    className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                    value={editing.password ?? ''}
+                    onChange={(e) => setEditing({ ...editing, password: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              ) : editing.id ? null : editing.skipFirebaseCreate ? (
+                <p className="rounded-sm border border-grid/80 bg-stone-50/80 px-3 py-2 text-[11px] text-stone-500">
+                  {t('access.linkExistingHint')}
+                </p>
+              ) : (
+                <label className="block text-xs font-medium text-stone-500">
+                  {t('access.passwordFirebase')}
+                  <input
+                    type="password"
+                    className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                    value={editing.password ?? ''}
+                    onChange={(e) => setEditing({ ...editing, password: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                  <span className="mt-1 block text-[11px] text-stone-400">
+                    {t('access.passwordFirebaseHint')}
+                  </span>
+                </label>
+              )}
+              {webMode && editing.roleId !== 'sysadmin' ? (
+                <div className="rounded-sm border border-grid/80 bg-stone-50/80 p-3">
+                  <p className="text-xs font-medium text-stone-600">{t('access.userViewsTitle')}</p>
+                  <p className="mt-0.5 text-[11px] text-stone-400">{t('access.userViewsHint')}</p>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                    {MANAGED_VIEWS.filter((v) => v !== 'settings').map((view) => (
+                      <label key={view} className="inline-flex items-center gap-1.5 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={editingEffectiveViews().includes(view)}
+                          onChange={() => toggleUserView(view)}
+                        />
+                        {t(VIEW_LABEL_KEYS[view])}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -403,8 +644,7 @@ export function AccessAdminPanel({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </ModalBackdrop>
       )}
     </section>
   )

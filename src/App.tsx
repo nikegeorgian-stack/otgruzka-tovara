@@ -1,9 +1,10 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { PageLoader } from '@/components/ui/PageLoader'
 import { StorageAlert } from '@/components/system/StorageAlert'
 import { I18nProvider } from '@/context/I18nContext'
 import { ConfirmProvider } from '@/context/ConfirmContext'
+import { ModalMinimizeProvider } from '@/context/ModalMinimizeContext'
 import { AppShell } from '@/components/layout/AppShell'
 import { WorkspaceTaskbar } from '@/components/layout/WorkspaceTaskbar'
 import { CoachProvider } from '@/context/CoachContext'
@@ -14,6 +15,7 @@ import { useAppStore } from '@/hooks/useAppStore'
 import { restoreDailyBackup } from '@/lib/backup'
 import { buildProcurementPageProps } from '@/lib/app/procurementProps'
 import { buildWarehousePageProps } from '@/lib/app/warehouseProps'
+import type { SaveDraftInput } from '@/lib/warehouse/documents'
 import { runExport } from '@/lib/export'
 import { importFromJson, exportToJson } from '@/lib/storage'
 import { t as translate } from '@/i18n'
@@ -23,6 +25,7 @@ import {
   FinancePage,
   FstCloudSync,
   HrPage,
+  HrInspectorPage,
   LocalDbSync,
   MonthPage,
   PlannerPage,
@@ -36,29 +39,49 @@ import {
   JournalsPage,
   ItOfficePage,
   WarehousePage,
+  MonthLayoutLabPage,
 } from '@/app/lazyPages'
 import { LoginScreen } from '@/components/auth/LoginScreen'
+import { WelcomeGreeting } from '@/components/auth/WelcomeGreeting'
 import { AdminSetupScreen } from '@/components/auth/AdminSetupScreen'
 import { USE_LOCAL_DB } from '@/lib/localDb/config'
 import { useFstWebSession } from '@/context/FstWebSessionContext'
-import { isWebFinanceRole, isWebHrRole, isWebProcurementRole, isWebTechnologistRole, isWebWarehouseRole, isWebWorkshopMasterRole } from '@/lib/cloud/fstWebUsers'
-import { canAccessView, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel } from '@/lib/access/permissions'
+import { isWebFinanceRole, isWebHrInspectorRole, isWebHrRole, isWebProcurementRole, isWebTechnologistRole, isWebWarehouseRole, isWebWorkshopMasterRole } from '@/lib/cloud/fstWebUsers'
+import { canAccessView, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel, roleAllowsDocumentUnpost } from '@/lib/access/permissions'
 import { ACCESS_ROLES } from '@/lib/access/roles'
 import { COACH_TARGETS } from '@/lib/ai/coachTargets'
 import { webModesFromAdminCabinet } from '@/lib/access/adminCabinet'
+import {
+  resolveFinanceViewDefaults,
+  resolveHrViewDefaults,
+  resolveMonthViewDefaults,
+  resolveWarehouseViewDefaults,
+  type UserViewDefaults,
+} from '@/lib/viewDefaults/types'
+import { resolveJournalLink, type JournalNavTarget } from '@/lib/journals/navigate'
 
 const isFstWeb = import.meta.env.VITE_FST_WEB === 'true'
+
+function isMonthLayoutLabHash(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.location.hash.replace(/^#\/?/, '').startsWith('dev/month-layouts')
+}
 
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const app = useAppStore()
   const webSession = useFstWebSession()
   const isAdmin = isSysAdmin(app.currentUser)
+  const financeActor = { id: app.currentUser?.id, name: app.currentUser?.displayName }
   const adminCabinetModes =
     isAdmin && isFstWeb ? webModesFromAdminCabinet(app.adminCabinet) : null
   const webHrMode =
     isFstWeb &&
     (isWebHrRole(app.currentUser?.roleId) || adminCabinetModes?.webHrMode === true)
+  const webHrInspectorMode =
+    isFstWeb &&
+    (isWebHrInspectorRole(app.currentUser?.roleId) ||
+      adminCabinetModes?.webHrInspectorMode === true)
   const webFinanceMode =
     isFstWeb &&
     (isWebFinanceRole(app.currentUser?.roleId) || adminCabinetModes?.webFinanceMode === true)
@@ -87,8 +110,26 @@ export default function App() {
   const canCancelDocuments = app.currentUser
     ? roleAllowsDocumentCancel(app.store.access, app.currentUser.roleId)
     : false
+  const canUnpostDocuments = roleAllowsDocumentUnpost(app.currentUser)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [plannerFocusOrderId, setPlannerFocusOrderId] = useState<string | null>(null)
+  const [journalNav, setJournalNav] = useState<JournalNavTarget | null>(null)
+  const [monthLayoutLab, setMonthLayoutLab] = useState(isMonthLayoutLabHash)
+
+  useEffect(() => {
+    const onHash = () => setMonthLayoutLab(isMonthLayoutLabHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  const saveViewDefaults = useCallback(
+    <K extends keyof UserViewDefaults>(viewId: K, patch: NonNullable<UserViewDefaults[K]>) => {
+      if (app.currentUser?.id) {
+        app.updateUserViewDefaults(app.currentUser.id, viewId, patch)
+      }
+    },
+    [app.currentUser?.id, app.updateUserViewDefaults],
+  )
 
   const coachAllowedViews = app.currentUser
     ? COACH_TARGETS.map((target) => target.view).filter((v) =>
@@ -131,10 +172,41 @@ export default function App() {
         cancelledByName: app.currentUser?.displayName,
         reason: args?.reason,
       }),
+    onSaveDocumentDraft: (doc: SaveDraftInput) =>
+      app.saveWarehouseDocDraft(doc, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      }),
+    onPostExistingDocument: (documentId: string) =>
+      app.postExistingWarehouseDoc(documentId, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      }),
+    onUnpostDocument: (documentId: string) => {
+      if (!roleAllowsDocumentUnpost(app.currentUser)) {
+        return { ok: false as const, error: 'warehouse.doc.errUnpostForbidden' }
+      }
+      return app.unpostWarehouseDoc(documentId, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      })
+    },
+    onRemoveDocumentDraft: (documentId: string) =>
+      app.removeWarehouseDraft(documentId, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      }),
     onMergeInvoiceRegistry: app.mergeWarehouseInvoiceRegistry,
     onRunInventory: app.runWarehouseInventory,
     onPostInventoryRevision: app.postWarehouseInventoryRevision,
     onPostOpeningBalances: app.postWarehouseOpeningBalances,
+    onAcquireDocumentLock: (documentId: string) =>
+      app.acquireWarehouseDocumentLock(documentId, {
+        actorId: app.currentUser?.id ?? '',
+        actorName: app.currentUser?.displayName,
+      }),
+    onReleaseDocumentLock: (documentId: string) =>
+      app.releaseWarehouseDocumentLock(documentId, app.currentUser?.id),
     onImportExcel: app.importWarehouseExcel,
     onExportExcel: (warehouseId?: string) =>
       void runExport('warehouse', app.store, { warehouseId }),
@@ -190,6 +262,7 @@ export default function App() {
   return (
     <I18nProvider locale={app.store.settings.locale} setLocale={app.setLocale}>
       <ConfirmProvider>
+        <ModalMinimizeProvider>
         {!app.skipLocalAuth && app.adminSetupRequired ? (
           <AdminSetupScreen
             onSetup={async (password) => {
@@ -199,6 +272,10 @@ export default function App() {
           />
         ) : !app.skipLocalAuth && !app.currentUser ? (
           <LoginScreen onLogin={app.login} />
+        ) : monthLayoutLab ? (
+          <Suspense fallback={<PageLoader />}>
+            <MonthLayoutLabPage />
+          </Suspense>
         ) : (
           <CoachProvider
             aiSettings={app.store.settings.ai}
@@ -253,6 +330,7 @@ export default function App() {
           }
           workspaceOpen={app.workspacePanes.length > 0}
           webHrMode={webHrMode}
+          webHrInspectorMode={webHrInspectorMode}
           webFinanceMode={webFinanceMode}
           webWarehouseMode={webWarehouseMode}
           webTechnologistMode={webTechnologistMode}
@@ -334,6 +412,22 @@ export default function App() {
               onRenameBrigade={app.renameBrigade}
               onRemoveBrigade={app.removeBrigade}
               onSetBrigadeNameKa={app.setBrigadeNameKa}
+              onSetBrigadeUnit={app.setBrigadeUnit}
+              onMarkBrigadier={(rowId, dateKey, on) =>
+                app.setBrigadierDay(app.activeMonth, rowId, dateKey, on)
+              }
+              onMarkBrigadierMonth={(rowId, on) =>
+                app.setBrigadierMonth(app.activeMonth, rowId, on)
+              }
+              onSetFactHours={(rowId, dateKey, hours) =>
+                app.setFactHours(app.activeMonth, rowId, dateKey, hours)
+              }
+              onAddDayWorker={(brigade, employeeId, dateKey, code) =>
+                app.addBrigadeDayWorker(app.activeMonth, brigade, employeeId, dateKey, code)
+              }
+              onAssignPermanent={(employeeId, brigade) =>
+                app.assignPermanentToBrigade(app.activeMonth, employeeId, brigade)
+              }
               onSetComment={(rowId, dateKey, text) =>
                 app.setCellComment(app.activeMonth, rowId, dateKey, text)
               }
@@ -357,9 +451,32 @@ export default function App() {
               onSetBrigadier={app.setBrigadier}
               onUpsertEmployee={app.upsertEmployee}
               onTourComplete={() => app.updateSettings({ tourCompleted: true })}
+              onCloseMonth={() =>
+                app.setMonthClosed(app.activeMonth, true, {
+                  id: app.currentUser?.id,
+                  name: app.currentUser?.displayName,
+                })
+              }
+              onReopenMonth={() =>
+                app.setMonthClosed(app.activeMonth, false, {
+                  id: app.currentUser?.id,
+                  name: app.currentUser?.displayName,
+                })
+              }
+              canReopen={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.currentUser?.roleId === 'operations_director'
+              }
               workshopMasterMode={workshopMasterMode}
               workshopMasterLogin={app.currentUser?.login}
               workshopMasterEmployeeId={app.currentUser?.employeeId}
+              userDefaultBrigades={app.currentUser?.defaultBrigades}
+              userMonthDefaults={resolveMonthViewDefaults(
+                app.currentUser?.viewDefaults,
+                app.currentUser?.defaultBrigades,
+              )}
+              currentUserId={app.currentUser?.id}
+              onSaveMonthDefaults={(defaults) => saveViewDefaults('month', defaults)}
             />
           )}
           {app.view === 'hr' && (
@@ -367,7 +484,9 @@ export default function App() {
               store={app.store}
               month={app.activeMonth}
               onMonthChange={app.setActiveMonth}
-              initialSection={app.hrSection}
+              initialSection={
+                resolveHrViewDefaults(app.currentUser?.viewDefaults)?.section ?? app.hrSection
+              }
               employees={app.store.employees}
               hrStructuralUnits={app.store.hrStructuralUnits}
               hrPositions={app.store.hrPositions}
@@ -391,6 +510,24 @@ export default function App() {
               webHrMode={webHrMode}
               workshopMasterMode={workshopMasterMode}
               webUserName={app.currentUser?.displayName}
+              userHrDefaults={resolveHrViewDefaults(app.currentUser?.viewDefaults)}
+              currentUserId={app.currentUser?.id}
+              onSaveViewDefaults={saveViewDefaults}
+            />
+          )}
+          {app.view === 'hr_inspector' && (
+            <HrInspectorPage
+              employees={app.store.employees}
+              brigades={app.store.brigades}
+              hrStructuralUnits={app.store.hrStructuralUnits}
+              hrPositions={app.store.hrPositions}
+              existingMonthKeys={Object.keys(app.store.months)}
+              site={app.store.settings.site}
+              responsible={app.store.settings.responsible}
+              webInspectorMode={webHrInspectorMode}
+              webUserName={webUserName}
+              onSaveEmployee={app.upsertEmployee}
+              onSetEmployeeFactRange={app.setEmployeeFactRange}
             />
           )}
           {app.view === 'finance' && (
@@ -399,8 +536,33 @@ export default function App() {
               month={app.activeMonth}
               onMonthChange={app.setActiveMonth}
               onSaveEmployee={app.upsertEmployee}
+              onRemoveEmployee={app.removeEmployee}
+              brigades={app.store.brigades}
+              hrStructuralUnits={app.store.hrStructuralUnits}
+              hrPositions={app.store.hrPositions}
+              onUpsertPosition={app.upsertHrPosition}
+              onRemovePosition={app.removeHrPosition}
+              onUpsertStructuralUnit={app.upsertHrStructuralUnit}
+              onRemoveStructuralUnit={app.removeHrStructuralUnit}
+              onImportOrgStructureFromSeed={app.importOrgStructureFromSeed}
+              actions={{
+                onGiveAdvance: (input) => app.giveAdvance(input, financeActor),
+                onRemoveAdvance: (id) => app.removeAdvance(id, financeActor),
+                onAddAdjustment: (input) => app.addAdjustment(input, financeActor),
+                onRemoveAdjustment: (id) => app.removeAdjustment(id, financeActor),
+                onAddPayout: (input) => app.addPayout(input, financeActor),
+                onRemovePayout: (id) => app.removePayout(id, financeActor),
+                onConfirmSick: (input) => app.confirmSick(input, financeActor),
+                onUnconfirmSick: (employeeId, month) =>
+                  app.unconfirmSick(employeeId, month, financeActor),
+                onSetBrigadierBonus: (amount) =>
+                  app.updateSettings({ brigadierBonus: amount }),
+              }}
               webFinanceMode={webFinanceMode}
               webUserName={app.currentUser?.displayName}
+              userFinanceDefaults={resolveFinanceViewDefaults(app.currentUser?.viewDefaults)}
+              currentUserId={app.currentUser?.id}
+              onSaveViewDefaults={saveViewDefaults}
             />
           )}
           {app.view === 'production' && (
@@ -420,6 +582,10 @@ export default function App() {
               clearWorkspaceDraft={app.clearWorkspaceDraft}
               workspaceRestoreSeq={app.workspaceRestoreSeq}
               workspaceDrafts={app.workspaceDrafts}
+              focusRequestId={
+                journalNav?.view === 'production' ? journalNav.productionRequestId : null
+              }
+              onJournalFocusConsumed={() => setJournalNav(null)}
             />
           )}
           {app.view === 'planner' && (
@@ -453,19 +619,13 @@ export default function App() {
               onFocusOrderConsumed={() => setPlannerFocusOrderId(null)}
             />
           )}
-          {app.view === 'summary' && <SummaryPage store={app.store} />}
-          {(app.view === 'directories' ||
-            app.view === 'employees' ||
-            app.view === 'codes') && (
+          {app.view === 'summary' && (
+            <SummaryPage store={app.store} onNavigate={app.setView} />
+          )}
+          {app.view === 'directories' && (
             <DirectoriesPage
               store={app.store}
-              initialSection={
-                (app.view === 'codes'
-                  ? 'codes'
-                  : app.view === 'employees'
-                    ? 'employees'
-                    : app.directorySection) as DirectorySection
-              }
+              initialSection={app.directorySection as DirectorySection}
               employees={app.store.employees}
               brigades={app.store.brigades}
               hrStructuralUnits={app.store.hrStructuralUnits}
@@ -481,6 +641,7 @@ export default function App() {
               onRenameBrigade={app.renameBrigade}
               onRemoveBrigade={app.removeBrigade}
               onSetBrigadeNameKa={app.setBrigadeNameKa}
+              onSetBrigadeUnit={app.setBrigadeUnit}
               onRemoveCounterparty={app.removeCounterparty}
               onUpsertFinishedProduct={app.upsertFinishedProduct}
               onRemoveFinishedProduct={app.removeFinishedProduct}
@@ -515,6 +676,8 @@ export default function App() {
               })}
               webWarehouseMode={webWarehouseMode}
               webUserName={webUserName}
+              journalNav={journalNav?.view === 'warehouse' ? journalNav : null}
+              onJournalNavConsumed={() => setJournalNav(null)}
               keeperId={app.currentUser?.id}
               keeperName={
                 app.currentUser?.displayName ??
@@ -523,6 +686,7 @@ export default function App() {
               }
               allowNegativeStock={allowNegativeStock}
               canCancelDocuments={canCancelDocuments}
+              canUnpostDocuments={canUnpostDocuments}
               pendingBatchRuns={app.store.formulations.batchRuns.filter(
                 (r) => (r.status ?? 'confirmed') === 'pending',
               )}
@@ -539,12 +703,19 @@ export default function App() {
                 app.rejectFormulationBatch(runId, keeper, reason)
               }
               onOpenSalesOrder={() => app.setView('director')}
+              userWarehouseDefaults={resolveWarehouseViewDefaults(app.currentUser?.viewDefaults)}
+              currentUserId={app.currentUser?.id}
+              onSaveViewDefaults={saveViewDefaults}
             />
           )}
           {app.view === 'procurement' && (
             <ProcurementPage
               {...buildProcurementPageProps(app.store, procurementActions)}
               webProcurementMode={webProcurementMode}
+              focusOrderId={
+                journalNav?.view === 'procurement' ? journalNav.procurementOrderId : null
+              }
+              onJournalFocusConsumed={() => setJournalNav(null)}
             />
           )}
           {app.view === 'technologist' && (
@@ -604,6 +775,7 @@ export default function App() {
           {app.view === 'mixer' && (
             <MixerPage
               formulations={app.store.formulations}
+              technologistQc={app.store.technologistQc}
               warehouse={app.store.warehouse}
               brigades={app.store.brigades}
               operatorId={app.currentUser?.id}
@@ -619,6 +791,8 @@ export default function App() {
                 })
               }
               onCompleteMixTask={app.completeMixTask}
+              onAddRoomClimateReading={app.addRoomClimateReading}
+              onRemoveRoomClimateReading={app.removeRoomClimateReading}
             />
           )}
           {app.view === 'director' && (
@@ -642,6 +816,17 @@ export default function App() {
                 setPlannerFocusOrderId(productionOrderId)
                 app.setView('planner')
               }}
+              focusSalesOrderId={
+                journalNav?.view === 'director' ? journalNav.salesOrderId : null
+              }
+              onJournalFocusConsumed={() => setJournalNav(null)}
+              erpInput={{
+                procurement: app.store.procurement,
+                warehouse: app.store.warehouse,
+                months: app.store.months,
+                employees: app.store.employees,
+              }}
+              onErpNavigate={app.setView}
             />
           )}
           {app.view === 'journals' && (
@@ -650,11 +835,21 @@ export default function App() {
               currentUser={app.currentUser}
               scope={{
                 webHrMode,
+                webHrInspectorMode,
                 webFinanceMode,
                 webWarehouseMode,
                 webTechnologistMode,
                 webProcurementMode,
                 webWorkshopMasterMode,
+              }}
+              onOpenEntry={(link, mode) => {
+                const nav = resolveJournalLink(link, mode)
+                if (!nav) return
+                setJournalNav(nav)
+                app.setView(nav.view)
+                if (nav.view === 'month' && 'month' in nav) {
+                  app.setActiveMonth(nav.month)
+                }
               }}
             />
           )}
@@ -690,6 +885,17 @@ export default function App() {
               onAddMonth={app.addMonth}
               onRemoveMonth={app.removeMonth}
               onArchiveMonth={app.archiveMonth}
+              onSyncMonthRosterFromHr={app.syncMonthRosterFromHr}
+              onSetMonthClosed={(month, closed) =>
+                app.setMonthClosed(month, closed, {
+                  id: app.currentUser?.id,
+                  name: app.currentUser?.displayName,
+                })
+              }
+              canReopenMonth={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.currentUser?.roleId === 'operations_director'
+              }
               onUpdateSettings={app.updateSettings}
               onRestoreTrashEmployee={app.restoreTrashEmployee}
               onRestoreTrashMonth={app.restoreTrashMonth}
@@ -701,14 +907,16 @@ export default function App() {
           </Suspense>
         </AppShell>
 
-        {!webHrMode && !webFinanceMode && !webWarehouseMode && !webTechnologistMode && !webProcurementMode && !webWorkshopMasterMode && (
-          <WorkspaceTaskbar
-            panes={app.workspacePanes}
-            activePaneId={app.activeWorkspacePaneId}
-            onActivate={app.activateWorkspacePane}
-            onClose={app.closeWorkspacePane}
-          />
+        {app.currentUser?.active && (
+          <WelcomeGreeting user={app.currentUser} employees={app.store.employees} />
         )}
+
+        <WorkspaceTaskbar
+          panes={app.workspacePanes}
+          activePaneId={app.activeWorkspacePaneId}
+          onActivate={app.activateWorkspacePane}
+          onClose={app.closeWorkspacePane}
+        />
 
         {USE_LOCAL_DB && !isFstWeb && (
           <Suspense fallback={null}>
@@ -728,6 +936,7 @@ export default function App() {
         <CoachHighlightOverlay />
           </CoachProvider>
         )}
+        </ModalMinimizeProvider>
       </ConfirmProvider>
     </I18nProvider>
   )

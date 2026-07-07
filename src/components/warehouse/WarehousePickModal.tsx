@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/ui/icons'
+import { useModalScope } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
@@ -50,6 +53,15 @@ export function WarehousePickModal({
   const { t } = useI18n()
   const { confirm, alert } = useConfirm()
   const searchRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const { zIndex } = useModalScope({
+    open,
+    onClose,
+    containerRef: panelRef,
+    disableEnterSubmit: true,
+    initialFocus: 'none',
+  })
 
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
@@ -84,15 +96,6 @@ export function WarehousePickModal({
   useEffect(() => {
     setHighlight(0)
   }, [search, catFilter])
-
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
 
   if (!open) return null
 
@@ -161,9 +164,22 @@ export function WarehousePickModal({
     if (item && q > 0) pickTotal += itemStockValue(item, q)
   }
 
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-3 sm:p-6">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-sm bg-white shadow-sm">
+  return createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center bg-black/50 p-3 sm:p-6"
+      style={{ zIndex }}
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-sm bg-white shadow-sm"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <header className="flex items-center justify-between border-b border-grid px-5 py-4">
           <div>
             <h3 className="text-lg font-bold text-ink">{t('warehouse.pick.title')}</h3>
@@ -385,6 +401,7 @@ export function WarehousePickModal({
           </div>
         </footer>
       </div>
-    </div>
+    </div>,
+    getModalPortalRoot(),
   )
 }

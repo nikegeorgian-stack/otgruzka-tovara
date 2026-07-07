@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { FormField } from '@/components/ui/FormField'
 import { Input } from '@/components/ui/Input'
+import { CloseIcon } from '@/components/ui/icons'
 import { useI18n } from '@/context/I18nContext'
 import type { RoomClimateRecord } from '@/lib/technologist/types'
 import { TechnologistRoomClimateJournal } from './TechnologistRoomClimateJournal'
@@ -10,7 +11,7 @@ type Props = {
   records: RoomClimateRecord[]
   operatorName?: string
   onFix: (entry: Omit<RoomClimateRecord, 'id' | 'createdAt'>) => void
-  onRemove: (id: string) => void
+  onRemove?: (id: string) => void
 }
 
 function todayIso(): string {
@@ -27,20 +28,45 @@ function num(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
+const FAB_CLASS =
+  'fixed z-[90] bottom-5 left-5 max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))] print:hidden'
+
+const DRAWER_CLASS =
+  'fixed z-[90] inset-y-0 right-0 flex w-[min(20rem,calc(100vw-1rem))] flex-col border-l border-sky-200 bg-white shadow-2xl animate-[climateDrawerIn_0.2s_ease-out] max-lg:inset-x-0 max-lg:top-auto max-lg:max-h-[min(28rem,85vh)] max-lg:w-auto max-lg:rounded-t-md max-lg:border-l-0 max-lg:border-t print:hidden'
+
 export function TechnologistRoomClimateWidget({
   records,
   operatorName,
   onFix,
   onRemove,
 }: Props) {
-  const { t } = useI18n()
-  const [measuredDate, setMeasuredDate] = useState(todayIso)
-  const [measuredTime, setMeasuredTime] = useState(nowTime)
+  const { t, tf } = useI18n()
+  const [open, setOpen] = useState(false)
   const [temperature, setTemperature] = useState('')
   const [humidity, setHumidity] = useState('')
-  const [roomLabel, setRoomLabel] = useState('')
   const [error, setError] = useState('')
-  const [journalOpen, setJournalOpen] = useState(true)
+  const [fixedSummary, setFixedSummary] = useState('')
+
+  const today = todayIso()
+  const todayCount = useMemo(
+    () => records.filter((r) => r.measuredDate === today).length,
+    [records, today],
+  )
+  const last = records[0]
+
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   function handleFix() {
     const temperatureC = num(temperature)
@@ -53,144 +79,155 @@ export function TechnologistRoomClimateWidget({
       setError(t('technologist.climate.errorHumidity'))
       return
     }
-    if (!measuredDate) {
-      setError(t('technologist.climate.errorDate'))
-      return
-    }
 
+    const measuredDate = todayIso()
+    const measuredTime = nowTime()
     setError('')
     onFix({
       measuredDate,
-      measuredTime: measuredTime || '00:00',
+      measuredTime,
       temperatureC,
       humidityPct,
-      roomLabel: roomLabel.trim() || undefined,
       recordedByName: operatorName,
     })
+    setFixedSummary(
+      tf('technologist.climate.fixedOk', {
+        temp: temperatureC.toFixed(1),
+        humidity: humidityPct.toFixed(0),
+        time: measuredTime,
+      }),
+    )
     setTemperature('')
     setHumidity('')
-    setJournalOpen(true)
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        title={t('technologist.climate.open')}
+        aria-label={t('technologist.climate.open')}
+        className={`${FAB_CLASS} flex h-12 min-w-12 items-center gap-2 rounded-sm border border-sky-500 bg-sky-600 px-3 text-white shadow-md transition hover:bg-sky-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500`}
+        onClick={() => {
+          setFixedSummary('')
+          setError('')
+          setOpen(true)
+        }}
+      >
+        <span className="text-sm font-bold tracking-tight">t° / φ</span>
+        {todayCount > 0 ? (
+          <span className="rounded-full bg-white/25 px-2 py-0.5 text-xs font-semibold tabular-nums">
+            {todayCount}
+          </span>
+        ) : last ? (
+          <span className="hidden text-xs tabular-nums opacity-90 sm:inline">
+            {last.temperatureC.toFixed(0)}° · {last.humidityPct.toFixed(0)}%
+          </span>
+        ) : null}
+      </button>
+    )
   }
 
   return (
-    <section
-      className="mb-4 overflow-hidden rounded-sm border-2 border-sky-400/70 bg-sky-50 shadow-md ring-1 ring-sky-200/50"
-      aria-label={t('technologist.climate.title')}
-    >
-      <div className="border-b border-sky-200/70 bg-sky-500/10 px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+    <>
+      <button
+        type="button"
+        aria-label={t('common.close')}
+        className="fixed inset-0 z-[89] bg-stone-900/30 print:hidden"
+        onClick={() => setOpen(false)}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('technologist.climate.title')}
+        className={DRAWER_CLASS}
+        style={{
+          bottom: 'max(0px, env(safe-area-inset-bottom))',
+        }}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-2 border-b border-sky-100 bg-sky-50 px-4 py-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
               {t('technologist.climate.badge')}
             </p>
-            <h2 className="text-base font-semibold text-sky-950 sm:text-lg">
+            <h2 className="text-sm font-semibold text-sky-950">
               {t('technologist.climate.title')}
             </h2>
-            <p className="mt-0.5 text-xs text-sky-800/80 sm:text-sm">
-              {t('technologist.climate.hint')}
-            </p>
           </div>
-          <span className="rounded-sm bg-sky-500 px-3 py-1 text-xs font-medium text-white shadow-sm">
-            {records.length}
-          </span>
-        </div>
-      </div>
-
-      <div className="space-y-4 px-4 py-4 sm:px-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <FormField label={t('technologist.climate.date')}>
-            <Input
-              type="date"
-              value={measuredDate}
-              onChange={(e) => setMeasuredDate(e.target.value)}
-            />
-          </FormField>
-          <FormField label={t('technologist.climate.time')}>
-            <Input
-              type="time"
-              value={measuredTime}
-              onChange={(e) => setMeasuredTime(e.target.value)}
-            />
-          </FormField>
-          <FormField label={t('technologist.climate.temperature')}>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="0.1"
-              placeholder="22.5"
-              value={temperature}
-              onChange={(e) => setTemperature(e.target.value)}
-            />
-          </FormField>
-          <FormField label={t('technologist.climate.humidity')}>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="1"
-              min={0}
-              max={100}
-              placeholder="55"
-              value={humidity}
-              onChange={(e) => setHumidity(e.target.value)}
-            />
-          </FormField>
-          <FormField label={t('technologist.climate.room')}>
-            <Input
-              value={roomLabel}
-              onChange={(e) => setRoomLabel(e.target.value)}
-              placeholder={t('technologist.climate.roomPlaceholder')}
-            />
-          </FormField>
-        </div>
-
-        {error ? (
-          <p className="rounded-sm bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={handleFix}
-            className="inline-flex min-h-11 items-center justify-center rounded-sm bg-sky-700 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-sky-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+            className="rounded-sm p-1 text-stone-500 hover:bg-white hover:text-stone-800"
+            onClick={() => setOpen(false)}
+            aria-label={t('common.close')}
           >
-            {t('technologist.climate.fix')}
+            <CloseIcon size={18} />
           </button>
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onClick={() => {
-              setMeasuredDate(todayIso())
-              setMeasuredTime(nowTime())
-            }}
-          >
-            {t('technologist.climate.now')}
-          </Button>
-        </div>
+        </header>
 
-        <div className="rounded-sm border border-sky-200/80 bg-white/70">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-sky-950"
-            onClick={() => setJournalOpen((v) => !v)}
-          >
-            <span>{t('technologist.climate.journal')}</span>
-            <span className="text-xs text-sky-700">{journalOpen ? '▲' : '▼'}</span>
-          </button>
-
-          {journalOpen ? (
-            <div className="border-t border-sky-100 px-2 pb-3 pt-1">
-              <TechnologistRoomClimateJournal
-                records={records}
-                onRemove={onRemove}
-                maxHeightClass="max-h-72"
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label={t('technologist.climate.temperature')}>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                placeholder="22.5"
+                autoFocus
+                className="text-lg tabular-nums"
+                value={temperature}
+                onChange={(e) => setTemperature(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleFix()
+                }}
               />
-            </div>
+            </FormField>
+            <FormField label={t('technologist.climate.humidity')}>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                min={0}
+                max={100}
+                placeholder="55"
+                className="text-lg tabular-nums"
+                value={humidity}
+                onChange={(e) => setHumidity(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleFix()
+                }}
+              />
+            </FormField>
+          </div>
+
+          {error ? (
+            <p className="rounded-sm bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-200">
+              {error}
+            </p>
           ) : null}
+
+          {fixedSummary ? (
+            <p className="rounded-sm bg-teal-50 px-3 py-2 text-xs text-teal-800 ring-1 ring-teal-200">
+              {fixedSummary}
+            </p>
+          ) : null}
+
+          <Button type="button" variant="primary" className="min-h-11 w-full" onClick={handleFix}>
+            {t('technologist.climate.fix')}
+          </Button>
+
+          <div className="min-h-0 border-t border-stone-100 pt-2">
+            <p className="mb-2 text-xs font-medium text-stone-600">
+              {t('technologist.climate.journalToday')}
+            </p>
+            <TechnologistRoomClimateJournal
+              records={records.filter((r) => r.measuredDate === today)}
+              onRemove={onRemove}
+              maxHeightClass="max-h-36"
+              compact
+            />
+          </div>
         </div>
-      </div>
-    </section>
+      </aside>
+    </>
   )
 }

@@ -1,6 +1,9 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { BilingualText } from '@/components/employee/BilingualText'
 import { EmployeePhoto } from '@/components/ui/EmployeePhoto'
+import { useModalScope } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { CecIdentityPanel } from '@/components/hr/CecIdentityPanel'
 import { HrPositionSelect } from '@/components/hr/HrPositionSelect'
 import { HrDocumentOpenButton } from '@/components/hr/HrDocumentOpenButton'
@@ -22,6 +25,7 @@ import {
   HR_DOC_TYPES,
 } from '@/lib/hr/labels'
 import { applyPositionToEmployeeFields, structuralUnitName } from '@/lib/hr/orgStructure'
+import { salaryFieldsFromPosition } from '@/lib/finance/salary'
 import { applyHrStatus } from '@/lib/hr/sync'
 import { daysUntil, isExpiringSoon, isOverdue } from '@/lib/hr/stats'
 import type {
@@ -73,6 +77,7 @@ export function HrEmployeeModal({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [camera, setCamera] = useState<'photo' | 'document' | null>(null)
   const photoFileRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [docForm, setDocForm] = useState<{
     title: string
     docType: string
@@ -152,6 +157,14 @@ export function HrEmployeeModal({
     })
     onClose()
   }
+
+  const { zIndex } = useModalScope({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    onPrimaryAction: saveAndClose,
+    initialFocus: 'none',
+  })
 
   async function addDocumentFromFile(file: File) {
     const fileUrl = await fileToDataUrl(file)
@@ -234,33 +247,29 @@ export function HrEmployeeModal({
     const p = hrPositions.find((x) => x.id === positionId)
     if (!p) return
     const unit = activeUnits.find((u) => u.id === p.structuralUnitId)
+    const salaryPatch = salaryFieldsFromPosition(emp, p)
     patch({
       ...applyPositionToEmployeeFields(p, unit),
-      monthlySalary: p.salary,
-      currency: p.currency,
+      ...(salaryPatch ?? {}),
+      currency: salaryPatch?.currency ?? p.currency,
       contractType: p.contractType,
       probationMonths: p.probationMonths,
     })
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
     <>
-      <div
-        className="app-dialog-backdrop fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto p-4 pt-8 sm:items-center sm:pt-4"
+      {createPortal(
+        <div
+        className="app-dialog-backdrop fixed inset-0 flex items-start justify-center overflow-y-auto p-4 pt-8 sm:items-center sm:pt-4"
+        style={{ zIndex }}
         role="presentation"
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) onClose()
         }}
       >
         <div
+          ref={panelRef}
           className="app-dialog-panel mb-8 w-full max-w-3xl rounded-sm border border-grid bg-white shadow-sm"
           role="dialog"
           aria-modal="true"
@@ -362,6 +371,7 @@ export function HrEmployeeModal({
               </button>
               <button
                 type="button"
+                data-modal-primary
                 className="inline-flex items-center rounded-sm bg-accent px-4 py-1.5 text-sm font-semibold text-white"
                 onClick={saveAndClose}
               >
@@ -758,15 +768,21 @@ export function HrEmployeeModal({
                     <label className="block text-xs font-medium text-stone-500">
                       Оклад / ставка
                       <input
-                        type="number"
-                        className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                        value={emp.monthlySalary ?? ''}
-                        onChange={(e) =>
-                          patch({
-                            monthlySalary: e.target.value ? Number(e.target.value) : undefined,
-                          })
+                        type="text"
+                        readOnly
+                        title="Оклад и ставки редактируются в разделе Финансы → Ставки"
+                        className="mt-1 w-full cursor-not-allowed rounded-sm border border-grid bg-stone-50 px-3 py-2 text-sm text-stone-600"
+                        value={
+                          emp.monthlySalary != null
+                            ? `${emp.monthlySalary.toLocaleString('ru-RU')} ₾/мес`
+                            : emp.hourlyRate != null
+                              ? `${emp.hourlyRate.toLocaleString('ru-RU')} ₾/ч`
+                              : '—'
                         }
                       />
+                      <span className="mt-1 block text-[11px] text-stone-400">
+                        Редактируется в разделе Финансы → Ставки
+                      </span>
                     </label>
                     <label className="block text-xs font-medium text-stone-500">
                       Валюта
@@ -1128,7 +1144,9 @@ export function HrEmployeeModal({
             )}
           </div>
         </div>
-      </div>
+      </div>,
+      getModalPortalRoot(),
+      )}
 
       {camera && (
         <HrCameraModal

@@ -14,6 +14,9 @@ import { ProductColorBadge } from '@/components/ui/ProductColorBadge'
 import { ProductColorPicker } from '@/components/ui/ProductColorPicker'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
 import { emptyProductionOrder } from '@/lib/planner/init'
 import { formatStackDescription } from '@/lib/packaging/calc'
@@ -150,6 +153,16 @@ export function PlannerPage({
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
+  const asOf = useAsOfSnapshot({ initialDate: activeMonth + '-01' })
+  const {
+    enabled: asOfEnabled,
+    setEnabled: setAsOfEnabled,
+    date: asOfDate,
+    setDate: setAsOfDate,
+    time: asOfTime,
+    setTime: setAsOfTime,
+    asOfIso,
+  } = asOf
   const PLANNER_DRAFT_KEY = 'planner-order'
   const [tab, setTab] = useState<Tab>('orders')
   const [notice, setNotice] = useState<string | null>(null)
@@ -213,8 +226,14 @@ export function PlannerPage({
   )
 
   const calendar = useMemo(
-    () => buildCalendarMonth({ orders, nextOrderSeq: 0 }, requests, activeMonth),
-    [orders, requests, activeMonth],
+    () =>
+      buildCalendarMonth(
+        { orders, nextOrderSeq: 0 },
+        requests,
+        activeMonth,
+        asOfEnabled ? (asOfIso ?? undefined) : undefined,
+      ),
+    [orders, requests, activeMonth, asOfEnabled, asOfIso],
   )
 
   const report = useMemo(
@@ -1309,6 +1328,23 @@ export function PlannerPage({
       )}
 
       {tab === 'calendar' && (
+        <div className="space-y-4">
+          <AsOfSnapshotBar
+            enabled={asOfEnabled}
+            onEnabledChange={setAsOfEnabled}
+            date={asOfDate}
+            onDateChange={setAsOfDate}
+            time={asOfTime}
+            onTimeChange={setAsOfTime}
+            hintKey="asOf.hintPlanner"
+          />
+          {asOfEnabled ? (
+            <ProductionDaySnapshot
+              requests={requests}
+              date={asOfDate}
+              asOfIso={asOfIso ?? undefined}
+            />
+          ) : null}
         <div className="overflow-x-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead>
@@ -1381,6 +1417,7 @@ export function PlannerPage({
               )}
             </tbody>
           </table>
+        </div>
         </div>
       )}
 

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { EmployeePhoto } from '@/components/ui/EmployeePhoto'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { EducationSection, ExperienceSection } from '@/components/hr/HrCardSections'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
@@ -219,8 +220,12 @@ function CandidateEditor({
   const labelCls = 'block text-xs font-medium text-stone-500'
 
   return (
-    <div className="app-dialog-backdrop fixed inset-0 z-[150] flex items-start justify-center overflow-y-auto p-4 pt-8 sm:items-center sm:pt-4">
-      <div className="app-dialog-panel mb-8 w-full max-w-2xl rounded-sm bg-white shadow-sm">
+    <ModalBackdrop
+      open
+      onClose={onClose}
+      className="app-dialog-backdrop fixed inset-0 flex items-start justify-center overflow-y-auto p-4 pt-8 sm:items-center sm:pt-4"
+      panelClassName="app-dialog-panel mb-8 w-full max-w-2xl rounded-sm bg-white shadow-sm"
+    >
         <div className="flex items-center justify-between border-b border-grid px-6 py-4">
           <div className="flex items-center gap-3">
             <EmployeePhoto
@@ -416,7 +421,6 @@ function CandidateEditor({
             />
           </label>
         </div>
-      </div>
-    </div>
+    </ModalBackdrop>
   )
 }

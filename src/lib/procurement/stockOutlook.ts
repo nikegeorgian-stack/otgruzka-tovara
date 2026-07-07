@@ -1,4 +1,4 @@
-import { computeAllBalances } from '@/lib/warehouse/stock'
+import { computeAllBalances, computeAllBalancesAsOf } from '@/lib/warehouse/stock'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { PurchaseOrder } from './types'
 
@@ -20,17 +20,20 @@ export type ProcurementStockRow = {
 export function computeProcurementStockRows(
   orders: PurchaseOrder[],
   warehouse: WarehouseStore,
+  asOfIso?: string,
 ): ProcurementStockRow[] {
-  const balances = computeAllBalances(warehouse)
+  const balances = asOfIso
+    ? computeAllBalancesAsOf(warehouse, asOfIso)
+    : computeAllBalances(warehouse)
   const itemMap = new Map(warehouse.items.map((i) => [i.id, i]))
   const agg = new Map<string, ProcurementStockRow>()
 
-  const activeIntl = orders.filter(
-    (o) =>
-      o.scope === 'international' &&
-      o.status !== 'received' &&
-      o.status !== 'cancelled',
-  )
+  const activeIntl = orders.filter((o) => {
+    if (o.scope !== 'international') return false
+    if (o.status === 'received' || o.status === 'cancelled') return false
+    if (asOfIso && o.createdAt > asOfIso) return false
+    return true
+  })
 
   for (const order of activeIntl) {
     for (const line of order.lines) {

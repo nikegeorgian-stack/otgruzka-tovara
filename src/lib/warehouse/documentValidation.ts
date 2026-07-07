@@ -97,13 +97,15 @@ export function matchCounterpartyId(
 
 export function validateWarehouseDocumentInput(
   store: WarehouseStore,
-  doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'status'>,
+  doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'status'> & { id?: string },
+  excludeId?: string,
 ): { ok: true } | { ok: false; errors: DocumentFieldErrors } {
   const errors: DocumentFieldErrors = {}
+  const skipId = excludeId ?? doc.id
 
   if (!doc.warehouseId) errors.warehouseId = 'warehouse.doc.errWarehouse'
   if (!doc.number?.trim()) errors.number = 'warehouse.doc.errNumber'
-  else if (isDocumentNumberTaken(store.documents, doc.number)) {
+  else if (isDocumentNumberTaken(store.documents, doc.number, skipId)) {
     errors.number = 'warehouse.doc.errDuplicateNumber'
   }
   if (!doc.date) errors.date = 'warehouse.doc.errDate'
@@ -141,10 +143,19 @@ export function validateWarehouseDocumentInput(
     }
   }
 
-  for (const line of doc.lines) {
-    if (!line.itemId || line.quantity <= 0) {
-      errors.lines = 'warehouse.doc.errLines'
-      break
+  if (doc.type === 'inventory') {
+    for (const line of doc.lines) {
+      if (!line.itemId || line.quantity < 0 || Number.isNaN(line.quantity)) {
+        errors.lines = 'warehouse.doc.errLines'
+        break
+      }
+    }
+  } else {
+    for (const line of doc.lines) {
+      if (!line.itemId || line.quantity <= 0) {
+        errors.lines = 'warehouse.doc.errLines'
+        break
+      }
     }
   }
 

@@ -32,6 +32,13 @@ export const ACCESS_ROLES: RoleDefinition[] = [
     descriptionKa: 'პერსონალი და ცხრილი',
   },
   {
+    id: 'hr_inspector',
+    labelRu: 'Инспектор по кадрам',
+    labelKa: 'კადრების ინსპექტორი',
+    descriptionRu: 'Контроль документов, иностранного персонала, отпусков и посещаемости',
+    descriptionKa: 'დოკუმენტები, უცხოური პერსონალი, შვებულება',
+  },
+  {
     id: 'operations_director',
     labelRu: 'Операционный директор',
     labelKa: 'ოპერაციული დირექტორი',
@@ -92,12 +99,14 @@ export const DEFAULT_ROLE_VIEWS: Record<AccessRoleId, ViewId[]> = {
     'procurement',
     'hr',
     'finance',
+    'hr_inspector',
     'directories',
     'journals',
     'settings',
   ],
   warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals'],
   hr: ['hr', 'directories', 'month', 'summary', 'journals'],
+  hr_inspector: ['hr_inspector', 'summary', 'journals'],
   operations_director: [
     'director',
     'summary',

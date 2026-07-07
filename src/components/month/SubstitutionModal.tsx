@@ -13,6 +13,7 @@ import {
   findRowByEmployeeId,
   getSubstitution,
 } from '@/lib/substitutions'
+import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
 import type { DayCode, DaySubstitution, Employee, MonthSheet } from '@/lib/types'
 
 type Props = {
@@ -55,7 +56,8 @@ export function SubstitutionModal({
 
   const substituteOptions = useMemo(() => {
     const active = employees.filter(
-      (e) => e.active && (e.hrStatus ?? 'active') !== 'fired' && e.id !== row?.employeeId,
+      (e) =>
+        employeeActiveInMonth(e, sheet.month) && e.id !== row?.employeeId,
     )
     const same = active.filter((e) => e.brigade === brigade)
     const other = active.filter((e) => e.brigade !== brigade)
@@ -99,7 +101,6 @@ export function SubstitutionModal({
       title={t('substitution.title')}
       subtitle={subtitle}
       size="md"
-      zIndex={110}
       footer={
         <div className="flex w-full flex-wrap justify-end gap-2">
           {existing && (
@@ -149,6 +150,7 @@ export function SubstitutionModal({
             employees={substituteOptions}
             value={substituteEmployeeId || null}
             brigade={brigade}
+            month={sheet.month}
             excludeId={row?.employeeId ?? undefined}
             placeholder={t('substitution.pickSubstitute')}
             onChange={handleSubstituteChange}

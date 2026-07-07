@@ -82,6 +82,7 @@ export function FormulationMixerPanel({
   const [shiftBrigade, setShiftBrigade] = useState(initialBrigade ?? brigades[0] ?? '')
   const [shiftNote, setShiftNote] = useState('')
   const [comment, setComment] = useState('')
+  const [showExtra, setShowExtra] = useState(false)
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(
     null,
   )
@@ -148,8 +149,8 @@ export function FormulationMixerPanel({
       )}
 
       <Card title={t('technologist.mixerTitle')} description={t('technologist.mixerHint')}>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <FormField label={t('technologist.field.recipe')}>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <FormField label={t('technologist.field.recipe')} className="sm:col-span-2 xl:col-span-1">
             <select
               className="fc-input"
               value={recipeId}
@@ -213,17 +214,31 @@ export function FormulationMixerPanel({
             </select>
           </FormField>
 
-          <FormField label={t('technologist.field.shiftNote')}>
-            <Input
-              value={shiftNote}
-              onChange={(e) => setShiftNote(e.target.value)}
-              placeholder={t('technologist.field.shiftNotePh')}
-            />
-          </FormField>
+          <div className="sm:col-span-2 xl:col-span-3">
+            <button
+              type="button"
+              className="text-xs font-medium text-teal-700 hover:text-teal-900"
+              onClick={() => setShowExtra((v) => !v)}
+            >
+              {showExtra ? t('technologist.mixer.lessFields') : t('technologist.mixer.moreFields')}
+            </button>
+          </div>
 
-          <FormField label={t('technologist.field.comment')} className="lg:col-span-2">
-            <Input value={comment} onChange={(e) => setComment(e.target.value)} />
-          </FormField>
+          {showExtra ? (
+            <>
+              <FormField label={t('technologist.field.shiftNote')} className="sm:col-span-2">
+                <Input
+                  value={shiftNote}
+                  onChange={(e) => setShiftNote(e.target.value)}
+                  placeholder={t('technologist.field.shiftNotePh')}
+                />
+              </FormField>
+
+              <FormField label={t('technologist.field.comment')} className="sm:col-span-2 xl:col-span-3">
+                <Input value={comment} onChange={(e) => setComment(e.target.value)} />
+              </FormField>
+            </>
+          ) : null}
         </div>
       </Card>
 
@@ -295,9 +310,10 @@ export function FormulationMixerPanel({
             </table>
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Button
               variant="primary"
+              className="min-h-11 px-6"
               disabled={!plan.mixAllowed || !operatorId}
               onClick={handlePost}
             >

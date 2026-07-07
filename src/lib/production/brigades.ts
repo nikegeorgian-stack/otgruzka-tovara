@@ -1,5 +1,6 @@
 import type { Employee, MonthSheet } from '@/lib/types'
 import type { ProductionLineId, ProductionRosterEntry } from './types'
+import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
 
 const FOREMAN_RE = /бригадир|ბრიგადირი/i
 
@@ -14,9 +15,12 @@ export function employeesInBrigade(
   sheet?: MonthSheet | null,
 ): Employee[] {
   if (!brigade) return []
+  const month = sheet?.month
   const byId = new Map<string, Employee>()
   for (const e of employees) {
-    if (!e.active || (e.hrStatus ?? 'active') === 'fired') continue
+    if (month ? !employeeActiveInMonth(e, month) : !e.active || (e.hrStatus ?? 'active') === 'fired') {
+      continue
+    }
     if (e.brigade === brigade) byId.set(e.id, e)
   }
   if (sheet) {
@@ -25,7 +29,8 @@ export function employeesInBrigade(
       .sort((a, b) => a.sortOrder - b.sortOrder)
     for (const row of rows) {
       const emp = employees.find((e) => e.id === row.employeeId)
-      if (emp?.active) byId.set(emp.id, emp)
+      if (!emp) continue
+      if (month ? employeeActiveInMonth(emp, month) : emp.active) byId.set(emp.id, emp)
     }
   }
   return [...byId.values()].sort((a, b) =>

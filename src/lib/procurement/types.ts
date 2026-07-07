@@ -113,6 +113,8 @@ export type PurchaseOrderStatusChange = {
   fromStatus?: PurchaseOrderStatus
   toStatus: PurchaseOrderStatus
   note?: string
+  /** Приход на склад при приёмке заказа */
+  warehouseDocumentId?: string
 }
 
 export type PurchaseOrder = {

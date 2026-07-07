@@ -1,6 +1,7 @@
 import { DEFAULT_BRIGADES } from './brigades.constants'
 import { createEmptyBrigadeRow } from './brigadeRows'
 import { monthKey } from './dates'
+import { employeeActiveInMonth } from './hr/employeeActive'
 import { buildPlanRow } from './schedule'
 import type { AppStore, DayCode, Employee, MonthSheet, TimesheetRow } from './types'
 
@@ -18,8 +19,8 @@ export function createMonthSheet(
 
   for (const brigade of brigades) {
     const inBrigade = employees
-      .filter((e) => e.active && e.brigade === brigade)
-      .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber, 'ru'))
+      .filter((e) => employeeActiveInMonth(e, month) && e.brigade === brigade)
+      .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber, 'ru', { numeric: true }))
 
     for (const emp of inBrigade) {
       rows.push({
@@ -52,6 +53,9 @@ export function createMonthSheet(
     comments: {},
     substitutions: {},
     factExtraHours: {},
+    brigadierDays: {},
+    factHoursOverride: {},
+    dayTransfers: {},
   }
 }
 

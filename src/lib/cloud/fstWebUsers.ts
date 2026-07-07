@@ -11,9 +11,13 @@ export type FstWebUserProfile = {
   uid?: string
 }
 
-/** Firebase email → роль и отображаемое имя (облачные учётки). */
-const WEB_USER_DIRECTORY: Record<string, Pick<FstWebUserProfile, 'roleId' | 'displayName'>> = {
+/** Firebase email → роль и отображаемое имя (legacy, до миграции в store.access). */
+export const LEGACY_WEB_USER_DIRECTORY: Record<
+  string,
+  Pick<FstWebUserProfile, 'roleId' | 'displayName'>
+> = {
   'hr-nino@fibercell.net': { roleId: 'hr', displayName: 'Нино' },
+  'inspektor-nata@fibercell.net': { roleId: 'hr_inspector', displayName: 'Ната' },
   'finans-lizi@fibercell.net': { roleId: 'finance', displayName: 'Лизи' },
   'sklad-alexandra@fibercell.net': { roleId: 'warehouse_keeper', displayName: 'Александра' },
   'manager-ved-tamara@fibercell.net': { roleId: 'procurement_manager', displayName: 'Тамара' },
@@ -25,9 +29,18 @@ const WEB_USER_DIRECTORY: Record<string, Pick<FstWebUserProfile, 'roleId' | 'dis
   'master-valera@fibercell.net': { roleId: 'workshop_master', displayName: 'Валера' },
 }
 
+/** E-mail уже зарегистрирован в Firebase (legacy / админ) — не создавать повторно. */
+export function isKnownWebFirebaseEmail(email: string | null | undefined): boolean {
+  if (!email?.trim()) return false
+  const key = email.trim().toLowerCase()
+  if (isFstAdminEmail(key)) return true
+  return key in LEGACY_WEB_USER_DIRECTORY
+}
+
 /** Разделы в облаке — уже чем на desktop. */
 export const FST_WEB_ROLE_VIEWS: Partial<Record<AccessRoleId, ViewId[]>> = {
   hr: ['hr'],
+  hr_inspector: ['hr_inspector'],
   finance: ['finance'],
   warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals'],
   procurement_manager: ['procurement', 'directories'],
@@ -52,10 +65,11 @@ export const FST_WEB_ROLE_VIEWS: Partial<Record<AccessRoleId, ViewId[]>> = {
 export function resolveFstWebProfile(
   email: string | null | undefined,
   uid?: string | null,
+  access?: AccessStore | null,
 ): FstWebUserProfile | null {
   if (!email?.trim()) return null
   const key = email.trim().toLowerCase()
-  if (!isFstWebAllowedEmail(key)) return null
+
   if (isFstAdminEmail(key)) {
     return {
       email: key,
@@ -64,9 +78,23 @@ export function resolveFstWebProfile(
       uid: uid ?? undefined,
     }
   }
-  const row = WEB_USER_DIRECTORY[key]
-  if (!row) return null
-  return { email: key, uid: uid ?? undefined, ...row }
+
+  const stored = access?.users.find((u) => u.login === key && u.active)
+  if (stored) {
+    return {
+      email: key,
+      roleId: stored.roleId,
+      displayName: stored.displayName || key,
+      uid: uid ?? undefined,
+    }
+  }
+
+  const row = LEGACY_WEB_USER_DIRECTORY[key]
+  if (row && isFstWebAllowedEmail(key)) {
+    return { email: key, uid: uid ?? undefined, ...row }
+  }
+
+  return null
 }
 
 export function buildWebAppUser(profile: FstWebUserProfile): AppUser {
@@ -90,13 +118,13 @@ export function webViewsForRole(access: AccessStore, roleId: AccessRoleId): View
   return viewsForRole(access, roleId)
 }
 
-export function webAccessStore(access: AccessStore, roleId: AccessRoleId): AccessStore {
-  const web = FST_WEB_ROLE_VIEWS[roleId]
-  if (!web) return access
-  return {
-    ...access,
-    roleViews: { ...access.roleViews, [roleId]: [...web] },
-  }
+/** Облако: roleViews из store (настраивает админ), без жёсткого override. */
+export function webAccessStore(access: AccessStore, _roleId: AccessRoleId): AccessStore {
+  return access
+}
+
+export function isWebHrInspectorRole(roleId: AccessRoleId | undefined): boolean {
+  return roleId === 'hr_inspector'
 }
 
 export function isWebHrRole(roleId: AccessRoleId | undefined): boolean {

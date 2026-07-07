@@ -1,13 +1,15 @@
 import type { WarehouseDocument } from './types'
 
-export function documentNumberPrefix(type: 'receipt' | 'issue'): string {
-  return type === 'receipt' ? 'ПР' : 'РС'
+export function documentNumberPrefix(type: WarehouseDocument['type']): string {
+  if (type === 'receipt') return 'ПР'
+  if (type === 'issue') return 'РС'
+  return 'ИНВ'
 }
 
 /** Следующий номер: ПР-20260619-001 (сквозная нумерация за день по типу) */
 export function nextDocumentNumber(
   documents: WarehouseDocument[],
-  type: 'receipt' | 'issue',
+  type: WarehouseDocument['type'],
   date: string,
 ): string {
   const prefix = documentNumberPrefix(type)

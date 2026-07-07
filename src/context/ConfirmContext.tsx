@@ -21,6 +21,14 @@ type AlertOptions = {
 type ConfirmContextValue = {
   confirm: (opts: ConfirmOptions) => Promise<boolean>
   alert: (opts: AlertOptions) => Promise<void>
+  /** Несохранённые изменения: save | discard | cancel */
+  confirmUnsaved: (opts?: {
+    title?: string
+    message?: string
+    saveLabel?: string
+    discardLabel?: string
+    cancelLabel?: string
+  }) => Promise<'save' | 'discard' | 'cancel'>
 }
 
 const ConfirmContext = createContext<ConfirmContextValue | null>(null)
@@ -28,16 +36,33 @@ const ConfirmContext = createContext<ConfirmContextValue | null>(null)
 type DialogState =
   | { kind: 'confirm'; opts: ConfirmOptions }
   | { kind: 'alert'; opts: AlertOptions }
+  | {
+      kind: 'unsaved'
+      opts: {
+        title?: string
+        message?: string
+        saveLabel?: string
+        discardLabel?: string
+        cancelLabel?: string
+      }
+    }
   | null
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const [state, setState] = useState<DialogState>(null)
   const resolverRef = useRef<((value: boolean) => void) | null>(null)
+  const unsavedResolverRef = useRef<((value: 'save' | 'discard' | 'cancel') => void) | null>(null)
 
   const close = useCallback((result: boolean) => {
     resolverRef.current?.(result)
     resolverRef.current = null
+    setState(null)
+  }, [])
+
+  const closeUnsaved = useCallback((result: 'save' | 'discard' | 'cancel') => {
+    unsavedResolverRef.current?.(result)
+    unsavedResolverRef.current = null
     setState(null)
   }, [])
 
@@ -55,7 +80,26 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const value = useMemo(() => ({ confirm, alert }), [confirm, alert])
+  const confirmUnsaved = useCallback(
+    (opts?: {
+      title?: string
+      message?: string
+      saveLabel?: string
+      discardLabel?: string
+      cancelLabel?: string
+    }) => {
+      return new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+        unsavedResolverRef.current = resolve
+        setState({ kind: 'unsaved', opts: opts ?? {} })
+      })
+    },
+    [],
+  )
+
+  const value = useMemo(
+    () => ({ confirm, alert, confirmUnsaved }),
+    [confirm, alert, confirmUnsaved],
+  )
 
   return (
     <ConfirmContext.Provider value={value}>
@@ -64,7 +108,6 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <AppDialog
           open
           size="md"
-          zIndex={200}
           onClose={() => close(false)}
           title={state.opts.title ?? t('common.confirmTitle')}
           footer={
@@ -91,7 +134,6 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <AppDialog
           open
           size="md"
-          zIndex={200}
           onClose={() => close(true)}
           title={state.opts.title ?? t('common.notice')}
           footer={
@@ -104,6 +146,33 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         >
           <div className="px-5 py-4 text-sm leading-relaxed text-ink whitespace-pre-line">
             {state.opts.message}
+          </div>
+        </AppDialog>
+      )}
+      {state?.kind === 'unsaved' && (
+        <AppDialog
+          open
+          size="md"
+          blockBackdropClose
+          disableEnterSubmit
+          onClose={() => closeUnsaved('cancel')}
+          title={state.opts.title ?? t('common.unsavedTitle')}
+          footer={
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => closeUnsaved('cancel')}>
+                {state.opts.cancelLabel ?? t('common.cancel')}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => closeUnsaved('discard')}>
+                {state.opts.discardLabel ?? t('common.discardChanges')}
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => closeUnsaved('save')}>
+                {state.opts.saveLabel ?? t('common.save')}
+              </Button>
+            </div>
+          }
+        >
+          <div className="px-5 py-4 text-sm leading-relaxed text-ink whitespace-pre-line">
+            {state.opts.message ?? t('common.unsavedChanges')}
           </div>
         </AppDialog>
       )}

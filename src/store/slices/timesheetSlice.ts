@@ -5,6 +5,7 @@ import {
   removeBrigadeFromStore,
   renameBrigadeInStore,
 } from '@/lib/brigadeManage'
+import { syncEmployeeUnitFromBrigade } from '@/lib/brigadeUnits'
 import {
   addBrigadeRow,
   normalizeBrigadeSlots,
@@ -17,9 +18,15 @@ import {
   setCellComment,
   type CopyPlanToFactScope,
 } from '@/lib/bulkOps'
-import { nextCode } from '@/lib/codes'
+import { hoursForCode, nextCode } from '@/lib/codes'
 import { dayDateKey, parseMonthKey } from '@/lib/dates'
+import {
+  findHomeWorkRow,
+  setFactWithOverride,
+  withDayTransfer,
+} from '@/lib/dayTransfer'
 import { ensureMonthReady } from '@/lib/monthReady'
+import { isMonthClosed } from '@/lib/monthManage'
 import { ensureMonth, syncPlanRow } from '@/lib/monthSheet'
 import {
   cycleStartFromDay,
@@ -53,6 +60,7 @@ import type { StoreSliceDeps } from '../storeApi'
 export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
   function updateMonth(month: string, updater: (sheet: MonthSheet) => MonthSheet) {
     setStore((s) => {
+      if (isMonthClosed(s, month)) return s
       const base = ensureMonth(s, month)
       const sheet = base.months[month]
       return {
@@ -71,6 +79,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     assignRowEmployee(month: string, rowId: string, employeeId: string | null) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find((r) => r.id === rowId)
@@ -122,6 +131,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       code: DayCode,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find((r) => r.id === rowId)
@@ -138,8 +148,10 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
           const oKey = `${rowId}|${dateKey}`
           const prev = getFactMark(sheet, rowId, dateKey) ?? ''
           const factExtraHours = { ...(sheet.factExtraHours ?? {}) }
+          const factHoursOverride = { ...(sheet.factHoursOverride ?? {}) }
           if (!isWorkCode(code)) {
             delete factExtraHours[cellLookupKey(rowId, dateKey)]
+            delete factHoursOverride[cellLookupKey(rowId, dateKey)]
           }
           nextSheet = {
             ...sheet,
@@ -148,6 +160,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
               ? sheet.factOverrides
               : [...sheet.factOverrides, oKey],
             factExtraHours,
+            factHoursOverride,
           }
           let next = { ...base, months: { ...base.months, [month]: nextSheet } }
           next = auditFactChange(
@@ -167,6 +180,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     cycleMark(month: string, rowId: string, dateKey: string, mode: 'plan' | 'fact') {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find((r) => r.id === rowId)
@@ -211,6 +225,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     setCellComment(month: string, rowId: string, dateKey: string, text: string) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = setCellComment(base.months[month], rowId, dateKey, text)
         let next = { ...base, months: { ...base.months, [month]: sheet } }
@@ -233,6 +248,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): { warningNoRow?: boolean } {
       let warningNoRow = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const { sheet, warningNoRow: warn } = applySubstitution(
           base.months[month],
@@ -258,6 +274,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     clearSubstitution(month: string, rowId: string, dateKey: string) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = clearSubstitution(base.months[month], rowId, dateKey)
         return { ...base, months: { ...base.months, [month]: sheet } }
@@ -266,6 +283,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     bulkHolidayV(month: string) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = applyHolidayVForAll(base.months[month])
         let next = { ...base, months: { ...base.months, [month]: sheet } }
@@ -275,6 +293,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     bulkCopyPlanToFact(month: string, scope: CopyPlanToFactScope, brigade?: string) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = copyPlanToFact(base.months[month], base.employees, scope, brigade)
         let next = { ...base, months: { ...base.months, [month]: sheet } }
@@ -288,6 +307,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
     bulkCopyPlanToFact52(month: string) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = copyPlanToFact(base.months[month], base.employees, '52')
         let next = { ...base, months: { ...base.months, [month]: sheet } }
@@ -352,11 +372,69 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       })
     },
 
+    setBrigadierDay(month: string, rowId: string, dateKey: string, on: boolean) {
+      updateMonth(month, (sheet) => {
+        const key = `${rowId}|${dateKey}`
+        const current = sheet.brigadierDays ?? {}
+        if (on) {
+          if (current[key]) return sheet
+          return { ...sheet, brigadierDays: { ...current, [key]: true } }
+        }
+        if (!current[key]) return sheet
+        const { [key]: _removed, ...rest } = current
+        return { ...sheet, brigadierDays: rest }
+      })
+    },
+
+    /** Отметить/снять бригадирство на весь месяц (по плановым рабочим дням строки). */
+    setBrigadierMonth(month: string, rowId: string, on: boolean) {
+      updateMonth(month, (sheet) => {
+        const { year, month: mo } = parseMonthKey(sheet.month)
+        const days = new Date(year, mo, 0).getDate()
+        const prefix = `${rowId}|`
+        const next: Record<string, true> = {}
+        for (const [k, v] of Object.entries(sheet.brigadierDays ?? {})) {
+          if (!k.startsWith(prefix)) next[k] = v
+        }
+        if (on) {
+          const rowPlan = sheet.plan[rowId] ?? {}
+          for (let d = 1; d <= days; d++) {
+            const dateKey = dayDateKey(year, mo, d)
+            if (isWorkCode(rowPlan[dateKey] ?? '')) next[`${prefix}${dateKey}`] = true
+          }
+        }
+        return { ...sheet, brigadierDays: next }
+      })
+    },
+
     setBrigadeNameKa(nameRu: string, nameKa: string) {
       setStore((s) => ({
         ...s,
         brigadeNamesKa: { ...s.brigadeNamesKa, [nameRu]: nameKa },
       }))
+    },
+
+    setBrigadeUnit(brigade: string, unitId: string | null) {
+      setStore((s) => {
+        const current = s.brigadeUnits ?? {}
+        let brigadeUnits: Record<string, string>
+        if (!unitId) {
+          const { [brigade]: _removed, ...rest } = current
+          brigadeUnits = rest
+        } else {
+          brigadeUnits = { ...current, [brigade]: unitId }
+        }
+        // Always-sync: подтягиваем подразделение всем сотрудникам этой бригады.
+        const unit = unitId ? s.hrStructuralUnits.find((u) => u.id === unitId) : undefined
+        const employees = unit
+          ? s.employees.map((e) =>
+              e.brigade === brigade
+                ? { ...e, structuralUnitId: unit.id, department: unit.name }
+                : e,
+            )
+          : s.employees
+        return { ...s, brigadeUnits, employees }
+      })
     },
 
     removeBrigade(name: string) {
@@ -377,6 +455,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       brigade: string,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const withTpl = applyTemplateToBrigade(s, templateId, brigade)
         const base = ensureMonth(withTpl, month)
         let sheet = base.months[month]
@@ -420,6 +499,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find(
@@ -445,6 +525,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     swapEmployeeRows(month: string, employeeIdA: string, employeeIdB: string): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const rowA = sheet.rows.find((r) => r.employeeId === employeeIdA)
@@ -475,6 +556,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const emp = base.employees.find((e) => e.id === employeeId)
         if (!emp) return base
@@ -510,6 +592,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const emp = base.employees.find((e) => e.id === employeeId)
         if (!emp) return base
@@ -549,6 +632,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const emp = base.employees.find((e) => e.id === employeeId)
         if (!emp || !isCyclicSchedule(emp.schedule)) return base
@@ -587,11 +671,12 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
     ): boolean {
       let ok = false
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const emp = base.employees.find((e) => e.id === employeeId)
         if (!emp || !base.brigades.includes(brigade)) return base
 
-        const updatedEmp = { ...emp, brigade }
+        const updatedEmp = syncEmployeeUnitFromBrigade({ ...emp, brigade }, base, brigade)
         let sheet = base.months[month]
 
         let targetRowId = sheet.rows.find(
@@ -652,6 +737,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       syncHr: boolean,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = applyBrigadeRoster(
           base.months[month],
@@ -663,7 +749,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
         if (syncHr) {
           const selected = new Set(employeeIds)
           employees = employees.map((e) => {
-            if (selected.has(e.id)) return { ...e, brigade }
+            if (selected.has(e.id)) return syncEmployeeUnitFromBrigade({ ...e, brigade }, base, brigade)
             if (e.brigade === brigade && !selected.has(e.id)) {
               return { ...e, brigade: '' }
             }
@@ -693,6 +779,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       code: DayCode,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find((r) => r.id === rowId)
@@ -761,6 +848,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       code: DayCode,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const row = sheet.rows.find((r) => r.employeeId === employeeId)
@@ -804,6 +892,7 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
       hours: FactExtraHours,
     ) {
       setStore((s) => {
+        if (isMonthClosed(s, month)) return s
         const base = ensureMonth(s, month)
         const sheet = base.months[month]
         const code = getFactMark(sheet, rowId, dateKey)
@@ -811,19 +900,129 @@ export function createTimesheetSlice({ setStore, getStore }: StoreSliceDeps) {
 
         const key = cellLookupKey(rowId, dateKey)
         const factExtraHours = { ...(sheet.factExtraHours ?? {}) }
+        const factHoursOverride = { ...(sheet.factHoursOverride ?? {}) }
         if (hours <= 0) {
           delete factExtraHours[key]
         } else {
           factExtraHours[key] = hours
+          delete factHoursOverride[key]
         }
         return {
           ...base,
           months: {
             ...base.months,
-            [month]: { ...sheet, factExtraHours },
+            [month]: { ...sheet, factExtraHours, factHoursOverride },
           },
         }
       })
+    },
+
+    /** Точные отработанные часы за смену (ушёл раньше/задержался). null — вернуть норму кода. */
+    setFactHours(
+      month: string,
+      rowId: string,
+      dateKey: string,
+      hours: number | null,
+    ) {
+      setStore((s) => {
+        if (isMonthClosed(s, month)) return s
+        const base = ensureMonth(s, month)
+        const sheet = base.months[month]
+        const code = getFactMark(sheet, rowId, dateKey)
+        if (!isWorkCode(code)) return s
+
+        const key = cellLookupKey(rowId, dateKey)
+        const factHoursOverride = { ...(sheet.factHoursOverride ?? {}) }
+        const factExtraHours = { ...(sheet.factExtraHours ?? {}) }
+        const norm = hoursForCode(code)
+        const clamped =
+          hours == null ? null : Math.max(0, Math.min(24, Math.round(hours)))
+        if (clamped == null || clamped === norm) {
+          delete factHoursOverride[key]
+        } else {
+          factHoursOverride[key] = clamped
+          delete factExtraHours[key]
+        }
+        return {
+          ...base,
+          months: {
+            ...base.months,
+            [month]: { ...sheet, factHoursOverride, factExtraHours },
+          },
+        }
+      })
+    },
+
+    /** Добавить сотрудника на смену только за конкретный день (доп. выход по факту). */
+    addBrigadeDayWorker(
+      month: string,
+      brigade: string,
+      employeeId: string,
+      dateKey: string,
+      code: DayCode,
+    ): boolean {
+      let ok = false
+      setStore((s) => {
+        if (isMonthClosed(s, month)) return s
+        const base = ensureMonth(s, month)
+        const emp = base.employees.find((e) => e.id === employeeId)
+        if (!emp || !base.brigades.includes(brigade)) return base
+
+        let sheet = base.months[month]
+        const homeRowId = findHomeWorkRow(sheet, employeeId, dateKey, brigade)
+
+        let targetRowId = sheet.rows.find(
+          (r) => r.brigade === brigade && r.employeeId === employeeId,
+        )?.id
+        if (!targetRowId) {
+          let emptyId = sheet.rows.find(
+            (r) => r.brigade === brigade && !r.employeeId,
+          )?.id
+          if (!emptyId) {
+            sheet = addBrigadeRow(sheet, brigade)
+            emptyId = sheet.rows.find(
+              (r) => r.brigade === brigade && !r.employeeId,
+            )?.id
+          }
+          if (!emptyId) return base
+          sheet = {
+            ...sheet,
+            rows: sheet.rows.map((r) =>
+              r.id === emptyId ? { ...r, employeeId } : r,
+            ),
+          }
+          targetRowId = emptyId
+        }
+
+        if (homeRowId) {
+          sheet = setFactWithOverride(sheet, homeRowId, dateKey, 'В')
+          sheet = withDayTransfer(sheet, employeeId, dateKey, {
+            fromRowId: homeRowId,
+            toRowId: targetRowId,
+            toBrigade: brigade,
+          })
+        }
+
+        const oKey = `${targetRowId}|${dateKey}`
+        const nextSheet: MonthSheet = {
+          ...sheet,
+          fact: {
+            ...sheet.fact,
+            [targetRowId]: { ...sheet.fact[targetRowId], [dateKey]: code },
+          },
+          factOverrides: sheet.factOverrides.includes(oKey)
+            ? sheet.factOverrides
+            : [...sheet.factOverrides, oKey],
+        }
+        ok = true
+        let next = { ...base, months: { ...base.months, [month]: nextSheet } }
+        next = auditFactChange(next, month, targetRowId, dateKey, employeeId, '', code)
+        if (homeRowId) {
+          next = auditFactChange(next, month, homeRowId, dateKey, employeeId, '', 'В')
+        }
+        return next
+      })
+      return ok
     },
   }
 }

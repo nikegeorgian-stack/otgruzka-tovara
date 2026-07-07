@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { usePopoverZIndex } from '@/hooks/useModalScope'
+import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { useI18n } from '@/context/I18nContext'
 import { FACT_EXTRA_HOURS_OPTIONS } from '@/lib/factExtra'
 import { scheduleShortLabel } from '@/lib/schedules'
@@ -67,6 +69,7 @@ export function CellCodePicker({
 }: Props) {
   const { t, tf, codeLabel } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
+  const popoverZ = usePopoverZIndex()
   const [pos, setPos] = useState({ left: x, top: y })
   const canAddExtra = mode === 'fact' && !!onPickExtra
 
@@ -106,10 +109,10 @@ export function CellCodePicker({
   return createPortal(
     <div
       ref={ref}
-      className={`app-dialog-panel fixed z-[150] overflow-hidden rounded-sm border border-grid bg-white shadow-sm  ${
+      className={`app-dialog-panel fixed overflow-hidden rounded-sm border border-grid bg-white shadow-sm  ${
         canAddExtra ? 'w-[18rem]' : 'w-[16rem]'
       }`}
-      style={{ left: pos.left, top: pos.top }}
+      style={{ left: pos.left, top: pos.top, zIndex: popoverZ }}
       role="dialog"
       aria-label={t('cellPicker.title')}
     >
@@ -235,6 +238,6 @@ export function CellCodePicker({
       </p>
       </div>
     </div>,
-    document.body,
+    getModalPortalRoot(),
   )
 }

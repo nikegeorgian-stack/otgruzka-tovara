@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CloseIcon } from '@/components/ui/icons'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { OrderStatusBadge } from '@/components/procurement/OrderStatusBadge'
 import { ContainerTrackingPanel } from '@/components/procurement/ContainerTrackingPanel'
 import { PurchaseOrderDocumentsTab } from '@/components/procurement/PurchaseOrderDocumentsTab'
@@ -235,8 +236,12 @@ export function PurchaseOrderModal({
   ]
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4">
-      <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-sm bg-white shadow-sm">
+    <ModalBackdrop
+      open
+      onClose={onClose}
+      className="fixed inset-0 flex items-center justify-center bg-black/45 p-4"
+      panelClassName="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-sm bg-white shadow-sm"
+    >
         <div className="flex items-start justify-between gap-4 border-b border-grid px-6 py-4">
           <div>
             <p className="font-mono text-xs font-semibold text-teal-700">{draft.orderNumber}</p>
@@ -1237,7 +1242,6 @@ export function PurchaseOrderModal({
             {t('common.save')}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalBackdrop>
   )
 }

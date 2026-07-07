@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { CloseIcon } from '@/components/ui/icons'
 import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
@@ -48,7 +48,7 @@ import type {
   WriteoffReasonId,
   WarehouseStore,
 } from '@/lib/warehouse/types'
-import type { PostDocumentResult } from '@/lib/warehouse/documents'
+import type { PostDocumentResult, SaveDraftInput } from '@/lib/warehouse/documents'
 
 const RECEIPT_PURPOSES: WarehouseDocumentPurpose[] = ['purchase', 'return', 'other']
 const ISSUE_PURPOSES: WarehouseDocumentPurpose[] = [
@@ -93,6 +93,8 @@ type Props = {
   initialPickSearch?: string
   initialPickOpen?: boolean
   onPost: (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => PostDocumentResult
+  /** Сохранить черновик (без движений). Если не задан — кнопки черновика нет. */
+  onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult
   onPostTransfer?: (
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string
@@ -107,13 +109,58 @@ type Props = {
   productionRequests?: ProductionRequest[]
   keeperId?: string
   keeperName?: string
+  /** Редактирование / просмотр существующего документа (не inventory). */
+  existingDocument?: WarehouseDocument | null
+  readOnly?: boolean
+}
+
+export type WarehouseDocumentEditorHandle = {
+  isDirty: () => boolean
+  saveDraft: () => boolean
 }
 
 function newLine(): DocLineRow {
   return { key: crypto.randomUUID(), itemId: null, quantity: '' }
 }
 
-export function WarehouseDocumentEditor({
+function linesFromDocument(doc: WarehouseDocument): DocLineRow[] {
+  if (!doc.lines.length) return [newLine()]
+  return doc.lines.map((l) => ({
+    key: crypto.randomUUID(),
+    itemId: l.itemId,
+    quantity: String(l.quantity),
+    unit: l.inputUnit,
+    unitPrice: l.unitPrice != null ? String(l.unitPrice) : undefined,
+    batchNo: l.batchNo,
+    expiryDate: l.expiryDate,
+  }))
+}
+
+function stateFromDocument(doc: WarehouseDocument) {
+  return {
+    type: (doc.type === 'issue' ? 'issue' : 'receipt') as 'receipt' | 'issue',
+    docWarehouseId: doc.warehouseId,
+    targetWarehouseId: doc.targetWarehouseId ?? '',
+    purpose: doc.purpose ?? defaultPurpose(doc.type === 'issue' ? 'issue' : 'receipt'),
+    date: doc.date,
+    number: doc.number,
+    numberTouched: true,
+    counterpartyId: doc.counterpartyId ?? '',
+    contractId: doc.contractId ?? '',
+    counterparty: doc.counterparty ?? '',
+    brigade: doc.brigade ?? '',
+    productionRequestId: doc.productionRequestId ?? '',
+    writeoffReason: (doc.writeoffReason ?? '') as WriteoffReasonId | '',
+    comment: doc.comment ?? '',
+    invoiceKey: doc.invoiceKey,
+    sellerTin: doc.sellerTin,
+    lines: linesFromDocument(doc),
+  }
+}
+
+export const WarehouseDocumentEditor = forwardRef<WarehouseDocumentEditorHandle, Props>(
+  function WarehouseDocumentEditor(
+{
   warehouse,
   categoryNames,
   balances,
@@ -125,6 +172,7 @@ export function WarehouseDocumentEditor({
   initialPickSearch,
   initialPickOpen = false,
   onPost,
+  onSaveDraft,
   onPostTransfer,
   onMergeInvoiceRegistry,
   onCancel,
@@ -135,28 +183,35 @@ export function WarehouseDocumentEditor({
   productionRequests = [],
   keeperId,
   keeperName,
-}: Props) {
+  existingDocument = null,
+  readOnly = false,
+}: Props,
+ref,
+) {
   const { t, locale } = useI18n()
   const { confirm } = useConfirm()
   const defaultWhId = warehouseId || warehouse.locations[0]?.id || ''
+  const seeded = existingDocument ? stateFromDocument(existingDocument) : null
 
-  const [type, setType] = useState<'receipt' | 'issue'>(initialType)
-  const [docWarehouseId, setDocWarehouseId] = useState(defaultWhId)
-  const [targetWarehouseId, setTargetWarehouseId] = useState('')
-  const [purpose, setPurpose] = useState<WarehouseDocumentPurpose>(() => defaultPurpose(initialType))
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [number, setNumber] = useState('')
-  const [numberTouched, setNumberTouched] = useState(false)
-  const [counterpartyId, setCounterpartyId] = useState('')
-  const [contractId, setContractId] = useState('')
-  const [counterparty, setCounterparty] = useState('')
-  const [brigade, setBrigade] = useState('')
-  const [productionRequestId, setProductionRequestId] = useState('')
-  const [writeoffReason, setWriteoffReason] = useState<WriteoffReasonId | ''>('')
-  const [comment, setComment] = useState('')
-  const [invoiceKey, setInvoiceKey] = useState<string | undefined>()
-  const [sellerTin, setSellerTin] = useState<string | undefined>()
-  const [lines, setLines] = useState<DocLineRow[]>(() => [newLine()])
+  const [type, setType] = useState<'receipt' | 'issue'>(seeded?.type ?? initialType)
+  const [docWarehouseId, setDocWarehouseId] = useState(seeded?.docWarehouseId ?? defaultWhId)
+  const [targetWarehouseId, setTargetWarehouseId] = useState(seeded?.targetWarehouseId ?? '')
+  const [purpose, setPurpose] = useState<WarehouseDocumentPurpose>(
+    () => seeded?.purpose ?? defaultPurpose(initialType),
+  )
+  const [date, setDate] = useState(seeded?.date ?? (() => new Date().toISOString().slice(0, 10)))
+  const [number, setNumber] = useState(seeded?.number ?? '')
+  const [numberTouched, setNumberTouched] = useState(seeded?.numberTouched ?? false)
+  const [counterpartyId, setCounterpartyId] = useState(seeded?.counterpartyId ?? '')
+  const [contractId, setContractId] = useState(seeded?.contractId ?? '')
+  const [counterparty, setCounterparty] = useState(seeded?.counterparty ?? '')
+  const [brigade, setBrigade] = useState(seeded?.brigade ?? '')
+  const [productionRequestId, setProductionRequestId] = useState(seeded?.productionRequestId ?? '')
+  const [writeoffReason, setWriteoffReason] = useState<WriteoffReasonId | ''>(seeded?.writeoffReason ?? '')
+  const [comment, setComment] = useState(seeded?.comment ?? '')
+  const [invoiceKey, setInvoiceKey] = useState<string | undefined>(seeded?.invoiceKey)
+  const [sellerTin, setSellerTin] = useState<string | undefined>(seeded?.sellerTin)
+  const [lines, setLines] = useState<DocLineRow[]>(() => seeded?.lines ?? [newLine()])
   const [pickOpen, setPickOpen] = useState(initialPickOpen)
   const [formError, setFormError] = useState<string | null>(null)
   const [printError, setPrintError] = useState<string | null>(null)
@@ -411,6 +466,7 @@ export function WarehouseDocumentEditor({
   }
 
   async function postDocument() {
+    if (readOnly) return
     const itemUnitMap = new Map(activeItems.map((i) => [i.id, i.unit]))
     const parsed = lines
       .map((l) => {
@@ -525,6 +581,138 @@ export function WarehouseDocumentEditor({
     resetForm()
   }
 
+  function saveDraft() {
+    if (!onSaveDraft || readOnly) return false
+    const itemUnitMap = new Map(activeItems.map((i) => [i.id, i.unit]))
+    const parsed = lines
+      .filter((l) => l.itemId)
+      .map((l) => {
+        const baseUnit = l.itemId ? itemUnitMap.get(l.itemId) : undefined
+        const inputUnit = l.unit && l.unit !== baseUnit ? l.unit : undefined
+        return {
+          itemId: l.itemId!,
+          quantity: Number(l.quantity.replace(',', '.')) || 0,
+          inputUnit,
+          ...(type === 'receipt'
+            ? {
+                unitPrice: l.unitPrice ? Number(l.unitPrice.replace(',', '.')) || undefined : undefined,
+                batchNo: l.batchNo?.trim() || undefined,
+                expiryDate: l.expiryDate || undefined,
+              }
+            : {}),
+        }
+      })
+    const result = onSaveDraft({
+      id: existingDocument?.id,
+      type,
+      ...buildDocBase(),
+      lines: parsed,
+    })
+    if (showPostError(result)) return false
+    setFormError(null)
+    if (!existingDocument) resetForm()
+    return true
+  }
+
+  const dirtyBaseline = useMemo(() => {
+    if (!seeded) return null
+    return JSON.stringify({
+      type: seeded.type,
+      docWarehouseId: seeded.docWarehouseId,
+      targetWarehouseId: seeded.targetWarehouseId,
+      purpose: seeded.purpose,
+      date: seeded.date,
+      number: seeded.number,
+      counterpartyId: seeded.counterpartyId,
+      contractId: seeded.contractId,
+      counterparty: seeded.counterparty,
+      brigade: seeded.brigade,
+      productionRequestId: seeded.productionRequestId,
+      writeoffReason: seeded.writeoffReason,
+      comment: seeded.comment,
+      invoiceKey: seeded.invoiceKey,
+      sellerTin: seeded.sellerTin,
+      lines: seeded.lines.map((l) => ({
+        itemId: l.itemId,
+        quantity: l.quantity,
+        unit: l.unit,
+        unitPrice: l.unitPrice,
+        batchNo: l.batchNo,
+        expiryDate: l.expiryDate,
+      })),
+    })
+  }, [existingDocument?.id])
+
+  const isDirty = useCallback(() => {
+    if (readOnly) return false
+    if (dirtyBaseline) {
+      const current = JSON.stringify({
+        type,
+        docWarehouseId,
+        targetWarehouseId,
+        purpose,
+        date,
+        number,
+        counterpartyId,
+        contractId,
+        counterparty,
+        brigade,
+        productionRequestId,
+        writeoffReason,
+        comment,
+        invoiceKey,
+        sellerTin,
+        lines: lines.map((l) => ({
+          itemId: l.itemId,
+          quantity: l.quantity,
+          unit: l.unit,
+          unitPrice: l.unitPrice,
+          batchNo: l.batchNo,
+          expiryDate: l.expiryDate,
+        })),
+      })
+      return current !== dirtyBaseline
+    }
+    if (numberTouched) return true
+    if (comment.trim() || brigade.trim() || counterparty.trim()) return true
+    if (counterpartyId || contractId || productionRequestId || invoiceKey) return true
+    if (writeoffReason || targetWarehouseId) return true
+    if (type !== initialType) return true
+    if (purpose !== defaultPurpose(initialType)) return true
+    if (lines.some((l) => l.itemId && l.quantity.trim())) return true
+    return false
+  }, [
+    brigade,
+    comment,
+    contractId,
+    counterparty,
+    counterpartyId,
+    date,
+    dirtyBaseline,
+    docWarehouseId,
+    initialType,
+    invoiceKey,
+    lines,
+    number,
+    numberTouched,
+    productionRequestId,
+    purpose,
+    readOnly,
+    sellerTin,
+    targetWarehouseId,
+    type,
+    writeoffReason,
+  ])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      isDirty,
+      saveDraft,
+    }),
+    [isDirty, saveDraft],
+  )
+
   function printDraft() {
     if (!printMeta) return
     const parsed = lines
@@ -584,6 +772,7 @@ export function WarehouseDocumentEditor({
               <button
                 key={id}
                 type="button"
+                disabled={readOnly}
                 className={`rounded-sm px-4 py-1.5 text-sm font-semibold ${
                   type === id
                     ? id === 'receipt'
@@ -599,7 +788,8 @@ export function WarehouseDocumentEditor({
           </div>
           <button
             type="button"
-            className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+            disabled={readOnly}
+            className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
             onClick={() => setPickOpen(true)}
           >
             {t('warehouse.pick.button')}
@@ -608,7 +798,7 @@ export function WarehouseDocumentEditor({
         </div>
       </div>
 
-      {type === 'receipt' && purpose === 'purchase' && (
+      {type === 'receipt' && purpose === 'purchase' && !readOnly && (
         <div className={variant === 'page' ? 'border-b border-grid px-4 py-3' : 'pb-2'}>
           <WarehouseInvoiceLoader
             warehouse={warehouse}
@@ -624,6 +814,14 @@ export function WarehouseDocumentEditor({
           <FormNotice type="error" message={formError} onDismiss={() => setFormError(null)} />
         </div>
       )}
+
+      {readOnly && (
+        <div className={variant === 'page' ? 'px-4' : ''}>
+          <FormNotice type="info" message={t('warehouse.doc.readOnlyPosted')} />
+        </div>
+      )}
+
+      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
 
       {printError && (
         <div className={variant === 'page' ? 'px-4' : ''}>
@@ -1011,6 +1209,7 @@ export function WarehouseDocumentEditor({
           </tbody>
         </table>
       </div>
+      </fieldset>
 
       <div
         className={`flex flex-wrap items-center justify-between gap-3 ${
@@ -1057,13 +1256,24 @@ export function WarehouseDocumentEditor({
               {t('common.cancel')}
             </button>
           )}
-          <button
-            type="button"
-            className="rounded-sm bg-teal-700 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-800"
-            onClick={postDocument}
-          >
-            {t('warehouse.doc.post')}
-          </button>
+          {onSaveDraft && purpose !== 'transfer' && !readOnly && (
+            <button
+              type="button"
+              className="rounded-sm border border-teal-600 px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+              onClick={saveDraft}
+            >
+              {t('warehouse.doc.saveDraft')}
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              type="button"
+              className="rounded-sm bg-teal-700 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+              onClick={postDocument}
+            >
+              {t('warehouse.doc.post')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1106,4 +1316,4 @@ export function WarehouseDocumentEditor({
       )}
     </div>
   )
-}
+})

@@ -166,6 +166,86 @@ export function summarizeProductionMonth(
   return { month, byLine, combined, planMp, factMp }
 }
 
+export type DayProductionSummary = {
+  date: string
+  /** ISO-момент среза; undefined = весь день */
+  asOfIso?: string
+  requests: number
+  planMp: number
+  factMp: number
+  factKg: number
+  byLine: MonthLineSummary[]
+  byCategory: CategoryTotals
+}
+
+/**
+ * Выработка за день: только проведённые заявки.
+ * Если asOfIso задан — только заявки с postedAt ≤ asOfIso (срез «на это время»).
+ */
+export function summarizeProductionDay(
+  requests: ProductionRequest[],
+  dateIso: string,
+  asOfIso?: string,
+): DayProductionSummary {
+  const posted = requests.filter((r) => {
+    if (r.date !== dateIso || r.status !== 'posted') return false
+    if (!asOfIso) return true
+    if (!r.postedAt) return true
+    return r.postedAt <= asOfIso
+  })
+
+  const byLine = (['1', '2', 'pack'] as const).map((lineId) => {
+    const lineReqs = posted.filter((r) => r.lineId === lineId)
+    const combined = emptyCategoryTotals()
+    let planMp = 0
+    let factMp = 0
+    let defectKg = 0
+    for (const req of lineReqs) {
+      const s = summarizeRequest(req)
+      planMp += s.planMp
+      factMp += s.factMp
+      defectKg += s.factKg
+      for (const cat of PRODUCTION_CATEGORIES) {
+        combined[cat.key].qtyMp += s.byCategory[cat.key].qtyMp
+        combined[cat.key].qtyKg += s.byCategory[cat.key].qtyKg
+      }
+    }
+    return {
+      lineId,
+      requests: lineReqs.length,
+      planMp,
+      factMp,
+      defectKg,
+      byCategory: combined,
+    }
+  })
+
+  const byCategory = emptyCategoryTotals()
+  let planMp = 0
+  let factMp = 0
+  let factKg = 0
+  for (const row of byLine) {
+    planMp += row.planMp
+    factMp += row.factMp
+    factKg += row.defectKg
+    for (const cat of PRODUCTION_CATEGORIES) {
+      byCategory[cat.key].qtyMp += row.byCategory[cat.key].qtyMp
+      byCategory[cat.key].qtyKg += row.byCategory[cat.key].qtyKg
+    }
+  }
+
+  return {
+    date: dateIso,
+    asOfIso,
+    requests: posted.length,
+    planMp,
+    factMp,
+    factKg,
+    byLine,
+    byCategory,
+  }
+}
+
 export function formatNum(n: number | undefined): string {
   if (n === undefined || Number.isNaN(n)) return '—'
   if (Math.abs(n) < 0.0001) return '—'

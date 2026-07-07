@@ -1,13 +1,12 @@
 import type { ReactNode } from 'react'
+import { SearchableSelect, type SearchableOption } from '@/components/ui/SearchableSelect'
 import { useI18n } from '@/context/I18nContext'
-
-type Option = { value: string; label: string }
 
 type Props = {
   label: string
   hint?: string
   value: string
-  options: Option[]
+  options: SearchableOption[]
   placeholder?: string
   disabled?: boolean
   onChange: (value: string) => void
@@ -31,19 +30,14 @@ export function DirectoryFieldPicker({
     <label className="text-xs font-medium text-stone-500">
       {label}
       <div className="mt-1 flex gap-1">
-        <select
-          className="min-w-0 flex-1 rounded-sm border border-grid px-3 py-2 text-sm disabled:bg-stone-50"
+        <SearchableSelect
+          className="flex-1"
           value={value}
+          options={options}
+          placeholder={placeholder ?? '—'}
           disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">{placeholder ?? '—'}</option>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          onChange={onChange}
+        />
         <button
           type="button"
           title={t('directories.openList')}

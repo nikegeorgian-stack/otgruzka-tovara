@@ -1,4 +1,5 @@
-﻿import { useMemo, useState, Fragment, useCallback, useEffect } from 'react'
+﻿import { useMemo, useState, Fragment, useCallback, useEffect, useRef } from 'react'
+import { AppDialog } from '@/components/ui/AppDialog'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -16,9 +17,21 @@ import { WarehouseItemRequestsPanel } from '@/components/warehouse/WarehouseItem
 import { ProductionRequestsPanel } from '@/components/warehouse/ProductionRequestsPanel'
 import { BatchConfirmRequestsPanel } from '@/components/warehouse/BatchConfirmRequestsPanel'
 import { WarehouseInventoryTab } from '@/components/warehouse/WarehouseInventoryTab'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { WarehouseLoadingTab } from '@/components/warehouse/WarehouseLoadingTab'
 import { KeeperReplenishmentPanel } from '@/components/warehouse/KeeperReplenishmentPanel'
 import { WarehouseLabelPrintModal } from '@/components/warehouse/WarehouseLabelPrintModal'
+import { WarehouseViewDefaultsDialog } from '@/components/warehouse/WarehouseViewDefaultsDialog'
+import { PageActionOverflow } from '@/components/ui/PageActionOverflow'
+import { WorkspaceWidgetDrawer } from '@/components/ui/workspace/WorkspaceWidgetDrawer'
+import {
+  WorkspaceWidgetChip,
+  WorkspaceWidgetRail,
+} from '@/components/ui/workspace/WorkspaceWidgetRail'
+import { useWorkspaceWidgets } from '@/hooks/useWorkspaceWidgets'
+import type { WorkspaceWidgetDef } from '@/lib/ui/workspaceWidgets'
 import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
 import {
   UNITS,
@@ -31,6 +44,7 @@ import { findOpenDailyIssue, sessionLineCount } from '@/lib/warehouse/dailyIssue
 import { compressItemPhoto } from '@/lib/warehouse/itemPhoto'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { requestModalClose } from '@/lib/ui/requestModalClose'
 import { WAREHOUSE_PICK_EVENT, consumePendingWarehousePick, type WarehousePickDetail } from '@/lib/ai/warehousePickEvent'
 import { printWarehouseBalances } from '@/lib/warehouse/print'
 import { getItemHistory } from '@/lib/warehouse/itemHistory'
@@ -38,6 +52,7 @@ import { unitLabel, unitsConvertible } from '@/lib/warehouse/units'
 import {
   avgCostForItem,
   computeAllBalances,
+  computeAllBalancesAsOf,
   formatQty,
   itemStockValue,
   lowStockItems,
@@ -69,7 +84,6 @@ export function WarehousePage(props: WarehousePageProps) {
     onDeleteMovement,
     onPostDocument,
     onRunInventory,
-    onPostInventoryRevision,
     onPostOpeningBalances,
     onImportExcel,
     onExportExcel,
@@ -78,10 +92,17 @@ export function WarehousePage(props: WarehousePageProps) {
     keeperName,
     allowNegativeStock = false,
     canCancelDocuments = false,
+    canUnpostDocuments = false,
     counterparties,
     productionRequests,
     onPostTransfer,
     onCancelDocument,
+    onSaveDocumentDraft,
+    onPostExistingDocument,
+    onUnpostDocument,
+    onRemoveDocumentDraft,
+    onAcquireDocumentLock,
+    onReleaseDocumentLock,
     onOpenDailyIssueSession,
     onAdjustDailyIssueLine,
     onSetDailyIssueComment,
@@ -113,23 +134,46 @@ export function WarehousePage(props: WarehousePageProps) {
     brigadeNamesKa,
     onSaveProductionRequest,
     onPostProductionRequest,
+    journalNav,
+    onJournalNavConsumed,
+    userWarehouseDefaults,
+    currentUserId,
+    onSaveViewDefaults,
   } = props
 
   const { t, tf } = useI18n()
-  const [tab, setTab] = useState<WarehouseTab>(embedded ? 'nomenclature' : 'balances')
+  const [tab, setTab] = useState<WarehouseTab>(
+    embedded ? 'nomenclature' : (userWarehouseDefaults?.tab ?? 'balances'),
+  )
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
-  const [warehouseId, setWarehouseId] = useState('')
-  const [deficitOnly, setDeficitOnly] = useState(false)
-  const [showArchived, setShowArchived] = useState(false)
+  const [warehouseId, setWarehouseId] = useState(userWarehouseDefaults?.warehouseId ?? '')
+  const [deficitOnly, setDeficitOnly] = useState(userWarehouseDefaults?.deficitOnly ?? false)
+  const [showArchived, setShowArchived] = useState(userWarehouseDefaults?.showArchived ?? false)
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const widgets = useWorkspaceWidgets(embedded ? 'warehouse-embedded' : 'warehouse')
   const [editItem, setEditItem] = useState<WarehouseItem | null>(null)
   const [cardItem, setCardItem] = useState<WarehouseItem | null>(null)
   const [isNew, setIsNew] = useState(false)
+  const [pendingJournalDocId, setPendingJournalDocId] = useState<string | null>(null)
+  const [pendingJournalLoadingId, setPendingJournalLoadingId] = useState<string | null>(null)
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
   })
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const asOf = useAsOfSnapshot()
+  const {
+    enabled: asOfEnabled,
+    setEnabled: setAsOfEnabled,
+    date: asOfDate,
+    setDate: setAsOfDate,
+    time: asOfTime,
+    setTime: setAsOfTime,
+    scope: asOfScope,
+    setScope: setAsOfScope,
+    asOfIso,
+  } = asOf
   const [pendingAiPick, setPendingAiPick] = useState<WarehousePickDetail | null>(null)
   const [labelPrintIds, setLabelPrintIds] = useState<string[] | null>(null)
   const [dailyIssueSessionId, setDailyIssueSessionId] = useState<string | null>(null)
@@ -172,10 +216,54 @@ export function WarehousePage(props: WarehousePageProps) {
     return () => window.removeEventListener(WAREHOUSE_PICK_EVENT, handler)
   }, [])
 
-  const balances = useMemo(
-    () => computeAllBalances(warehouse, warehouseId || undefined),
-    [warehouse, warehouseId],
-  )
+  useEffect(() => {
+    if (!journalNav) return
+    if ('warehouseDocumentId' in journalNav) {
+      setTab('documents')
+      setPendingJournalDocId(journalNav.warehouseDocumentId)
+    } else if ('warehouseItemId' in journalNav) {
+      setTab('nomenclature')
+      const item = warehouse.items.find((i) => i.id === journalNav.warehouseItemId)
+      if (item) setCardItem(item)
+    } else if ('loadingShipmentId' in journalNav) {
+      setTab('loading')
+      setPendingJournalLoadingId(journalNav.loadingShipmentId)
+    }
+    onJournalNavConsumed?.()
+  }, [journalNav, warehouse.items, onJournalNavConsumed])
+
+  const asOfIsoMemo = asOfIso
+
+  const outputItemIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const fp of finishedProducts ?? []) {
+      if (fp.warehouseItemId) ids.add(fp.warehouseItemId)
+    }
+    return ids
+  }, [finishedProducts])
+
+  const balances = useMemo(() => {
+    if (asOfIsoMemo) {
+      return computeAllBalancesAsOf(warehouse, asOfIsoMemo, warehouseId || undefined)
+    }
+    return computeAllBalances(warehouse, warehouseId || undefined)
+  }, [warehouse, warehouseId, asOfIsoMemo])
+
+  const showAsOfBar =
+    !embedded &&
+    (tab === 'balances' ||
+      tab === 'analytics' ||
+      tab === 'movements' ||
+      tab === 'nomenclature' ||
+      tab === 'inventory' ||
+      tab === 'workwear')
+
+  const asOfHintKey =
+    tab === 'analytics'
+      ? 'asOf.hintWarehouseAnalytics'
+      : tab === 'movements'
+        ? 'asOf.hintWarehouseMovements'
+        : 'asOf.hintWarehouse'
   const categories = useMemo(
     () => [...warehouse.categories].sort((a, b) => a.sortOrder - b.sortOrder),
     [warehouse.categories],
@@ -202,11 +290,16 @@ export function WarehousePage(props: WarehousePageProps) {
     )
   })
 
-  const hasItemFilter = !!(search.trim() || catFilter || deficitOnly || warehouseId)
+  const hasItemFilter = !!(search.trim() || catFilter || deficitOnly || warehouseId || (asOfEnabled && asOfScope === 'output'))
+
+  const scopeFilteredItems =
+    asOfEnabled && asOfScope === 'output'
+      ? filteredItems.filter((i) => outputItemIds.has(i.id))
+      : filteredItems
 
   const displayItems = deficitOnly
-    ? filteredItems.filter((i) => lowStockItems([i], balances).length > 0)
-    : filteredItems
+    ? scopeFilteredItems.filter((i) => lowStockItems([i], balances).length > 0)
+    : scopeFilteredItems
 
   const activeItems = warehouse.items.filter((i) => i.active)
   const lowStock = lowStockItems(activeItems, balances)
@@ -252,27 +345,181 @@ export function WarehousePage(props: WarehousePageProps) {
     }
   }, [visibleTabs, tab])
 
+  useEffect(() => {
+    if (embedded) return
+    if (userWarehouseDefaults?.tab) setTab(userWarehouseDefaults.tab)
+    if (userWarehouseDefaults?.warehouseId !== undefined) {
+      setWarehouseId(userWarehouseDefaults.warehouseId)
+    }
+    if (userWarehouseDefaults?.deficitOnly !== undefined) {
+      setDeficitOnly(userWarehouseDefaults.deficitOnly)
+    }
+    if (userWarehouseDefaults?.showArchived !== undefined) {
+      setShowArchived(userWarehouseDefaults.showArchived)
+    }
+  }, [embedded, userWarehouseDefaults])
+
+  const applyWarehouseDefaults = useCallback(
+    (defaults: NonNullable<typeof userWarehouseDefaults>) => {
+      if (defaults.tab) setTab(defaults.tab)
+      if (defaults.warehouseId !== undefined) setWarehouseId(defaults.warehouseId)
+      if (defaults.deficitOnly !== undefined) setDeficitOnly(defaults.deficitOnly)
+      if (defaults.showArchived !== undefined) setShowArchived(defaults.showArchived)
+    },
+    [],
+  )
+
+  const warehouseWidgetDefs: WorkspaceWidgetDef[] = [
+    { id: 'filters', labelKey: 'workspace.widget.filters', icon: '▦' },
+    {
+      id: 'analytics',
+      labelKey: 'workspace.widget.analytics',
+      icon: '◫',
+      badge: lowStock.length > 0 ? lowStock.length : undefined,
+    },
+  ]
+
+  const showSearchInRail = embedded || tab === 'balances' || tab === 'nomenclature'
+
+  const filterPanel = (
+    <div className="flex flex-wrap items-center gap-3">
+      {(embedded || tab === 'balances' || tab === 'nomenclature') && (
+        <input
+          type="search"
+          placeholder={t('warehouse.search')}
+          className="min-w-[12rem] flex-1 rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      )}
+      {(embedded || (tab !== 'import' && tab !== 'audit')) && (
+        <select
+          className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+          value={warehouseId}
+          onChange={(e) => setWarehouseId(e.target.value)}
+        >
+          <option value="">{t('warehouse.allLocations')}</option>
+          {warehouse.locations.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {(embedded || tab === 'balances' || tab === 'nomenclature') && (
+        <select
+          className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+          value={catFilter}
+          onChange={(e) => setCatFilter(e.target.value)}
+        >
+          <option value="">{t('warehouse.allCategories')}</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {!embedded && tab === 'balances' && (
+        <label className="flex items-center gap-2 text-sm text-stone-600">
+          <input
+            type="checkbox"
+            checked={deficitOnly}
+            onChange={(e) => setDeficitOnly(e.target.checked)}
+          />
+          {t('warehouse.deficitOnly')}
+        </label>
+      )}
+      {(embedded || tab === 'nomenclature') && (
+        <>
+          <label className="flex items-center gap-2 text-sm text-stone-600">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+            />
+            {t('warehouse.showArchived')}
+          </label>
+          <button
+            type="button"
+            className="rounded-sm border border-teal-600 bg-white px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+            onClick={() => setLabelPrintIds([])}
+          >
+            {t('warehouse.labels')}
+          </button>
+          <button type="button" className="btn-add" onClick={openNewItem}>
+            {t('warehouse.addItem')}
+          </button>
+        </>
+      )}
+      {!embedded && (tab === 'balances' || tab === 'import') && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="rounded-sm border border-grid bg-white px-3 py-2 text-sm hover:bg-stone-50"
+            onClick={handleExport}
+          >
+            {t('warehouse.exportExcel')}
+          </button>
+          <button
+            type="button"
+            className="rounded-sm border border-grid bg-white px-3 py-2 text-sm hover:bg-stone-50"
+            onClick={() =>
+              printWarehouseBalances(warehouse, warehouseId || undefined, t('warehouse.title'))
+            }
+          >
+            {t('warehouse.print')}
+          </button>
+        </div>
+      )}
+      {!embedded && tab === 'analytics' && (
+        <>
+          <input
+            type="date"
+            className="rounded-sm border border-grid px-3 py-2 text-sm"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+          />
+          <span className="text-stone-400">—</span>
+          <input
+            type="date"
+            className="rounded-sm border border-grid px-3 py-2 text-sm"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+          />
+        </>
+      )}
+    </div>
+  )
+
   const content = (
     <>
       {!embedded && (
         <PageHeader
-          badge={webWarehouseMode ? t('web.warehouse.badge') : t('warehouse.badge')}
+          density="compact"
+          showBrand={false}
           title={
             webWarehouseMode && webUserName
               ? tf('web.warehouse.welcome', { name: webUserName })
               : t('warehouse.title')
           }
-          subtitle={
-            webWarehouseMode ? t('web.warehouse.pageSubtitle') : t('warehouse.subtitle')
-          }
+          subtitle={webWarehouseMode ? t('web.warehouse.pageSubtitle') : t('warehouse.subtitle')}
           actions={
-            <div className="flex flex-wrap gap-2">
-              <KpiCard label={t('warehouse.kpi.items')} value={activeItems.length} />
-              <KpiCard label={t('warehouse.kpi.categories')} value={categories.length} />
-              <KpiCard
-                label={t('warehouse.kpi.lowStock')}
-                value={lowStock.length}
-                tone={lowStock.length > 0 ? 'warn' : 'default'}
+            <div className="flex flex-wrap items-center gap-2">
+              <TabBar
+                tabs={visibleTabs.map((id) => ({ id, label: tabLabels[id] }))}
+                value={tab}
+                onChange={setTab}
+              />
+              <PageActionOverflow
+                items={[
+                  {
+                    id: 'defaults',
+                    label: t('viewDefaults.open'),
+                    onClick: () => setDefaultsOpen(true),
+                    hidden: !(currentUserId && onSaveViewDefaults),
+                  },
+                ]}
               />
             </div>
           }
@@ -310,129 +557,96 @@ export function WarehousePage(props: WarehousePageProps) {
       )}
 
       {!embedded && (
-      <div className="flex flex-wrap items-center gap-3">
-        <TabBar
-          tabs={visibleTabs.map((id) => ({ id, label: tabLabels[id] }))}
-          value={tab}
-          onChange={setTab}
+        <WorkspaceWidgetRail
+          widgets={warehouseWidgetDefs}
+          openId={widgets.openId}
+          onToggle={widgets.toggle}
+          leading={
+            showSearchInRail ? (
+              <input
+                type="search"
+                placeholder={t('warehouse.search')}
+                className="w-full rounded-sm border border-grid bg-white px-2 py-1.5 text-sm"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            ) : undefined
+          }
+          chips={
+            <>
+              <WorkspaceWidgetChip onClick={() => widgets.open('analytics')}>
+                {tf('workspace.chip.items', { count: activeItems.length })}
+              </WorkspaceWidgetChip>
+              {lowStock.length > 0 ? (
+                <WorkspaceWidgetChip tone="warn" onClick={() => widgets.open('analytics')}>
+                  {tf('workspace.chip.lowStock', { count: lowStock.length })}
+                </WorkspaceWidgetChip>
+              ) : null}
+              <WorkspaceWidgetChip onClick={() => widgets.open('filters')}>
+                {tf('workspace.chip.tab', { label: tabLabels[tab] })}
+              </WorkspaceWidgetChip>
+            </>
+          }
         />
-      </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Поиск и категория влияют только на остатки/номенклатуру — не показываем их там, где они ничего не фильтруют. */}
-        {(embedded || tab === 'balances' || tab === 'nomenclature') && (
-          <input
-            type="search"
-            placeholder={t('warehouse.search')}
-            className="min-w-[12rem] flex-1 rounded-sm border border-grid bg-white px-3 py-2 text-sm"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        )}
-        {/* Склад участвует во всех журналах/отчётах, оставляем шире. */}
-        {(embedded || (tab !== 'import' && tab !== 'audit' && tab !== 'workwear')) && (
-          <select
-            className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
-            value={warehouseId}
-            onChange={(e) => setWarehouseId(e.target.value)}
+      {!embedded && (
+        <>
+          <WorkspaceWidgetDrawer
+            open={widgets.isOpen('filters')}
+            title={t('workspace.widget.filters')}
+            subtitle={t('workspace.widget.filtersHint')}
+            onClose={widgets.close}
           >
-            <option value="">{t('warehouse.allLocations')}</option>
-            {warehouse.locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {(embedded || tab === 'balances' || tab === 'nomenclature') && (
-          <select
-            className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
-            value={catFilter}
-            onChange={(e) => setCatFilter(e.target.value)}
+            {filterPanel}
+          </WorkspaceWidgetDrawer>
+          <WorkspaceWidgetDrawer
+            open={widgets.isOpen('analytics')}
+            title={t('workspace.widget.analytics')}
+            subtitle={t('workspace.widget.analyticsHint')}
+            onClose={widgets.close}
           >
-            <option value="">{t('warehouse.allCategories')}</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {!embedded && tab === 'balances' && (
-          <label className="flex items-center gap-2 text-sm text-stone-600">
-            <input
-              type="checkbox"
-              checked={deficitOnly}
-              onChange={(e) => setDeficitOnly(e.target.checked)}
-            />
-            {t('warehouse.deficitOnly')}
-          </label>
-        )}
-        {(embedded || tab === 'nomenclature') && (
-          <>
-            <label className="flex items-center gap-2 text-sm text-stone-600">
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(e) => setShowArchived(e.target.checked)}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <KpiCard label={t('warehouse.kpi.items')} value={activeItems.length} />
+              <KpiCard label={t('warehouse.kpi.categories')} value={categories.length} />
+              <KpiCard
+                label={t('warehouse.kpi.lowStock')}
+                value={lowStock.length}
+                tone={lowStock.length > 0 ? 'warn' : 'default'}
               />
-              {t('warehouse.showArchived')}
-            </label>
-            <button
-              type="button"
-              className="rounded-sm border border-teal-600 bg-white px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
-              onClick={() => setLabelPrintIds([])}
-            >
-              {t('warehouse.labels')}
-            </button>
-            <button
-              type="button"
-              className="btn-add"
-              onClick={openNewItem}
-            >
-              {t('warehouse.addItem')}
-            </button>
-          </>
-        )}
-        {!embedded && (tab === 'balances' || tab === 'import') && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded-sm border border-grid bg-white px-3 py-2 text-sm hover:bg-stone-50"
-              onClick={handleExport}
-            >
-              {t('warehouse.exportExcel')}
-            </button>
-            <button
-              type="button"
-              className="rounded-sm border border-grid bg-white px-3 py-2 text-sm hover:bg-stone-50"
-              onClick={() =>
-                printWarehouseBalances(warehouse, warehouseId || undefined, t('warehouse.title'))
-              }
-            >
-              {t('warehouse.print')}
-            </button>
-          </div>
-        )}
-        {!embedded && tab === 'analytics' && (
-          <>
-            <input
-              type="date"
-              className="rounded-sm border border-grid px-3 py-2 text-sm"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-            <span className="text-stone-400">—</span>
-            <input
-              type="date"
-              className="rounded-sm border border-grid px-3 py-2 text-sm"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </>
-        )}
-      </div>
+            </div>
+          </WorkspaceWidgetDrawer>
+        </>
+      )}
+
+      {embedded && filterPanel}
+
+      {showAsOfBar && (
+        <>
+          <AsOfSnapshotBar
+            className="mb-4"
+            enabled={asOfEnabled}
+            onEnabledChange={setAsOfEnabled}
+            date={asOfDate}
+            onDateChange={setAsOfDate}
+            time={asOfTime}
+            onTimeChange={setAsOfTime}
+            scope={asOfScope}
+            onScopeChange={setAsOfScope}
+            showScope={tab === 'balances' || tab === 'nomenclature'}
+            hintKey={asOfHintKey}
+          />
+          {asOfEnabled && productionRequests && productionRequests.length > 0 && tab === 'balances' ? (
+            <div className="mb-4">
+              <ProductionDaySnapshot
+                requests={productionRequests}
+                date={asOfDate}
+                asOfIso={asOfIsoMemo ?? undefined}
+              />
+            </div>
+          ) : null}
+        </>
+      )}
 
       {!embedded && tab === 'balances' && (
         <div className="mb-4 space-y-4">
@@ -524,9 +738,11 @@ export function WarehousePage(props: WarehousePageProps) {
           keeperName={keeperName}
           onPostDocument={onPostDocument}
           onPostTransfer={onPostTransfer}
+          onSaveDocumentDraft={onSaveDocumentDraft}
           onMergeInvoiceRegistry={onMergeInvoiceRegistry}
           onAddMovement={onAddMovement}
           onDeleteMovement={onDeleteMovement}
+          asOfIso={asOfIsoMemo}
         />
       )}
       {!embedded && tab === 'documents' && (
@@ -538,6 +754,7 @@ export function WarehousePage(props: WarehousePageProps) {
           printMeta={printMeta}
           allowNegativeStock={allowNegativeStock}
           canCancelDocuments={canCancelDocuments}
+          canUnpostDocuments={canUnpostDocuments}
           counterparties={counterparties}
           onUpsertCounterparty={onUpsertCounterparty}
           onOpenCounterparties={onOpenCounterparties}
@@ -547,19 +764,43 @@ export function WarehousePage(props: WarehousePageProps) {
           onPostDocument={onPostDocument}
           onPostTransfer={onPostTransfer}
           onCancelDocument={onCancelDocument}
+          onSaveDocumentDraft={onSaveDocumentDraft}
+          onPostExistingDocument={onPostExistingDocument}
+          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onRemoveDocumentDraft={onRemoveDocumentDraft}
+          onAcquireDocumentLock={onAcquireDocumentLock}
+          onReleaseDocumentLock={onReleaseDocumentLock}
+          onQuickEditItem={(item) => {
+            setEditItem(item)
+            setIsNew(false)
+          }}
           onMergeInvoiceRegistry={onMergeInvoiceRegistry}
           pendingAiPick={pendingAiPick}
           onConsumeAiPick={() => setPendingAiPick(null)}
+          pendingOpenDocumentId={pendingJournalDocId}
+          onPendingOpenConsumed={() => setPendingJournalDocId(null)}
         />
       )}
       {!embedded && tab === 'inventory' && (
         <WarehouseInventoryTab
           warehouse={warehouse}
           warehouseId={warehouseId}
+          categoryNames={categoryNames}
           printMeta={printMeta}
+          keeperId={keeperId}
+          keeperName={keeperName ?? webUserName}
+          asOfIso={asOfIsoMemo}
           onRunInventory={onRunInventory}
-          onPostInventoryRevision={onPostInventoryRevision}
           onPostOpeningBalances={onPostOpeningBalances}
+          onSaveDocumentDraft={onSaveDocumentDraft}
+          onPostExistingDocument={onPostExistingDocument}
+          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onAcquireDocumentLock={onAcquireDocumentLock}
+          onReleaseDocumentLock={onReleaseDocumentLock}
+          onQuickEditItem={(item) => {
+            setEditItem(item)
+            setIsNew(false)
+          }}
         />
       )}
       {!embedded &&
@@ -573,6 +814,7 @@ export function WarehousePage(props: WarehousePageProps) {
             employees={employees}
             keeperId={keeperId}
             keeperName={keeperName ?? webUserName}
+            asOfDate={asOfEnabled ? asOfDate : undefined}
             onUpsertCatalogItem={onUpsertWorkwearCatalogItem}
             onArchiveCatalogItem={onArchiveWorkwearCatalogItem}
             onPostIssuance={onPostWorkwearIssuance}
@@ -584,6 +826,7 @@ export function WarehousePage(props: WarehousePageProps) {
           warehouseId={warehouseId}
           fromDate={fromDate}
           toDate={toDate}
+          asOfIso={asOfIsoMemo}
         />
       )}
       {!embedded && tab === 'import' && (
@@ -655,6 +898,8 @@ export function WarehousePage(props: WarehousePageProps) {
             onRemoveLoadingShipment={onRemoveLoadingShipment}
             salesOrders={salesOrders}
             onOpenSalesOrder={onOpenSalesOrder}
+            pendingOpenShipmentId={pendingJournalLoadingId}
+            onPendingOpenConsumed={() => setPendingJournalLoadingId(null)}
           />
         )}
 
@@ -731,6 +976,24 @@ export function WarehousePage(props: WarehousePageProps) {
           onSetComment={onSetDailyIssueComment}
           onPost={onPostDailyIssueSession}
           onClose={() => setDailyIssueSessionId(null)}
+        />
+      )}
+
+      {defaultsOpen && currentUserId && onSaveViewDefaults && !embedded && (
+        <WarehouseViewDefaultsDialog
+          warehouse={warehouse}
+          webMode={webWarehouseMode}
+          initial={{
+            tab,
+            warehouseId: warehouseId || undefined,
+            deficitOnly,
+            showArchived,
+          }}
+          onSave={(defaults) => {
+            onSaveViewDefaults('warehouse', defaults)
+            applyWarehouseDefaults(defaults)
+          }}
+          onClose={() => setDefaultsOpen(false)}
         />
       )}
     </>
@@ -991,23 +1254,43 @@ function ItemEditModal({
   onAddLocation: (name: string) => string
 }) {
   const { t, locale } = useI18n()
+  const { confirmUnsaved } = useConfirm()
   const [draft, setDraft] = useState(item)
+  const baselineRef = useRef(JSON.stringify(item))
   const [newCat, setNewCat] = useState('')
   const [newLoc, setNewLoc] = useState('')
   const [altUnit, setAltUnit] = useState('')
-  const [altQtyA, setAltQtyA] = useState('1')
   const [altQtyB, setAltQtyB] = useState('1')
   const [altRef, setAltRef] = useState('')
+  const [showPackaging, setShowPackaging] = useState((item.unitConversions?.length ?? 0) > 0)
   const [error, setError] = useState<string | null>(null)
   const [photoBusy, setPhotoBusy] = useState(false)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+  function isDirty() {
+    return JSON.stringify(draft) !== baselineRef.current
+  }
+
+  function requestClose() {
+    void requestModalClose(
+      { confirmUnsaved },
+      {
+        isDirty,
+        save: () => save(),
+        close: onClose,
+      },
+    )
+  }
+
+  function save(): boolean {
+    const name = draft.name.trim()
+    if (!name) {
+      setError(t('warehouse.err.nameRequired'))
+      return false
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+    setError(null)
+    onSave({ ...draft, name })
+    return true
+  }
 
   async function onPhotoFile(file: File | undefined) {
     if (!file) return
@@ -1023,23 +1306,31 @@ function ItemEditModal({
     }
   }
 
-  function save() {
-    const name = draft.name.trim()
-    if (!name) {
-      setError(t('warehouse.err.nameRequired'))
-      return
-    }
-    setError(null)
-    onSave({ ...draft, name })
-  }
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-sm bg-white shadow-sm">
-        <div className="border-b border-grid px-6 py-4">
-          <h3 className="text-lg font-bold">{isNew ? t('warehouse.addItem') : t('warehouse.editItem')}</h3>
+    <AppDialog
+      open
+      onClose={requestClose}
+      title={isNew ? t('warehouse.addItem') : t('warehouse.editItem')}
+      size="lg"
+      onPrimaryAction={() => save()}
+      initialFocus="primary"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={requestClose}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            data-modal-primary
+            className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
+            onClick={() => save()}
+          >
+            {t('common.save')}
+          </button>
         </div>
-        <div className="space-y-4 px-6 py-4">
+      }
+    >
+      <div className="space-y-4 px-6 py-4">
           {error && <FormNotice type="error" message={error} onDismiss={() => setError(null)} />}
           <label className="block text-xs font-semibold text-stone-500">
             {t('warehouse.col.internalCode')}
@@ -1233,105 +1524,120 @@ function ItemEditModal({
             />
           </label>
           <div>
-            <p className="text-xs font-semibold text-stone-500">{t('warehouse.unitConversion')}</p>
-            <p className="mt-0.5 text-[11px] text-stone-400">{t('warehouse.unitConversionHint')}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <input
-                className="w-14 rounded-sm border border-grid px-2 py-2 text-right text-sm tabular-nums"
-                inputMode="decimal"
-                value={altQtyA}
-                onChange={(e) => setAltQtyA(e.target.value)}
-              />
-              <select
-                className="w-24 rounded-sm border border-grid px-2 py-2 text-sm"
-                value={altUnit}
-                onChange={(e) => setAltUnit(e.target.value)}
-              >
-                <option value="">{t('warehouse.col.unit')}</option>
-                {UNITS.filter(
-                  (u) => u !== draft.unit && !(draft.unitConversions ?? []).some((c) => c.unit === u),
-                ).map((u) => (
-                  <option key={u} value={u}>
-                    {unitLabel(u, locale)}
-                  </option>
-                ))}
-              </select>
-              <span className="px-0.5 text-sm text-stone-400">=</span>
-              <input
-                className="w-14 rounded-sm border border-grid px-2 py-2 text-right text-sm tabular-nums"
-                inputMode="decimal"
-                value={altQtyB}
-                onChange={(e) => setAltQtyB(e.target.value)}
-              />
-              <select
-                className="w-24 rounded-sm border border-grid px-2 py-2 text-sm"
-                value={altRef || draft.unit}
-                onChange={(e) => setAltRef(e.target.value)}
-              >
-                <option value={draft.unit}>{unitLabel(draft.unit, locale)}</option>
+            <p className="text-xs font-semibold text-stone-500">{t('warehouse.packaging')}</p>
+            <p className="mt-0.5 text-[11px] text-stone-400">{t('warehouse.packagingHint')}</p>
+            {(draft.unitConversions ?? []).length > 0 && (
+              <div className="mt-1.5 flex flex-col gap-1">
                 {(draft.unitConversions ?? []).map((c) => (
-                  <option key={c.unit} value={c.unit}>
-                    {unitLabel(c.unit, locale)}
-                  </option>
+                  <div
+                    key={c.unit}
+                    className="flex items-center justify-between rounded-sm border border-grid/70 bg-stone-50/70 px-2.5 py-1.5 text-xs text-stone-600"
+                  >
+                    <span className="tabular-nums">
+                      1 {unitLabel(c.unit, locale)} = {formatQty(c.factor)}{' '}
+                      {unitLabel(draft.unit, locale)}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-stone-400 hover:text-red-600"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          unitConversions: (draft.unitConversions ?? []).filter(
+                            (x) => x.unit !== c.unit,
+                          ),
+                        })
+                      }
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))}
-              </select>
+              </div>
+            )}
+            {showPackaging ? (
+              <div className="mt-1.5 rounded-sm border border-grid/70 bg-stone-50/40 p-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="px-0.5 text-sm tabular-nums text-stone-500">1</span>
+                  <select
+                    className="w-24 rounded-sm border border-grid px-2 py-2 text-sm"
+                    value={altUnit}
+                    onChange={(e) => setAltUnit(e.target.value)}
+                  >
+                    <option value="">{t('warehouse.packagingUnit')}</option>
+                    {UNITS.filter(
+                      (u) =>
+                        u !== draft.unit &&
+                        !(draft.unitConversions ?? []).some((c) => c.unit === u),
+                    ).map((u) => (
+                      <option key={u} value={u}>
+                        {unitLabel(u, locale)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="px-0.5 text-sm text-stone-400">=</span>
+                  <input
+                    className="w-14 rounded-sm border border-grid px-2 py-2 text-right text-sm tabular-nums"
+                    inputMode="decimal"
+                    value={altQtyB}
+                    onChange={(e) => setAltQtyB(e.target.value)}
+                  />
+                  <select
+                    className="w-24 rounded-sm border border-grid px-2 py-2 text-sm"
+                    value={altRef || draft.unit}
+                    onChange={(e) => setAltRef(e.target.value)}
+                  >
+                    <option value={draft.unit}>{unitLabel(draft.unit, locale)}</option>
+                    {(draft.unitConversions ?? []).map((c) => (
+                      <option key={c.unit} value={c.unit}>
+                        {unitLabel(c.unit, locale)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-add-icon px-2"
+                    onClick={() => {
+                      const unit = altUnit.trim()
+                      const b = Number(altQtyB.replace(',', '.'))
+                      if (!unit || !b) return
+                      if (!unitsConvertible(draft.unit, unit)) {
+                        setError(t('warehouse.unitDimMismatch'))
+                        return
+                      }
+                      const ref = altRef || draft.unit
+                      const refFactor =
+                        ref === draft.unit
+                          ? 1
+                          : (draft.unitConversions ?? []).find((c) => c.unit === ref)?.factor
+                      if (!refFactor) return
+                      const factor = b * refFactor
+                      setError(null)
+                      setDraft({
+                        ...draft,
+                        unitConversions: [
+                          ...(draft.unitConversions ?? []).filter((c) => c.unit !== unit),
+                          { unit, factor },
+                        ],
+                      })
+                      setAltUnit('')
+                      setAltQtyB('1')
+                      setAltRef('')
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            ) : (
               <button
                 type="button"
-                className="btn-add-icon px-2"
-                onClick={() => {
-                  const unit = altUnit.trim()
-                  const a = Number(altQtyA.replace(',', '.'))
-                  const b = Number(altQtyB.replace(',', '.'))
-                  if (!unit || !a || !b) return
-                  if (!unitsConvertible(draft.unit, unit)) {
-                    setError(t('warehouse.unitDimMismatch'))
-                    return
-                  }
-                  const ref = altRef || draft.unit
-                  const refFactor =
-                    ref === draft.unit
-                      ? 1
-                      : (draft.unitConversions ?? []).find((c) => c.unit === ref)?.factor
-                  if (!refFactor) return
-                  const factor = (b / a) * refFactor
-                  setError(null)
-                  setDraft({
-                    ...draft,
-                    unitConversions: [
-                      ...(draft.unitConversions ?? []).filter((c) => c.unit !== unit),
-                      { unit, factor },
-                    ],
-                  })
-                  setAltUnit('')
-                  setAltQtyA('1')
-                  setAltQtyB('1')
-                  setAltRef('')
-                }}
+                className="mt-1.5 inline-flex items-center gap-1 rounded-sm border border-dashed border-grid px-2.5 py-1.5 text-xs font-medium text-stone-500 hover:border-stone-400 hover:text-stone-700"
+                onClick={() => setShowPackaging(true)}
               >
-                +
+                + {t('warehouse.packagingAdd')}
               </button>
-            </div>
-            {(draft.unitConversions ?? []).map((c) => (
-              <p key={c.unit} className="mt-1 flex items-center justify-between text-xs text-stone-500">
-                <span>
-                  1 {unitLabel(c.unit, locale)} = {formatQty(c.factor)} {unitLabel(draft.unit, locale)}
-                </span>
-                <button
-                  type="button"
-                  className="text-stone-400 hover:text-red-600"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      unitConversions: (draft.unitConversions ?? []).filter(
-                        (x) => x.unit !== c.unit,
-                      ),
-                    })
-                  }
-                >
-                  ✕
-                </button>
-              </p>
-            ))}
+            )}
           </div>
           <label className="block text-xs font-semibold text-stone-500">
             {t('warehouse.note')}
@@ -1342,17 +1648,8 @@ function ItemEditModal({
               onChange={(e) => setDraft({ ...draft, note: e.target.value })}
             />
           </label>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-grid px-6 py-4">
-          <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button type="button" className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white" onClick={save}>
-            {t('common.save')}
-          </button>
-        </div>
       </div>
-    </div>
+    </AppDialog>
   )
 }
 
@@ -1383,28 +1680,41 @@ function ItemCardModal({
   const avgCost = avgCostForItem(warehouse.movements, item.id)
   const priceHistory = priceHistoryForItem(warehouse.movements, item.id).slice(0, 8)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-sm bg-white shadow-sm">
-        <div className="flex gap-4 border-b border-grid px-6 py-4">
-          <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} size="lg" />
-          <div className="min-w-0">
-            <p className="font-mono text-xs font-semibold text-teal-700">{item.internalCode}</p>
-            <h3 className="text-lg font-bold">{item.name}</h3>
-            <p className="text-sm text-stone-500">
-              {cat?.name} · {loc?.name}
-            </p>
-          </div>
+    <AppDialog
+      open
+      onClose={onClose}
+      title={item.name}
+      subtitle={`${item.internalCode} · ${cat?.name} · ${loc?.name}`}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={onClose}>
+            {t('common.close')}
+          </button>
+          <button
+            type="button"
+            className="rounded-sm border border-teal-600 px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+            onClick={onPrintLabel}
+          >
+            {t('warehouse.labels.printOne')}
+          </button>
+          <button type="button" className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white" onClick={onEdit}>
+            {t('common.edit')}
+          </button>
         </div>
-        <dl className="space-y-2 px-6 py-4 text-sm">
+      }
+    >
+      <div className="flex gap-4 border-b border-grid px-6 py-4">
+        <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} size="lg" />
+        <div className="min-w-0">
+          <p className="font-mono text-xs font-semibold text-teal-700">{item.internalCode}</p>
+          <p className="text-sm text-stone-500">
+            {cat?.name} · {loc?.name}
+          </p>
+        </div>
+      </div>
+      <dl className="space-y-2 px-6 py-4 text-sm">
           <div className="flex justify-between">
             <dt className="text-stone-500">{t('warehouse.col.balance')}</dt>
             <dd className="font-bold tabular-nums">{formatQty(b?.balance ?? 0)} {unitLabel(item.unit, locale)}</dd>
@@ -1490,23 +1800,7 @@ function ItemCardModal({
             </ul>
           </div>
         )}
-        <div className="flex justify-end gap-2 border-t border-grid px-6 py-4">
-          <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="rounded-sm border border-teal-600 px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
-            onClick={onPrintLabel}
-          >
-            {t('warehouse.labels.printOne')}
-          </button>
-          <button type="button" className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white" onClick={onEdit}>
-            {t('common.edit')}
-          </button>
-        </div>
-      </div>
-    </div>
+    </AppDialog>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/Button'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { useI18n } from '@/context/I18nContext'
 import { brigadeLabel } from '@/lib/brigadeText'
 import { emptyPackaging } from '@/lib/production/init'
@@ -84,9 +84,13 @@ export function ProductionKeeperModal({
     })
   }
 
-  const content = (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-stone-900/50 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-sm bg-white shadow-sm">
+  return (
+    <ModalBackdrop
+      open
+      onClose={onClose}
+      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
+      panelClassName="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-sm bg-white shadow-sm"
+    >
         <div className="border-b border-grid px-5 py-4">
           <h2 className="text-lg font-bold">{t('warehouse.production.modalTitle')}</h2>
           <p className="mt-1 text-sm text-stone-500">
@@ -213,9 +217,6 @@ export function ProductionKeeperModal({
             {t('production.postWarehouse')}
           </Button>
         </div>
-      </div>
-    </div>
+    </ModalBackdrop>
   )
-
-  return createPortal(content, document.body)
 }

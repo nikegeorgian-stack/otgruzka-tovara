@@ -9,6 +9,7 @@ export type JournalScopeContext = {
   webTechnologistMode?: boolean
   webProcurementMode?: boolean
   webWorkshopMasterMode?: boolean
+  webHrInspectorMode?: boolean
 }
 
 const TECHNOLOGIST: JournalCategory[] = [
@@ -31,10 +32,15 @@ const PROCUREMENT: JournalCategory[] = ['procurement', 'warehouse_movements']
 
 const PRODUCTION: JournalCategory[] = ['production', 'timesheet']
 
+const HR_JOURNALS: JournalCategory[] = ['hr', 'timesheet']
+
+const FINANCE_JOURNALS: JournalCategory[] = ['finance', 'timesheet']
+
 const ROLE_CATEGORIES: Record<AccessRoleId, JournalCategory[] | 'all'> = {
   sysadmin: 'all',
   warehouse_keeper: [...WAREHOUSE, ...PROCUREMENT],
-  hr: ['timesheet'],
+  hr: HR_JOURNALS,
+  hr_inspector: HR_JOURNALS,
   operations_director: 'all',
   workshop_master: PRODUCTION,
   procurement_manager: [...PROCUREMENT, 'warehouse_audit', 'warehouse_nomenclature'],
@@ -46,7 +52,7 @@ const ROLE_CATEGORIES: Record<AccessRoleId, JournalCategory[] | 'all'> = {
   ],
   technologist: TECHNOLOGIST,
   mixer: TECHNOLOGIST,
-  finance: ['timesheet'],
+  finance: FINANCE_JOURNALS,
 }
 
 export function resolveJournalCategories(ctx: JournalScopeContext): JournalCategory[] {
@@ -54,7 +60,8 @@ export function resolveJournalCategories(ctx: JournalScopeContext): JournalCateg
   if (ctx.webWarehouseMode) return [...WAREHOUSE, ...PROCUREMENT]
   if (ctx.webProcurementMode) return [...PROCUREMENT, 'warehouse_nomenclature']
   if (ctx.webWorkshopMasterMode) return PRODUCTION
-  if (ctx.webHrMode || ctx.webFinanceMode) return ['timesheet']
+  if (ctx.webHrInspectorMode || ctx.webHrMode) return HR_JOURNALS
+  if (ctx.webFinanceMode) return FINANCE_JOURNALS
 
   const role = ctx.roleId ?? 'warehouse_keeper'
   const mapped = ROLE_CATEGORIES[role] ?? 'all'

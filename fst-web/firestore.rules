@@ -1,30 +1,78 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAllowedFstEmail() {
+    function isSysAdminEmail() {
       return request.auth != null
         && request.auth.token.email != null
         && request.auth.token.email.lower() in [
           'admin@fibercell.net',
           'admin-dm@fibercell.net',
           'levan-admin@fibercell.net',
-          'hr-nino@fibercell.net',
-          'finans-lizi@fibercell.net',
-          'sklad-alexandra@fibercell.net',
-          'manager-ved-tamara@fibercell.net',
-          'technolog-lasha@fibercell.net',
-          'technolog-ekaterina@fibercell.net',
-          'technolog-annastasia@fibercell.net',
-          'technolog-maria@fibercell.net',
-          'master-karlo@fibercell.net',
-          'master-valera@fibercell.net',
         ];
+    }
+
+    function legacyAllowedEmails() {
+      return [
+        'admin@fibercell.net',
+        'admin-dm@fibercell.net',
+        'levan-admin@fibercell.net',
+        'hr-nino@fibercell.net',
+        'inspektor-nata@fibercell.net',
+        'finans-lizi@fibercell.net',
+        'sklad-alexandra@fibercell.net',
+        'manager-ved-tamara@fibercell.net',
+        'technolog-lasha@fibercell.net',
+        'technolog-ekaterina@fibercell.net',
+        'technolog-annastasia@fibercell.net',
+        'technolog-maria@fibercell.net',
+        'master-karlo@fibercell.net',
+        'master-valera@fibercell.net',
+      ];
+    }
+
+    function isAllowedFstEmail() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && (
+          isSysAdminEmail()
+          || request.auth.token.email.lower() in legacyAllowedEmails()
+          || (
+            exists(/databases/$(database)/documents/fstConfig/access)
+            && request.auth.token.email.lower() in get(/databases/$(database)/documents/fstConfig/access).data.allowedLogins
+          )
+        );
+    }
+
+    match /fstConfig/access {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow write: if isSysAdminEmail();
     }
 
     match /fstStores/{storeId} {
       allow read, write: if isAllowedFstEmail() && (
         request.auth.uid == storeId ||
         storeId == 'fibercell-main'
+      );
+    }
+
+    match /fstSyncMeta/{storeId} {
+      allow read, write: if isAllowedFstEmail() && (
+        request.auth.uid == storeId ||
+        storeId == 'fibercell-main'
+      );
+    }
+
+    match /fstStoreShards/{shardId} {
+      allow read, write: if isAllowedFstEmail() && (
+        shardId.matches('^' + request.auth.uid + '__.*') ||
+        shardId.matches('^fibercell-main__.*')
+      );
+    }
+
+    match /fstMonthArchive/{archiveId} {
+      allow read, write: if isAllowedFstEmail() && (
+        archiveId.matches('^' + request.auth.uid + '__.*') ||
+        archiveId.matches('^fibercell-main__.*')
       );
     }
   }

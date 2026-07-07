@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { ProductColorBadge } from '@/components/ui/ProductColorBadge'
 import { ProductColorPicker } from '@/components/ui/ProductColorPicker'
 import { WarehouseItemSelect } from '@/components/ui/WarehouseItemSelect'
@@ -344,8 +345,12 @@ export function FinishedProductsDirectoryPanel({
       </section>
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-grid bg-white p-5 shadow-sm">
+        <ModalBackdrop
+          open
+          onClose={closeEditing}
+          className="fixed inset-0 flex items-center justify-center bg-black/40 p-4"
+          panelClassName="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-grid bg-white p-5 shadow-sm"
+        >
             <h3 className="text-lg font-bold text-ink">
               {editing.name || t('finishedProduct.new')}
             </h3>
@@ -629,8 +634,7 @@ export function FinishedProductsDirectoryPanel({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </ModalBackdrop>
       )}
     </div>
   )

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { useI18n } from '@/context/I18nContext'
+import { warehouseStoreAsOf } from '@/lib/asOf/snapshot'
 import {
   computeAllBalances,
   computeReorderRows,
@@ -20,21 +21,34 @@ type Props = WarehousePageProps & {
   warehouseId: string
   fromDate: string
   toDate: string
+  asOfIso?: string | null
 }
 
-export function WarehouseAnalyticsTab({ warehouse, warehouseId, fromDate, toDate }: Props) {
+export function WarehouseAnalyticsTab({
+  warehouse,
+  warehouseId,
+  fromDate,
+  toDate,
+  asOfIso,
+}: Props) {
   const { t } = useI18n()
   const [busy, setBusy] = useState<'reorder' | 'turnover' | null>(null)
 
+  const wh = useMemo(
+    () => (asOfIso ? warehouseStoreAsOf(warehouse, asOfIso) : warehouse),
+    [warehouse, asOfIso],
+  )
+  const effectiveTo = asOfIso ? asOfIso.slice(0, 10) : toDate
+
   const balances = useMemo(
-    () => computeAllBalances(warehouse, warehouseId || undefined),
-    [warehouse, warehouseId],
+    () => computeAllBalances(wh, warehouseId || undefined),
+    [wh, warehouseId],
   )
   const turnover = useMemo(
-    () => turnoverForPeriod(warehouse, fromDate, toDate, warehouseId || undefined),
-    [warehouse, fromDate, toDate, warehouseId],
+    () => turnoverForPeriod(wh, fromDate, effectiveTo, warehouseId || undefined),
+    [wh, fromDate, effectiveTo, warehouseId],
   )
-  const activeItems = useMemo(() => warehouse.items.filter((i) => i.active), [warehouse.items])
+  const activeItems = useMemo(() => wh.items.filter((i) => i.active), [wh.items])
   const reorder = useMemo(
     () =>
       computeReorderRows(
@@ -44,28 +58,28 @@ export function WarehouseAnalyticsTab({ warehouse, warehouseId, fromDate, toDate
     [activeItems, balances, warehouseId],
   )
   const byCategory = useMemo(
-    () => valueByCategory(warehouse, balances, warehouseId || undefined),
-    [warehouse, balances, warehouseId],
+    () => valueByCategory(wh, balances, warehouseId || undefined),
+    [wh, balances, warehouseId],
   )
-  const itemMap = useMemo(() => new Map(warehouse.items.map((i) => [i.id, i])), [warehouse.items])
+  const itemMap = useMemo(() => new Map(wh.items.map((i) => [i.id, i])), [wh.items])
 
   const totalValue = useMemo(() => {
     let sum = 0
-    for (const item of warehouse.items) {
+    for (const item of wh.items) {
       if (warehouseId && item.warehouseId !== warehouseId) continue
       sum += itemStockValueSmart(
         item,
         balances.get(item.id)?.balance ?? 0,
-        warehouse.movements,
+        wh.movements,
         warehouseId,
       )
     }
     return sum
-  }, [warehouse.items, warehouse.movements, balances, warehouseId])
+  }, [wh.items, wh.movements, balances, warehouseId])
 
   const expiring = useMemo(
-    () => expiringBatches(warehouse.movements, warehouse.items, 30),
-    [warehouse.movements, warehouse.items],
+    () => expiringBatches(wh.movements, wh.items, 30),
+    [wh.movements, wh.items],
   )
 
   const periodReceipt = turnover.reduce((s, r) => s + r.receipt, 0)
@@ -76,7 +90,7 @@ export function WarehouseAnalyticsTab({ warehouse, warehouseId, fromDate, toDate
   async function handleExportReorder() {
     setBusy('reorder')
     try {
-      await exportWarehouseReorderExcel(warehouse, reorder)
+      await exportWarehouseReorderExcel(wh, reorder)
     } finally {
       setBusy(null)
     }
@@ -85,7 +99,7 @@ export function WarehouseAnalyticsTab({ warehouse, warehouseId, fromDate, toDate
   async function handleExportTurnover() {
     setBusy('turnover')
     try {
-      await exportWarehouseTurnoverExcel(warehouse, turnover, { from: fromDate, to: toDate })
+      await exportWarehouseTurnoverExcel(wh, turnover, { from: fromDate, to: effectiveTo })
     } finally {
       setBusy(null)
     }
@@ -107,7 +121,7 @@ export function WarehouseAnalyticsTab({ warehouse, warehouseId, fromDate, toDate
         <KpiCard
           label={`${t('warehouse.analytics.issued')} · ${t('warehouse.analytics.received')}`}
           value={`${formatQty(periodIssue)} / ${formatQty(periodReceipt)}`}
-          hint={`${fromDate} — ${toDate}`}
+          hint={`${fromDate} — ${effectiveTo}${asOfIso ? ` · ${t('asOf.onMoment')}` : ''}`}
         />
       </div>
 

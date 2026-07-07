@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
@@ -26,7 +26,10 @@ import {
   emptyProductionRequest,
 } from '@/lib/production/init'
 import { ProductionPrintPreview } from '@/components/production/ProductionPrintPreview'
+import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
 import { ProductionBrigadeRoster } from '@/components/production/ProductionBrigadeRoster'
+import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import {
   formatNum,
   summarizeProductionMonth,
@@ -79,6 +82,8 @@ type Props = {
   clearWorkspaceDraft: (draftKey: string) => void
   workspaceRestoreSeq: number
   workspaceDrafts: Record<string, unknown>
+  focusRequestId?: string | null
+  onJournalFocusConsumed?: () => void
 }
 
 type ProductionWorkspaceDraft = {
@@ -103,6 +108,8 @@ export function ProductionPage({
   clearWorkspaceDraft,
   workspaceRestoreSeq,
   workspaceDrafts,
+  focusRequestId,
+  onJournalFocusConsumed,
 }: Props) {
   const { t, tf, locale, employeeName } = useI18n()
   const { confirm } = useConfirm()
@@ -113,6 +120,16 @@ export function ProductionPage({
   const [printOpen, setPrintOpen] = useState(false)
 
   const today = new Date().toISOString().slice(0, 10)
+  const daySnapshot = useAsOfSnapshot()
+  const {
+    enabled: daySnapshotEnabled,
+    setEnabled: setDaySnapshotEnabled,
+    date: daySnapshotDate,
+    setDate: setDaySnapshotDate,
+    time: daySnapshotTime,
+    setTime: setDaySnapshotTime,
+    asOfIso: daySnapshotAsOf,
+  } = daySnapshot
   const [form, setForm] = useState<ProductionRequest>(() =>
     emptyProductionRequest(today, '1', 'day', defaultBrigadeForLine('1', brigades)),
   )
@@ -172,6 +189,17 @@ export function ProductionPage({
         ),
     [requests, activeMonth],
   )
+
+  const journalDisplay = useMemo(() => {
+    if (!daySnapshotEnabled) return journal
+    let list = journal.filter((r) => r.date === daySnapshotDate)
+    if (daySnapshotAsOf) {
+      list = list.filter(
+        (r) => r.status !== 'posted' || !r.postedAt || r.postedAt <= daySnapshotAsOf,
+      )
+    }
+    return list
+  }, [journal, daySnapshotEnabled, daySnapshotDate, daySnapshotAsOf])
 
   const brigadeOptions = useMemo(() => {
     const preferred = brigadesForLine(form.lineId, brigades)
@@ -291,6 +319,13 @@ export function ProductionPage({
     })
     setTab('request')
   }
+
+  useEffect(() => {
+    if (!focusRequestId) return
+    const req = requests.find((r) => r.id === focusRequestId)
+    if (req) loadRequest(req)
+    onJournalFocusConsumed?.()
+  }, [focusRequestId])
 
   function updatePackagingField(field: 'thermoFilm' | 'stretch', value: string) {
     setForm((f) => ({
@@ -1389,7 +1424,27 @@ export function ProductionPage({
       )}
 
       {tab === 'journal' && (
-        <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
+        <>
+          <AsOfSnapshotBar
+            className="mb-4"
+            enabled={daySnapshotEnabled}
+            onEnabledChange={setDaySnapshotEnabled}
+            date={daySnapshotDate}
+            onDateChange={setDaySnapshotDate}
+            time={daySnapshotTime}
+            onTimeChange={setDaySnapshotTime}
+            hintKey="asOf.hintProduction"
+          />
+          {daySnapshotEnabled ? (
+            <div className="mb-4">
+              <ProductionDaySnapshot
+                requests={requests}
+                date={daySnapshotDate}
+                asOfIso={daySnapshotAsOf ?? undefined}
+              />
+            </div>
+          ) : null}
+          <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-stone-50 text-xs uppercase text-stone-500">
               <tr>
@@ -1405,7 +1460,7 @@ export function ProductionPage({
               </tr>
             </thead>
             <tbody>
-              {journal.map((r) => {
+              {journalDisplay.map((r) => {
                 const s = summarizeRequest(r)
                 return (
                   <tr key={r.id} className="border-t border-grid">
@@ -1463,14 +1518,34 @@ export function ProductionPage({
               })}
             </tbody>
           </table>
-          {journal.length === 0 && (
+          {journalDisplay.length === 0 && (
             <p className="p-6 text-center text-sm text-stone-500">{t('production.empty')}</p>
           )}
         </div>
+        </>
       )}
 
       {tab === 'summary' && (
         <div className="space-y-4">
+          <AsOfSnapshotBar
+            enabled={daySnapshotEnabled}
+            onEnabledChange={setDaySnapshotEnabled}
+            date={daySnapshotDate}
+            onDateChange={setDaySnapshotDate}
+            time={daySnapshotTime}
+            onTimeChange={setDaySnapshotTime}
+            scope="all"
+            onScopeChange={() => {}}
+            showScope={false}
+          />
+          {daySnapshotEnabled ? (
+            <ProductionDaySnapshot
+              requests={requests}
+              date={daySnapshotDate}
+              asOfIso={daySnapshotAsOf ?? undefined}
+            />
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">
               <p className="text-xs uppercase text-stone-500">{t('production.monthPlan')}</p>

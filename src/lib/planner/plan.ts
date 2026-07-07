@@ -41,10 +41,12 @@ export function factMpForOrderOnDate(
   order: ProductionOrder,
   requests: ProductionRequest[],
   date: string,
+  asOfIso?: string,
 ): number {
   let total = 0
   for (const req of requests) {
     if (req.date !== date || req.status !== 'posted') continue
+    if (asOfIso && req.postedAt && req.postedAt > asOfIso) continue
     const totals = sumFactRows(req.factRows)
     const orderFact = totals[order.category]?.qtyMp ?? 0
     if (orderFact <= 0) continue

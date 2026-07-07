@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { BilingualText } from '@/components/employee/BilingualText'
 import { EmployeePicker } from '@/components/ui/EmployeePicker'
 import { useI18n } from '@/context/I18nContext'
@@ -19,7 +20,7 @@ import {
   georgiaHolidayNameBilingual,
   isGeorgiaPublicHoliday,
 } from '@/lib/georgiaCalendar'
-import { getFactExtraHours } from '@/lib/factExtra'
+import { getFactExtraHours, getFactHoursOverride } from '@/lib/factExtra'
 import { getFactMark, rowStats } from '@/lib/stats'
 import { isCyclicSchedule, usesGroup2x2 } from '@/lib/schedules'
 import {
@@ -30,12 +31,20 @@ import {
   type MonthGroupMode,
   type MonthTableDisplay,
 } from '@/lib/monthViewOptions'
-import { buildTimesheetLayout, layoutNavRowIds } from '@/lib/monthTimesheetLayout'
+import { buildTimesheetLayout, flattenTimesheetLayout, layoutNavRowIds } from '@/lib/monthTimesheetLayout'
+import {
+  DEFAULT_MONTH_ROW_SORT,
+  toggleMonthRowSort,
+  type MonthRowSort,
+  type MonthRowSortKey,
+} from '@/lib/monthRowSort'
 import { employeeStructuralUnitLabel } from '@/lib/hr/orgStructure'
-import type { AppStore, DayCode, MonthSheet } from '@/lib/types'
+import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
+import type { AppStore, DayCode, Employee, MonthSheet } from '@/lib/types'
 import { CellCodePicker } from './CellCodePicker'
 import { CellContextMenu } from './CellContextMenu'
 import { DayCell } from './DayCell'
+import { TimesheetFlatBody } from './TimesheetFlatBody'
 
 type Props = {
   store: AppStore
@@ -55,6 +64,8 @@ type Props = {
   filterSchedule?: string
   groupMode?: MonthGroupMode
   display?: MonthTableDisplay
+  rowSort?: MonthRowSort
+  onRowSortChange?: (sort: MonthRowSort) => void
   readOnly?: boolean
   onCycle: (rowId: string, dateKey: string) => void
   onSetCode: (rowId: string, dateKey: string, code: DayCode) => void
@@ -78,6 +89,10 @@ type Props = {
   ) => void
   /** Назначить бригадира бригады (null — снять). */
   onSetBrigadier?: (brigade: string, employeeId: string | null) => void
+  /** Отметить/снять бригадирство в конкретный день (для бригадирской премии). */
+  onMarkBrigadier?: (rowId: string, dateKey: string, on: boolean) => void
+  /** Отметить/снять бригадирство на весь месяц по строке. */
+  onMarkBrigadierMonth?: (rowId: string, on: boolean) => void
 }
 
 type FocusCell = { rowId: string; day: number }
@@ -98,6 +113,8 @@ export function PlanFactTable({
   filterSchedule = '',
   groupMode = 'brigade',
   display = DEFAULT_MONTH_VIEW_DISPLAY,
+  rowSort = DEFAULT_MONTH_ROW_SORT,
+  onRowSortChange,
   readOnly = false,
   onCycle,
   onSetCode,
@@ -114,6 +131,8 @@ export function PlanFactTable({
   onChangeGroup2x2,
   onSetCycleFromDay,
   onSetBrigadier,
+  onMarkBrigadier,
+  onMarkBrigadierMonth,
 }: Props) {
   const { t, locale, employeeNameLines, employeePositionLines } = useI18n()
   const { year, month } = parseMonthKey(sheet.month)
@@ -186,6 +205,20 @@ export function PlanFactTable({
     return map
   }, [sheet.rows])
 
+  const employeesById = useMemo(() => {
+    const map = new Map<string, Employee>()
+    for (const emp of store.employees) map.set(emp.id, emp)
+    return map
+  }, [store.employees])
+
+  const rowStatsMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof rowStats>>()
+    for (const row of sheet.rows) {
+      map.set(row.id, rowStats(sheet, row.id, days, year, month))
+    }
+    return map
+  }, [sheet, days, year, month])
+
   const focusNextEmptySlot = useCallback(
     (brigade: string, afterRowId: string) => {
       const rows = sheet.rows.filter((r) => r.brigade === brigade)
@@ -206,7 +239,7 @@ export function PlanFactTable({
   const rowVisible = useCallback(
     (_rowId: string, brigade: string, employeeId: string | null) => {
       if (!brigadeShown(brigade)) return false
-      const emp = employeeId ? store.employees.find((e) => e.id === employeeId) : null
+      const emp = employeeId ? employeesById.get(employeeId) ?? null : null
       if (unitFilterActive && selectedUnits && !isEmployeeUnitVisible(emp, selectedUnits)) {
         return false
       }
@@ -217,7 +250,7 @@ export function PlanFactTable({
       }
       return true
     },
-    [brigadeShown, filterSchedule, q, selectedUnits, store.employees, unitFilterActive],
+    [brigadeShown, employeesById, filterSchedule, q, selectedUnits, unitFilterActive],
   )
 
   const layoutBlocks = useMemo(
@@ -231,11 +264,30 @@ export function PlanFactTable({
           brigadeShown,
           rowVisible,
           searchActive: !!q,
+          rowSort,
+          employeesById,
+          locale,
         },
         t,
       ),
-    [store, sheet, brigades, groupMode, brigadeShown, rowVisible, q, t],
+    [store.employees, store.brigadeNamesKa, store.brigadeUnits, store.hrStructuralUnits, sheet, brigades, groupMode, brigadeShown, rowVisible, q, rowSort, employeesById, locale, t],
   )
+
+  const flatItems = useMemo(() => flattenTimesheetLayout(layoutBlocks), [layoutBlocks])
+
+  const shouldVirtualize = flatItems.length >= 48
+
+  const rowVirtualizer = useVirtualizer({
+    count: flatItems.length,
+    getScrollElement: () => tableRef.current,
+    estimateSize: (index) => {
+      const kind = flatItems[index]?.kind
+      if (kind === 'data') return focusMode ? 48 : 40
+      if (kind === 'unit') return 38
+      return 44
+    },
+    overscan: 10,
+  })
 
   const visibleRowCount = useMemo(
     () =>
@@ -247,6 +299,49 @@ export function PlanFactTable({
   )
 
   const navRows = useMemo(() => layoutNavRowIds(layoutBlocks), [layoutBlocks])
+
+  const handleSortClick = useCallback(
+    (key: MonthRowSortKey) => {
+      if (!onRowSortChange) return
+      onRowSortChange(toggleMonthRowSort(rowSort, key))
+    },
+    [onRowSortChange, rowSort],
+  )
+
+  const sortMark = useCallback(
+    (key: MonthRowSortKey) => {
+      if (rowSort.key !== key) return null
+      return rowSort.dir === 'asc' ? ' ↑' : ' ↓'
+    },
+    [rowSort],
+  )
+
+  const sortableTh = useCallback(
+    (
+      key: MonthRowSortKey,
+      label: string,
+      className: string,
+    ) => (
+      <th className={className}>
+        {onRowSortChange ? (
+          <button
+            type="button"
+            className="th-sortable inline-flex w-full items-center gap-0.5 text-left font-semibold hover:text-accent"
+            title={t('table.sortBy')}
+            onClick={() => handleSortClick(key)}
+          >
+            <span>{label}</span>
+            {sortMark(key) && (
+              <span className="font-mono text-[10px] text-accent">{sortMark(key)}</span>
+            )}
+          </button>
+        ) : (
+          label
+        )}
+      </th>
+    ),
+    [handleSortClick, onRowSortChange, sortMark, t],
+  )
 
   useEffect(() => {
     const root = tableRef.current
@@ -361,32 +456,41 @@ export function PlanFactTable({
       <table className="w-max min-w-full border-collapse text-sm">
         <thead className="sticky top-0 z-20 bg-[#faf8f4]">
           <tr>
-            <th className="sticky left-0 z-30 min-w-[2rem] border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-xs">
-              №
-            </th>
-            <th
-              className={`sticky left-[2rem] z-30 border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-left text-xs font-semibold ${
+            {sortableTh(
+              'default',
+              '№',
+              'sticky left-0 z-30 min-w-[2rem] border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-xs',
+            )}
+            {sortableTh(
+              'name',
+              t('table.colName'),
+              `sticky left-[2rem] z-30 border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-left text-xs font-semibold ${
                 focusMode ? 'min-w-[14rem]' : 'min-w-[10rem]'
-              }`}
-            >
-              {t('table.colName')}
-            </th>
-            {display.showTab && (
-              <th className="border-b border-grid px-2 py-2 text-xs">{t('table.colTab')}</th>
+              }`,
             )}
-            {display.showPosition && (
-              <th className="min-w-[8rem] border-b border-grid px-2 py-2 text-left text-xs">
-                {t('table.colPosition')}
-              </th>
-            )}
+            {display.showTab &&
+              sortableTh(
+                'tab',
+                t('table.colTab'),
+                'border-b border-grid px-2 py-2 text-xs',
+              )}
+            {display.showPosition &&
+              sortableTh(
+                'position',
+                t('table.colPosition'),
+                'min-w-[8rem] border-b border-grid px-2 py-2 text-left text-xs',
+              )}
             {display.showUnit && (
               <th className="min-w-[9rem] border-b border-grid px-2 py-2 text-left text-xs">
                 {t('table.colUnit')}
               </th>
             )}
-            {display.showSchedule && (
-              <th className="border-b border-grid px-2 py-2 text-xs">{t('table.colSchedule')}</th>
-            )}
+            {display.showSchedule &&
+              sortableTh(
+                'schedule',
+                t('table.colSchedule'),
+                'border-b border-grid px-2 py-2 text-xs',
+              )}
             {showGroupCol && (
               <th className="border-b border-grid px-1 py-2 text-center text-xs">
                 {t('table.colGroup')}
@@ -425,37 +529,44 @@ export function PlanFactTable({
           </tr>
         </thead>
         <tbody>
-          {layoutBlocks.map((block) => {
-            if (block.kind === 'unit') {
-              return (
-                <tr key={`unit-${block.unitId}`} className="bg-sky-50/90">
-                  <td
-                    colSpan={leadingCols + days + trailingCols}
-                    className="sticky left-0 border-b border-grid px-3 py-2.5 text-sm font-bold text-sky-950"
-                  >
-                    {block.unitLabel}
-                  </td>
-                </tr>
-              )
-            }
+          <TimesheetFlatBody
+            items={flatItems}
+            colSpan={leadingCols + days + trailingCols}
+            virtualizer={shouldVirtualize ? rowVirtualizer : undefined}
+            renderItem={(item) => {
+              if (item.kind === 'unit') {
+                const block = item.block
+                return (
+                  <tr key={item.key} className="bg-sky-50/90">
+                    <td
+                      colSpan={leadingCols + days + trailingCols}
+                      className="sticky left-0 border-b border-grid px-3 py-2.5 text-sm font-bold text-sky-950"
+                    >
+                      {block.unitLabel}
+                    </td>
+                  </tr>
+                )
+              }
 
-            const brigade = block.brigade
-            const rows = sheet.rows.filter((r) => r.brigade === brigade)
-            const visibleRows = block.rows
-            const brigadeRowCount = block.brigadeRowCount
-            const emptyRowCount = block.emptyRowCount
-            const canRemoveEmpty = brigadeRowCount > 1 && emptyRowCount > 0
-            const headerKey = `${block.kind}-${block.unitId ?? 'x'}-${brigade}`
+              if (item.kind === 'brigade-header') {
+                const block = item.block
+                const brigade = block.brigade
+                const rows = sheet.rows.filter((r) => r.brigade === brigade)
+                const brigadeRowCount = block.brigadeRowCount
+                const emptyRowCount = block.emptyRowCount
+                const canRemoveEmpty = brigadeRowCount > 1 && emptyRowCount > 0
 
-            return (
-              <Fragment key={headerKey}>
-                <tr className={block.kind === 'unit-brigade' ? 'bg-stone-50/70' : 'bg-stone-50'}>
-                  <td
-                    colSpan={leadingCols + days + trailingCols}
-                    className={`sticky left-0 border-b border-grid py-2 text-xs font-bold uppercase tracking-wide text-accent ${
-                      block.kind === 'unit-brigade' ? 'px-3 pl-8' : 'px-3'
-                    }`}
+                return (
+                  <tr
+                    key={item.key}
+                    className={block.kind === 'unit-brigade' ? 'bg-stone-50/70' : 'bg-stone-50'}
                   >
+                    <td
+                      colSpan={leadingCols + days + trailingCols}
+                      className={`sticky left-0 border-b border-grid py-2 text-xs font-bold uppercase tracking-wide text-accent ${
+                        block.kind === 'unit-brigade' ? 'px-3 pl-8' : 'px-3'
+                      }`}
+                    >
                     <span className="flex flex-wrap items-center gap-2">
                       <span>{brigadeLabel(brigade, store.brigadeNamesKa, locale)}</span>
                       {(() => {
@@ -469,7 +580,9 @@ export function PlanFactTable({
                             if (r.employeeId) candidateIds.add(r.employeeId)
                           }
                           for (const e of store.employees) {
-                            if (e.active && e.brigade === brigade) candidateIds.add(e.id)
+                            if (employeeActiveInMonth(e, sheet.month) && e.brigade === brigade) {
+                              candidateIds.add(e.id)
+                            }
                           }
                           if (brigadierId) candidateIds.add(brigadierId)
                           const candidates = store.employees
@@ -543,13 +656,18 @@ export function PlanFactTable({
                     </span>
                   </td>
                 </tr>
-                {visibleRows.map((row, idx) => {
-                  const emp = row.employeeId
-                    ? store.employees.find((e) => e.id === row.employeeId)
-                    : null
-                  const rs = rowStats(sheet, row.id, days, year, month)
-                  return (
-                    <tr key={row.id} className="group hover:bg-paper/60">
+                )
+              }
+
+              const { block, row, rowIndex: idx } = item
+              const brigade = block.brigade
+              const brigadeRowCount = block.brigadeRowCount
+              const emp = row.employeeId
+                ? employeesById.get(row.employeeId) ?? null
+                : null
+              const rs = rowStatsMap.get(row.id)!
+              return (
+                <tr key={item.key} className="group hover:bg-paper/60">
                       <td className="sticky left-0 border-b border-r border-grid bg-white px-1 py-1 font-mono text-xs group-hover:bg-paper/60">
                         <span className="flex items-center gap-1">
                           <span>{idx + 1}</span>
@@ -574,10 +692,10 @@ export function PlanFactTable({
                             employees={store.employees}
                             value={row.employeeId}
                             brigade={brigade}
+                            month={sheet.month}
                             assignedInMonth={assignedInMonth}
                             currentRowId={row.id}
                             compact
-                            elevated={focusMode}
                             placeholder={t('table.freeSlot')}
                             onChange={(id) => {
                               onAssign(row.id, id)
@@ -703,6 +821,8 @@ export function PlanFactTable({
                         const code = mode === 'plan' ? planCode : factCode
                         const extraHours =
                           mode === 'fact' ? getFactExtraHours(sheet, row.id, dateKey) : 0
+                        const overrideHours =
+                          mode === 'fact' ? getFactHoursOverride(sheet, row.id, dateKey) : null
                         const mismatch = planCode !== factCode && !!emp
                         const comment = getCellComment(sheet, row.id, dateKey)
                         const substitution =
@@ -712,10 +832,12 @@ export function PlanFactTable({
                         const subLabel = substitution
                           ? substitutionLabel(sheet, store.employees, row.id, dateKey)
                           : undefined
+                        const isBrigadier = !!sheet.brigadierDays?.[`${row.id}|${dateKey}`]
                         const titleParts = [
                           subLabel,
                           comment,
                           extraHours > 0 ? `+${extraHours} ${t('common.hoursShort')}` : '',
+                          overrideHours != null ? `${overrideHours} ${t('common.hoursShort')}` : '',
                           mismatch
                             ? `${t('month.plan')} «${planCode || '·'}» → ${t('month.fact')} «${factCode || '·'}»`
                             : `${dateKey} ${mode}`,
@@ -725,11 +847,13 @@ export function PlanFactTable({
                             <DayCell
                               code={code}
                               extraHours={extraHours}
+                              overrideHours={overrideHours}
                               size={cellSize}
                               mismatch={mismatch}
                               dimmed={mode === 'plan' && mismatch}
                               hasComment={!!comment}
                               hasSubstitution={!!substitution}
+                              isBrigadier={isBrigadier}
                               dataCell={`${row.id}|${dateKey}`}
                               onClick={(e) => {
                                 if (emp && canEditCells) {
@@ -750,7 +874,8 @@ export function PlanFactTable({
                               }}
                               onContextMenu={(e) => {
                                 if (!emp || !canEditCells) return
-                                if (!onCommentRequest && !onSubstitutionRequest) return
+                                if (!onCommentRequest && !onSubstitutionRequest && !onMarkBrigadier)
+                                  return
                                 e.preventDefault()
                                 setCodePicker(null)
                                 setFocus({ rowId: row.id, day: d })
@@ -785,11 +910,9 @@ export function PlanFactTable({
                         </>
                       )}
                     </tr>
-                  )
-                })}
-              </Fragment>
-            )
-          })}
+              )
+            }}
+          />
         </tbody>
       </table>
       {!embedded && (
@@ -863,9 +986,30 @@ export function PlanFactTable({
           x={contextMenu.x}
           y={contextMenu.y}
           showSubstitution={mode === 'fact' && !!onSubstitutionRequest}
+          showBrigadier={!!onMarkBrigadier}
+          isBrigadier={!!sheet.brigadierDays?.[`${contextMenu.rowId}|${contextMenu.dateKey}`]}
           onComment={() => onCommentRequest?.(contextMenu.rowId, contextMenu.dateKey)}
           onSubstitution={() =>
             onSubstitutionRequest?.(contextMenu.rowId, contextMenu.dateKey)
+          }
+          onToggleBrigadier={
+            onMarkBrigadier
+              ? () =>
+                  onMarkBrigadier(
+                    contextMenu.rowId,
+                    contextMenu.dateKey,
+                    !sheet.brigadierDays?.[`${contextMenu.rowId}|${contextMenu.dateKey}`],
+                  )
+              : undefined
+          }
+          onBrigadierMonth={
+            onMarkBrigadierMonth
+              ? () =>
+                  onMarkBrigadierMonth(
+                    contextMenu.rowId,
+                    !sheet.brigadierDays?.[`${contextMenu.rowId}|${contextMenu.dateKey}`],
+                  )
+              : undefined
           }
           onClose={() => setContextMenu(null)}
         />

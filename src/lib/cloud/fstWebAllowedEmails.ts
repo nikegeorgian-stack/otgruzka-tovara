@@ -6,6 +6,7 @@ export const FST_WEB_ALLOWED_EMAILS = [
   'admin-dm@fibercell.net',
   'levan-admin@fibercell.net',
   'hr-nino@fibercell.net',
+  'inspektor-nata@fibercell.net',
   'finans-lizi@fibercell.net',
   'sklad-alexandra@fibercell.net',
   'manager-ved-tamara@fibercell.net',

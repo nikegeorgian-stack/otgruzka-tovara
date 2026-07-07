@@ -8,6 +8,7 @@ import { HrPersonalFile } from '@/components/hr/HrPersonalFile'
 import { HrRegistryImportPanel } from '@/components/hr/HrRegistryImportPanel'
 import { HrTrashPanel } from '@/components/hr/HrTrashPanel'
 import { HrVacationForm } from '@/components/hr/HrVacationForm'
+import { HrViewDefaultsDialog } from '@/components/hr/HrViewDefaultsDialog'
 import { PayrollPanel } from '@/components/hr/PayrollPanel'
 import { WorkshopMasterRosterPanel } from '@/components/hr/WorkshopMasterRosterPanel'
 import { AppDialog } from '@/components/ui/AppDialog'
@@ -19,6 +20,15 @@ import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { TabBar } from '@/components/ui/TabBar'
+import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
+import { PageActionOverflow } from '@/components/ui/PageActionOverflow'
+import { WorkspaceWidgetDrawer } from '@/components/ui/workspace/WorkspaceWidgetDrawer'
+import {
+  WorkspaceWidgetChip,
+  WorkspaceWidgetRail,
+} from '@/components/ui/workspace/WorkspaceWidgetRail'
+import { useWorkspaceWidgets } from '@/hooks/useWorkspaceWidgets'
+import type { WorkspaceWidgetDef } from '@/lib/ui/workspaceWidgets'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
 import { isSysAdmin } from '@/lib/access/permissions'
@@ -37,8 +47,11 @@ import {
   isOverdue,
 } from '@/lib/hr/stats'
 import { employeeSearchHr } from '@/lib/hr/sync'
+import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
+import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
 import type { Candidate, DayCode, HrContractType, HrPosition, HrSection, HrStatus, HrStructuralUnit } from '@/lib/types'
 import type { Employee, AppStore } from '@/lib/types'
+import type { HrViewDefaults, UserViewDefaults } from '@/lib/viewDefaults/types'
 
 export type HrPageProps = {
   store: AppStore
@@ -76,6 +89,12 @@ export type HrPageProps = {
   /** Мастер цеха — только просмотр списка (ФИО, должность, договор) */
   workshopMasterMode?: boolean
   webUserName?: string
+  userHrDefaults?: HrViewDefaults
+  currentUserId?: string
+  onSaveViewDefaults?: <K extends keyof UserViewDefaults>(
+    viewId: K,
+    patch: NonNullable<UserViewDefaults[K]>,
+  ) => void
 }
 
 const HR_WEB_SECTIONS: HrSection[] = [
@@ -128,6 +147,9 @@ export function HrPage({
   webHrMode = false,
   workshopMasterMode = false,
   webUserName,
+  userHrDefaults,
+  currentUserId,
+  onSaveViewDefaults,
 }: HrPageProps) {
   const { t, tf, locale, employeeNameLines, employeePositionLines } = useI18n()
   const { confirm } = useConfirm()
@@ -144,11 +166,21 @@ export function HrPage({
     [webHrMode, admin],
   )
   const [section, setSection] = useState<HrSection>(initialSection)
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const widgets = useWorkspaceWidgets('hr')
   const [q, setQ] = useState('')
   const [docQ, setDocQ] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [statusFilters, setStatusFilters] = useState<Set<HrStatus>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [employeeSort, setEmployeeSort] = useState<TableSortState<EmployeeSortKey>>({
+    key: null,
+    dir: 'asc',
+  })
+
+  function handleEmployeeSort(key: EmployeeSortKey) {
+    setEmployeeSort((prev) => toggleTableSort(prev, key))
+  }
 
   function toggleStatus(s: HrStatus) {
     setStatusFilters((prev) => {
@@ -186,13 +218,14 @@ export function HrPage({
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return employees.filter((e) => {
+    const list = employees.filter((e) => {
       if (deptFilter && (e.department ?? e.brigade) !== deptFilter) return false
       if (statusFilters.size > 0 && !statusFilters.has(e.hrStatus ?? 'active')) return false
       if (!s) return true
       return employeeSearchHr(e).includes(s)
     })
-  }, [employees, q, deptFilter, statusFilters])
+    return sortEmployees(list, employeeSort, locale)
+  }, [employees, q, deptFilter, statusFilters, employeeSort, locale])
 
   const selected = employees.find((e) => e.id === selectedId) ?? null
   const allDocs = useMemo(() => allEmployeeDocuments(employees), [employees])
@@ -323,6 +356,77 @@ export function HrPage({
     onSectionChange?.(id)
   }
 
+  const hrWidgetDefs: WorkspaceWidgetDef[] = [
+    { id: 'filters', labelKey: 'workspace.widget.filters', icon: '▦' },
+    {
+      id: 'analytics',
+      labelKey: 'workspace.widget.analytics',
+      icon: '◫',
+      badge:
+        kpis.expiringDocs + kpis.overdueDocs + kpis.overdueTrainings > 0
+          ? kpis.expiringDocs + kpis.overdueDocs + kpis.overdueTrainings
+          : undefined,
+    },
+  ]
+
+  const employeeFilters = (
+    <div className="flex flex-wrap items-center gap-3">
+      <input
+        className="min-w-[14rem] flex-1 rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+        placeholder={t('hr.search')}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <select
+        className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+        value={deptFilter}
+        onChange={(e) => setDeptFilter(e.target.value)}
+      >
+        <option value="">{t('hr.allDepartments')}</option>
+        {departments.map((d) => (
+          <option key={d} value={d}>
+            {d}
+          </option>
+        ))}
+      </select>
+      <div className="flex flex-wrap items-center gap-1.5" title={t('hr.filterStatusHint')}>
+        {(['active', 'vacation', 'sick', 'fired'] as HrStatus[]).map((s) => {
+          const on = statusFilters.has(s)
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => toggleStatus(s)}
+              className={`flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-semibold transition ${
+                on
+                  ? 'border-accent bg-accent text-white'
+                  : 'border-grid bg-white text-stone-600 hover:border-accent/60'
+              }`}
+            >
+              <span
+                className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] ${
+                  on ? 'border-white bg-white/20' : 'border-stone-300'
+                }`}
+              >
+                {on ? '✓' : ''}
+              </span>
+              {hrStatusLabel(s, locale)}
+            </button>
+          )
+        })}
+        {statusFilters.size > 0 && (
+          <button
+            type="button"
+            className="rounded-sm px-2 py-1 text-xs text-stone-400 hover:text-stone-600"
+            onClick={() => setStatusFilters(new Set())}
+          >
+            ✕ {t('hr.allStatuses')}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
   if (workshopMasterMode) {
     return (
       <PageLayout>
@@ -343,21 +447,90 @@ export function HrPage({
   return (
     <PageLayout>
       <PageHeader
-        badge={webHrMode ? t('web.hr.badge') : t('hr.badge')}
+        density="compact"
+        showBrand={false}
         title={
           webHrMode && webUserName
             ? tf('web.hr.welcome', { name: webUserName })
             : t('hr.title')
         }
         subtitle={webHrMode ? t('web.hr.pageSubtitle') : t('hr.subtitle')}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <TabBar
+              tabs={visibleTabs.map((tab) => ({ id: tab.id, label: t(tab.labelKey) }))}
+              value={section}
+              onChange={(id) => changeSection(id as HrSection)}
+            />
+            <PageActionOverflow
+              items={[
+                {
+                  id: 'defaults',
+                  label: t('viewDefaults.open'),
+                  onClick: () => setDefaultsOpen(true),
+                  hidden: !(currentUserId && onSaveViewDefaults),
+                },
+              ]}
+            />
+          </div>
+        }
       />
 
       {notice && (
         <FormNotice type="error" message={notice} onDismiss={() => setNotice(null)} />
       )}
 
-      <div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <WorkspaceWidgetRail
+        widgets={hrWidgetDefs}
+        openId={widgets.openId}
+        onToggle={widgets.toggle}
+        leading={
+          section === 'employees' || section === 'cards' ? (
+            <input
+              className="w-full rounded-sm border border-grid bg-white px-2 py-1.5 text-sm"
+              placeholder={t('hr.search')}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          ) : undefined
+        }
+        chips={
+          <>
+            <WorkspaceWidgetChip onClick={() => widgets.open('analytics')}>
+              {t('hr.kpi.active')}: {kpis.active}
+            </WorkspaceWidgetChip>
+            {kpis.expiringDocs + kpis.overdueDocs > 0 ? (
+              <WorkspaceWidgetChip tone="warn" onClick={() => widgets.open('analytics')}>
+                {tf('workspace.chip.problems', {
+                  count: kpis.expiringDocs + kpis.overdueDocs,
+                })}
+              </WorkspaceWidgetChip>
+            ) : null}
+          </>
+        }
+      />
+
+      <WorkspaceWidgetDrawer
+        open={widgets.isOpen('filters')}
+        title={t('workspace.widget.filters')}
+        subtitle={t('workspace.widget.filtersHint')}
+        onClose={widgets.close}
+      >
+        {section === 'employees' || section === 'cards' ? (
+          employeeFilters
+        ) : (
+          <p className="text-sm text-stone-500">{t('hr.kpi.filterHint')}</p>
+        )}
+      </WorkspaceWidgetDrawer>
+
+      <WorkspaceWidgetDrawer
+        open={widgets.isOpen('analytics')}
+        title={t('workspace.widget.analytics')}
+        subtitle={t('workspace.widget.analyticsHint')}
+        onClose={widgets.close}
+        widthClass="w-full max-w-3xl"
+      >
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {kpiItems.map((k) => (
             <button
               key={k.label}
@@ -371,71 +544,12 @@ export function HrPage({
             </button>
           ))}
         </div>
-        <p className="mt-1 text-[11px] text-stone-400">{t('hr.kpi.filterHint')}</p>
-      </div>
-
-      <TabBar
-        tabs={visibleTabs.map((tab) => ({ id: tab.id, label: t(tab.labelKey) }))}
-        value={section}
-        onChange={(id) => changeSection(id)}
-      />
+        <p className="mt-2 text-[11px] text-stone-400">{t('hr.kpi.filterHint')}</p>
+      </WorkspaceWidgetDrawer>
 
       {(section === 'employees' || section === 'cards') && (
         <>
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              className="min-w-[14rem] flex-1 rounded-sm border border-grid bg-white px-3 py-2 text-sm"
-              placeholder={t('hr.search')}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <select
-              className="rounded-sm border border-grid bg-white px-3 py-2 text-sm"
-              value={deptFilter}
-              onChange={(e) => setDeptFilter(e.target.value)}
-            >
-              <option value="">{t('hr.allDepartments')}</option>
-              {departments.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-            <div className="flex flex-wrap items-center gap-1.5" title={t('hr.filterStatusHint')}>
-              {(['active', 'vacation', 'sick', 'fired'] as HrStatus[]).map((s) => {
-                const on = statusFilters.has(s)
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => toggleStatus(s)}
-                    className={`flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-semibold transition ${
-                      on
-                        ? 'border-accent bg-accent text-white'
-                        : 'border-grid bg-white text-stone-600 hover:border-accent/60'
-                    }`}
-                  >
-                    <span
-                      className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] ${
-                        on ? 'border-white bg-white/20' : 'border-stone-300'
-                      }`}
-                    >
-                      {on ? '✓' : ''}
-                    </span>
-                    {hrStatusLabel(s, locale)}
-                  </button>
-                )
-              })}
-              {statusFilters.size > 0 && (
-                <button
-                  type="button"
-                  className="rounded-sm px-2 py-1 text-xs text-stone-400 hover:text-stone-600"
-                  onClick={() => setStatusFilters(new Set())}
-                >
-                  ✕ {t('hr.allStatuses')}
-                </button>
-              )}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               className="btn-add"
@@ -463,10 +577,38 @@ export function HrPage({
               <table className="min-w-full text-sm">
                 <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
                   <tr>
-                    <th className="px-3 py-2">ФИО</th>
-                    <th className="px-3 py-2">№</th>
-                    <th className="px-3 py-2">{t('hr.col.dept')}</th>
-                    <th className="px-3 py-2">{t('hr.col.status')}</th>
+                    <SortableTableHeader
+                      label={t('table.colName')}
+                      sortKey="name"
+                      activeKey={employeeSort.key}
+                      dir={employeeSort.dir}
+                      onSort={handleEmployeeSort}
+                      className="px-3 py-2"
+                    />
+                    <SortableTableHeader
+                      label="№"
+                      sortKey="tab"
+                      activeKey={employeeSort.key}
+                      dir={employeeSort.dir}
+                      onSort={handleEmployeeSort}
+                      className="px-3 py-2"
+                    />
+                    <SortableTableHeader
+                      label={t('hr.col.dept')}
+                      sortKey="department"
+                      activeKey={employeeSort.key}
+                      dir={employeeSort.dir}
+                      onSort={handleEmployeeSort}
+                      className="px-3 py-2"
+                    />
+                    <SortableTableHeader
+                      label={t('hr.col.status')}
+                      sortKey="status"
+                      activeKey={employeeSort.key}
+                      dir={employeeSort.dir}
+                      onSort={handleEmployeeSort}
+                      className="px-3 py-2"
+                    />
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -821,6 +963,18 @@ export function HrPage({
         }}
         onClose={employeeEditor.close}
       />
+
+      {defaultsOpen && currentUserId && onSaveViewDefaults && (
+        <HrViewDefaultsDialog
+          tabs={visibleTabs}
+          initial={{ section: userHrDefaults?.section ?? section }}
+          onSave={(defaults) => {
+            onSaveViewDefaults('hr', defaults)
+            if (defaults.section) changeSection(defaults.section)
+          }}
+          onClose={() => setDefaultsOpen(false)}
+        />
+      )}
     </PageLayout>
   )
 }

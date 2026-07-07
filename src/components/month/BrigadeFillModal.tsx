@@ -11,6 +11,7 @@ import {
   rosterIdsInMonthSheet,
 } from '@/lib/brigadeFill'
 import { brigadeLabel } from '@/lib/brigadeText'
+import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
 import type { AppStore, Employee, MonthSheet } from '@/lib/types'
 
 type Props = {
@@ -48,14 +49,14 @@ export function BrigadeFillModal({
   const activeEmployees = useMemo(
     () =>
       store.employees
-        .filter((e) => e.active && (e.hrStatus ?? 'active') !== 'fired')
+        .filter((e) => employeeActiveInMonth(e, sheet.month))
         .sort((a, b) => a.fullName.localeCompare(b.fullName, 'ru')),
-    [store.employees],
+    [store.employees, sheet.month],
   )
 
   const hrInBrigade = useMemo(
-    () => employeesInBrigadeFromHr(store.employees, brigade),
-    [store.employees, brigade],
+    () => employeesInBrigadeFromHr(store.employees, brigade, sheet.month),
+    [store.employees, brigade, sheet.month],
   )
 
   const filtered = useMemo(() => {
@@ -111,7 +112,6 @@ export function BrigadeFillModal({
         open
         onClose={onClose}
         size="xl"
-        zIndex={130}
         blockBackdropClose={creating}
         title={tf('brigadeFill.title', { brigade: brigadeTitle })}
         subtitle={t('brigadeFill.subtitle')}

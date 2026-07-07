@@ -3,6 +3,7 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { brigadeEmployeeCount } from '@/lib/brigadeManage'
+import { activeStructuralUnits } from '@/lib/monthViewOptions'
 import type { AppStore } from '@/lib/types'
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeUnit?: (brigade: string, unitId: string | null) => void
 }
 
 export function BrigadesDirectoryPanel({
@@ -21,8 +23,10 @@ export function BrigadesDirectoryPanel({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeUnit,
 }: Props) {
   const { t, tf } = useI18n()
+  const units = activeStructuralUnits(store.hrStructuralUnits)
   const { confirm } = useConfirm()
   const [newBrigade, setNewBrigade] = useState('')
   const [editingBrigade, setEditingBrigade] = useState<string | null>(null)
@@ -164,6 +168,21 @@ export function BrigadesDirectoryPanel({
                   <span className="text-xs text-stone-400">
                     {brigadeEmployeeCount(store, name)} {t('settings.empCount')}
                   </span>
+                  {onSetBrigadeUnit && (
+                    <select
+                      className="max-w-[14rem] rounded-sm border border-grid px-2 py-1 text-xs"
+                      title={t('settings.brigadeUnitHint')}
+                      value={store.brigadeUnits?.[name] ?? ''}
+                      onChange={(e) => onSetBrigadeUnit(name, e.target.value || null)}
+                    >
+                      <option value="">{t('settings.brigadeNoUnit')}</option>
+                      {units.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <button
                     type="button"
                     className="rounded-sm border border-grid px-2 py-1 text-xs hover:bg-paper-dark"

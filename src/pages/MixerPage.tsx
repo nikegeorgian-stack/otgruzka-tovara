@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { FormulationCubeLabelModal } from '@/components/technologist/FormulationCubeLabelModal'
 import { FormulationMixerPanel } from '@/components/technologist/FormulationMixerPanel'
+import { TechnologistRoomClimateWidget } from '@/components/technologist/TechnologistRoomClimateWidget'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
@@ -9,10 +10,12 @@ import type { PostBatchMixInput, PostBatchMixResult } from '@/lib/formulations/b
 import { formatMixDate } from '@/lib/formulations/cubeLabel'
 import type { FormulationBatchRun, FormulationStore } from '@/lib/formulations/types'
 import { formulationColorLabel } from '@/lib/formulations/types'
+import type { RoomClimateRecord, TechnologistQcStore } from '@/lib/technologist/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 
 type Props = {
   formulations: FormulationStore
+  technologistQc: TechnologistQcStore
   warehouse: WarehouseStore
   brigades: string[]
   operatorId?: string
@@ -23,10 +26,13 @@ type Props = {
   webMixerMode?: boolean
   onPostBatch: (input: PostBatchMixInput) => PostBatchMixResult
   onCompleteMixTask: (taskId: string, batchRunId: string, doneByName?: string) => void
+  onAddRoomClimateReading: (entry: Omit<RoomClimateRecord, 'id' | 'createdAt'>) => void
+  onRemoveRoomClimateReading?: (id: string) => void
 }
 
 export function MixerPage({
   formulations,
+  technologistQc,
   warehouse,
   brigades,
   operatorId,
@@ -37,6 +43,8 @@ export function MixerPage({
   webMixerMode = false,
   onPostBatch,
   onCompleteMixTask,
+  onAddRoomClimateReading,
+  onRemoveRoomClimateReading,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -201,6 +209,13 @@ export function MixerPage({
           onClose={() => setLabelRun(null)}
         />
       )}
+
+      <TechnologistRoomClimateWidget
+        records={technologistQc.roomClimateLog}
+        operatorName={operatorName}
+        onFix={onAddRoomClimateReading}
+        onRemove={onRemoveRoomClimateReading}
+      />
     </PageLayout>
   )
 }

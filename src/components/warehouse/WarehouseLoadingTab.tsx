@@ -132,6 +132,8 @@ type Props = {
   onRemoveLoadingShipment: (shipmentId: string) => void
   salesOrders?: SalesOrder[]
   onOpenSalesOrder?: (orderId: string) => void
+  pendingOpenShipmentId?: string | null
+  onPendingOpenConsumed?: () => void
 }
 
 function emptyUiLine(): UiLine {
@@ -350,6 +352,8 @@ export function WarehouseLoadingTab({
   onRemoveLoadingShipment,
   salesOrders = [],
   onOpenSalesOrder,
+  pendingOpenShipmentId,
+  onPendingOpenConsumed,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -773,6 +777,14 @@ export function WarehouseLoadingTab({
     setReadOnly(s.status === 'posted')
     setView('form')
   }
+
+  useEffect(() => {
+    if (!pendingOpenShipmentId) return
+    const shipments = listLoadingShipments(warehouse)
+    const shipment = shipments.find((s) => s.id === pendingOpenShipmentId)
+    if (shipment) openDraft(shipment)
+    onPendingOpenConsumed?.()
+  }, [pendingOpenShipmentId])
 
   function newForm() {
     setState(defaultState())
