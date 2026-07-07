@@ -147,6 +147,10 @@ export default function App() {
     ],
   )
 
+  const ensureActiveMonthReady = useCallback(() => {
+    app.ensureMonthsReady(app.activeMonth)
+  }, [app.ensureMonthsReady, app.activeMonth])
+
   const coachAllowedViews = app.currentUser
     ? COACH_TARGETS.map((target) => target.view).filter((v) =>
         canAccessView(app.access, app.currentUser!, v as ViewId),
@@ -489,6 +493,7 @@ export default function App() {
               userDefaultBrigades={app.currentUser?.defaultBrigades}
               userMonthDefaults={userMonthDefaults}
               currentUserId={app.currentUser?.id}
+              onEnsureMonthReady={ensureActiveMonthReady}
               onSaveMonthDefaults={(defaults) => saveViewDefaults('month', defaults)}
             />
           )}

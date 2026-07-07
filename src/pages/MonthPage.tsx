@@ -135,6 +135,8 @@ type Props = {
   userMonthDefaults?: MonthViewDefaults
   currentUserId?: string
   onSaveMonthDefaults?: (defaults: MonthViewDefaults) => void
+  /** Создать лист месяца, если после загрузки облака его ещё нет */
+  onEnsureMonthReady?: () => void
 }
 
 export function MonthPage({
@@ -184,6 +186,7 @@ export function MonthPage({
   userMonthDefaults,
   currentUserId,
   onSaveMonthDefaults,
+  onEnsureMonthReady,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -408,6 +411,13 @@ export function MonthPage({
   }, [allUnitKeys, selectedBrigades, selectedUnits, store.brigades.length])
 
   const sheet = store.months[month]
+
+  useEffect(() => {
+    if (!store.months[month] && onEnsureMonthReady) {
+      onEnsureMonthReady()
+    }
+  }, [month, store.months[month], onEnsureMonthReady])
+
   const closed = sheet ? isMonthClosed(store, month) : false
   const effectiveEditing = editing && !closed
 

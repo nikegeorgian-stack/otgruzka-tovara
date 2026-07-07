@@ -46,7 +46,8 @@ export function createSettingsSlice(
     },
 
     replaceStore(next: AppStore) {
-      setStore(applyAppStoreSeeds(purgeExpiredTrash(next)))
+      const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
+      setStore(ensureMonthReady(seeded, getActiveMonth()))
     },
 
     resetStore() {
