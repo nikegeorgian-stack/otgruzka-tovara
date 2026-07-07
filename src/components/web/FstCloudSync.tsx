@@ -20,6 +20,8 @@ import type { FstCloudSyncProps } from './fstCloudTypes'
 
 /** Пауза перед записью полного payload в Firestore. */
 const SAVE_DEBOUNCE_MS = 2500
+/** Не зависать на белом экране, если Firestore не отвечает. */
+const CLOUD_LOAD_TIMEOUT_MS = 45_000
 /** Сглаживание частых правок коллег — один pull на пачку revision. */
 const REMOTE_PULL_DEBOUNCE_MS = 400
 
@@ -176,7 +178,12 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
 
     void (async () => {
       try {
-        const data = await ensureCloudStore(user.uid)
+        const data = await Promise.race([
+          ensureCloudStore(user.uid),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('cloud_load_timeout')), CLOUD_LOAD_TIMEOUT_MS)
+          }),
+        ])
         if (cancelled) return
         const seeded = commitSyncedState(data)
         applyStore(seeded)
@@ -184,7 +191,11 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
       } catch (err) {
         console.error('FST cloud load failed', err)
         if (!cancelled) {
-          setCloudError(cloudErrorMessage(err, 'Не удалось загрузить данные из облака.'))
+          const fallback =
+            err instanceof Error && err.message === 'cloud_load_timeout'
+              ? 'Таймаут загрузки из Firestore. Проверьте правила Firestore в otgruzka-tovara и нажмите «Повторить».'
+              : cloudErrorMessage(err, 'Не удалось загрузить данные из облака.')
+          setCloudError(fallback)
           setCloudReady(true)
           skipSave.current = true
         }
@@ -315,8 +326,11 @@ export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
   if (!configured) return null
   if (!cloudReady) {
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-100">
-        <p className="text-sm text-stone-600">FST — загрузка данных…</p>
+      <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-3 bg-paper px-6">
+        <p className="text-base font-semibold text-ink">FST — загрузка данных…</p>
+        <p className="max-w-sm text-center text-sm text-stone-500">
+          Подключение к Firestore otgruzka-tovara
+        </p>
       </div>
     )
   }

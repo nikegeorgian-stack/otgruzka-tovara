@@ -2,6 +2,7 @@ import { initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 import {
   initializeFirestore,
+  memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
   type Firestore,
@@ -53,14 +54,22 @@ export function getFirebaseAuth(): Auth {
   return auth
 }
 
-/** IndexedDB-кэш Firestore — быстрее повторные чтения, меньше ощущаемый пинг. */
+/** IndexedDB-кэш Firestore; при блокировке IndexedDB — memory cache (иначе белый экран). */
 export function getFirestoreDb(): Firestore {
   if (!db) {
-    db = initializeFirestore(getFirebaseApp(), {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
-    })
+    const firebaseApp = getFirebaseApp()
+    try {
+      db = initializeFirestore(firebaseApp, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      })
+    } catch (err) {
+      console.warn('FST: persistent Firestore cache unavailable, using memory cache', err)
+      db = initializeFirestore(firebaseApp, {
+        localCache: memoryLocalCache(),
+      })
+    }
   }
   return db
 }

@@ -18,7 +18,7 @@ function loadFirebaseBuildEnv() {
   if (existsSync(jsonPath)) {
     const cfg = JSON.parse(readFileSync(jsonPath, 'utf8'))
     for (const [k, v] of Object.entries(cfg)) {
-      if (!env[k] && v) env[k] = String(v)
+      if (v) env[k] = String(v)
     }
   }
   const dotEnv = path.join(root, 'fst-web', '.env.production')
