@@ -1,6 +1,5 @@
 import type { WorkSheet } from 'xlsx'
 import { loadXlsx } from '@/lib/lazy/xlsx'
-import { appendWarehouseAudit } from './audit'
 import type { StockMovement, WarehouseItem, WarehouseStore } from './types'
 
 export type ImportResult = {
@@ -168,35 +167,31 @@ export async function importWarehouseFromExcel(
 
   const matchedItems = new Set(movements.map((m) => m.itemId))
 
-  let next: WarehouseStore = {
-    ...store,
-    movements: [...store.movements, ...movements],
-  }
-  next = appendWarehouseAudit(next, {
-    action: 'import',
-    detail: `Excel: +${movements.length} операций, листов ${sheetsProcessed}`,
-  })
-
-  if (movements.length === 0) {
-    if (warnings.length === 0) {
-      throw warehouseImportError('noData')
-    }
+  // PHASE W1 — bare balance movements from Excel import are fail-closed.
+  // Legacy movements already in the ledger stay; new imports must use documents (W2).
+  if (movements.length > 0) {
     return {
       store,
       result: {
         movementsAdded: 0,
-        itemsMatched: 0,
+        itemsMatched: matchedItems.size,
         sheetsProcessed,
-        warnings: warnings.slice(0, 30),
+        warnings: [
+          'warehouse.import.errBareMovementsBlocked',
+          ...warnings,
+        ].slice(0, 30),
       },
     }
   }
 
+  if (warnings.length === 0) {
+    throw warehouseImportError('noData')
+  }
   return {
-    store: next,
+    store,
     result: {
-      movementsAdded: movements.length,
-      itemsMatched: matchedItems.size,
+      movementsAdded: 0,
+      itemsMatched: 0,
       sheetsProcessed,
       warnings: warnings.slice(0, 30),
     },

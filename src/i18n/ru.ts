@@ -5489,7 +5489,7 @@ export const ru: Dict = {
   'warehouse.doc.status.posted': 'Проведён',
   'warehouse.doc.status.cancelled': 'Отменён',
   'warehouse.doc.cancel': 'Сторно',
-  'warehouse.doc.cancelReasonPrompt': 'Причина отмены (необязательно):',
+  'warehouse.doc.cancelReasonPrompt': 'Причина отмены (обязательно):',
   'warehouse.doc.cancelSuccess': 'Документ отменён, создано сторнирующее движение.',
   'warehouse.doc.startTitle': 'Новый складской документ',
   'warehouse.doc.startHint':
@@ -5501,15 +5501,32 @@ export const ru: Dict = {
   'warehouse.doc.saveDraft': 'Записать черновик',
   'warehouse.doc.draftSaved': 'Черновик сохранён — остатки не изменены.',
   'warehouse.doc.postSuccess': 'Документ проведён, остатки обновлены.',
-  'warehouse.doc.unpost': 'Отменить проведение',
-  'warehouse.doc.unpostSuccess': 'Проведение снято, документ возвращён в черновик.',
-  'warehouse.doc.readOnlyPosted': 'Проведённый документ — только просмотр. Редактирование недоступно.',
+  'warehouse.doc.postConfirm': 'Провести документ? После проведения редактирование будет недоступно.',
+  'warehouse.doc.unpost': 'Создать сторно',
+  'warehouse.doc.unpostSuccess': 'Документ отменён через сторно (не возвращается в черновик).',
+  'warehouse.doc.readOnlyPosted':
+    'Проведённый документ — только просмотр. Редактирование недоступно. Исправьте через сторно или корректирующий документ.',
   'warehouse.doc.viewTitle': 'Просмотр документа №{number}',
   'warehouse.doc.editDraftTitle': 'Редактирование черновика №{number}',
   'warehouse.doc.errUnpostForbidden': 'Отменить проведение может только системный администратор.',
+  'warehouse.doc.errUnpostRemoved':
+    'Снятие проведения удалено. Используйте сторно (отмену) проведённого документа.',
+  'warehouse.doc.errPostedImmutable':
+    'Проведённый или отменённый документ нельзя редактировать. Исправьте через сторно или корректирующий документ.',
+  'warehouse.doc.errBareMovementBlocked':
+    'Прямое изменение остатка без складского документа запрещено.',
+  'warehouse.doc.errCancelReasonRequired': 'Укажите причину сторно.',
+  'warehouse.doc.errCancelForbidden': 'Недостаточно прав для сторно документа.',
+  'warehouse.doc.immutableNotice':
+    'Проведённый документ нельзя редактировать. Для исправления создайте сторно или корректирующий документ.',
+  'warehouse.doc.linkOriginal': 'Исходный документ',
+  'warehouse.doc.linkReversal': 'Документ сторно',
   'warehouse.doc.deleteDraft': 'Удалить',
   'warehouse.doc.draftRemoved': 'Черновик удалён.',
-  'warehouse.doc.errAlreadyPosted': 'Документ уже проведён — сначала снимите проведение.',
+  'warehouse.doc.errAlreadyPosted':
+    'Документ уже проведён — редактирование запрещено. Используйте сторно.',
+  'warehouse.import.errBareMovementsBlocked':
+    'Импорт Excel больше не создаёт голые движения. Используйте приходные документы.',
   'warehouse.doc.errInsufficientStock':
     'Недостаточно материала. Документ не проведён, остатки не изменены.',
   'warehouse.doc.errIdempotencyConflict':
@@ -5774,7 +5791,7 @@ export const ru: Dict = {
   'warehouse.audit.export': 'Экспорт',
   'warehouse.audit.nothing': 'Ничего не найдено',
   'warehouse.doc.cancelTitle': 'Сторнировать документ?',
-  'warehouse.doc.cancelReasonLabel': 'Причина сторно (необязательно)',
+  'warehouse.doc.cancelReasonLabel': 'Причина сторно (обязательно)',
   'warehouse.doc.cancelConfirm': 'Сторнировать',
   'warehouse.meta.deleteCategory': 'Удалить категорию',
   'warehouse.meta.deleteLocation': 'Удалить склад',

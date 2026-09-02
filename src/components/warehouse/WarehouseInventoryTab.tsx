@@ -20,7 +20,7 @@ type Props = Pick<
   | 'onPostOpeningBalances'
   | 'onSaveDocumentDraft'
   | 'onPostExistingDocument'
-  | 'onUnpostDocument'
+  | 'onCancelDocument'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
   | 'onQuickEditItem'
@@ -43,7 +43,7 @@ export function WarehouseInventoryTab({
   onPostOpeningBalances,
   onSaveDocumentDraft,
   onPostExistingDocument,
-  onUnpostDocument,
+  onCancelDocument,
   onAcquireDocumentLock,
   onReleaseDocumentLock,
   onQuickEditItem,
@@ -458,7 +458,7 @@ export function WarehouseInventoryTab({
           readOnly={editorDoc?.status === 'posted' || editorDoc?.status === 'cancelled'}
           onSaveDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={onUnpostDocument}
+          onCancelDocument={onCancelDocument}
           onAcquireLock={onAcquireDocumentLock}
           onReleaseLock={onReleaseDocumentLock}
           onQuickEditItem={onQuickEditItem}

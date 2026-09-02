@@ -37,7 +37,6 @@ type Props = Pick<
   | 'onCancelDocument'
   | 'onSaveDocumentDraft'
   | 'onPostExistingDocument'
-  | 'onUnpostDocument'
   | 'onRemoveDocumentDraft'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
@@ -46,7 +45,6 @@ type Props = Pick<
   | 'printMeta'
   | 'allowNegativeStock'
   | 'canCancelDocuments'
-  | 'canUnpostDocuments'
   | 'counterparties'
   | 'onUpsertCounterparty'
   | 'onOpenCounterparties'
@@ -81,7 +79,6 @@ export function WarehouseDocumentsTab({
   onCancelDocument,
   onSaveDocumentDraft,
   onPostExistingDocument,
-  onUnpostDocument,
   onRemoveDocumentDraft,
   onAcquireDocumentLock,
   onReleaseDocumentLock,
@@ -94,7 +91,6 @@ export function WarehouseDocumentsTab({
   onPendingOpenConsumed,
   allowNegativeStock = false,
   canCancelDocuments = false,
-  canUnpostDocuments = false,
   counterparties,
   onUpsertCounterparty,
   onOpenCounterparties,
@@ -194,9 +190,12 @@ export function WarehouseDocumentsTab({
 
   function confirmCancel() {
     if (!onCancelDocument || !cancelTarget) return
-    const result = onCancelDocument(cancelTarget.id, {
-      reason: cancelReason.trim() || undefined,
-    })
+    const reason = cancelReason.trim()
+    if (!reason) {
+      setJournalNotice(t('warehouse.doc.errCancelReasonRequired'))
+      return
+    }
+    const result = onCancelDocument(cancelTarget.id, { reason })
     setCancelTarget(null)
     if (!result.ok) {
       setJournalNotice(t(result.error))
@@ -207,14 +206,9 @@ export function WarehouseDocumentsTab({
 
   function handlePostExisting(doc: WarehouseDocument) {
     if (!onPostExistingDocument) return
+    if (!window.confirm(t('warehouse.doc.postConfirm'))) return
     const result = onPostExistingDocument(doc.id)
     setJournalNotice(result.ok ? t('warehouse.doc.postSuccess') : t(result.error))
-  }
-
-  function handleUnpost(doc: WarehouseDocument) {
-    if (!onUnpostDocument) return
-    const result = onUnpostDocument(doc.id)
-    setJournalNotice(result.ok ? t('warehouse.doc.unpostSuccess') : t(result.error))
   }
 
   function handleRemoveDraft(doc: WarehouseDocument) {
@@ -440,19 +434,6 @@ export function WarehouseDocumentsTab({
                           {t('warehouse.doc.deleteDraft')}
                         </button>
                       )}
-                      {(d.status ?? 'posted') === 'posted' &&
-                        canUnpostDocuments &&
-                        onUnpostDocument &&
-                        documentCanBeCancelled(d) &&
-                        !d.transferPairId && (
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-amber-700 hover:underline text-left"
-                            onClick={() => handleUnpost(d)}
-                          >
-                            {t('warehouse.doc.unpost')}
-                          </button>
-                        )}
                       {onCancelDocument &&
                         canCancelDocuments &&
                         (d.status ?? 'posted') === 'posted' &&
@@ -465,6 +446,30 @@ export function WarehouseDocumentsTab({
                             {t('warehouse.doc.cancel')}
                           </button>
                         )}
+                      {d.reversesDocumentId && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-stone-600 hover:underline text-left"
+                          onClick={() => {
+                            const src = warehouse.documents.find((x) => x.id === d.reversesDocumentId)
+                            if (src) openDocumentForEdit(src)
+                          }}
+                        >
+                          {t('warehouse.doc.linkOriginal')}
+                        </button>
+                      )}
+                      {d.reversalDocumentId && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-stone-600 hover:underline text-left"
+                          onClick={() => {
+                            const rev = warehouse.documents.find((x) => x.id === d.reversalDocumentId)
+                            if (rev) openDocumentForEdit(rev)
+                          }}
+                        >
+                          {t('warehouse.doc.linkReversal')}
+                        </button>
+                      )}
                       {d.type === 'receipt' &&
                         (d.status ?? 'posted') === 'posted' &&
                         access &&
@@ -521,7 +526,7 @@ export function WarehouseDocumentsTab({
           }
           onSaveDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onCancelDocument={canCancelDocuments ? onCancelDocument : undefined}
           onAcquireLock={onAcquireDocumentLock}
           onReleaseLock={onReleaseDocumentLock}
           onQuickEditItem={onQuickEditItem}
@@ -544,6 +549,11 @@ export function WarehouseDocumentsTab({
           initialFocus="none"
         >
           <div className="px-4 py-3">
+            {docModal.mode === 'view' && (
+              <p className="mb-3 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {t('warehouse.doc.immutableNotice')}
+              </p>
+            )}
             <WarehouseDocumentEditor
               ref={docEditorRef}
               warehouse={warehouse}
@@ -633,7 +643,12 @@ export function WarehouseDocumentsTab({
               <Button variant="secondary" size="sm" onClick={() => setCancelTarget(null)}>
                 {t('common.cancel')}
               </Button>
-              <Button variant="danger" size="sm" onClick={confirmCancel}>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={!cancelReason.trim()}
+                onClick={confirmCancel}
+              >
                 {t('warehouse.doc.cancelConfirm')}
               </Button>
             </div>
@@ -650,7 +665,7 @@ export function WarehouseDocumentsTab({
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') confirmCancel()
+                  if (e.key === 'Enter' && cancelReason.trim()) confirmCancel()
                 }}
               />
             </label>

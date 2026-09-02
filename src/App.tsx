@@ -93,7 +93,7 @@ import {
 } from '@/lib/cloud/passwordChangeSession'
 import { isWebFinanceRole, isWebHrInspectorRole, isWebHrRole, isWebProcurementRole, isWebSysAdminRole, isWebTechnologistRole, isWebWarehouseRole, isWebWorkshopMasterRole } from '@/lib/cloud/fstWebUsers'
 import { accessPersona } from '@/lib/access/accessPersona'
-import { canAccessView, canEditEmployeeSalary, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel, roleAllowsDocumentUnpost } from '@/lib/access/permissions'
+import { canAccessView, canEditEmployeeSalary, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel } from '@/lib/access/permissions'
 import { labelRuKa } from '@/i18n/localeFormat'
 import { ACCESS_ROLES } from '@/lib/access/roles'
 import { COACH_TARGETS } from '@/lib/ai/coachTargets'
@@ -201,7 +201,6 @@ export default function App() {
   const canCancelDocuments = accessUser
     ? roleAllowsDocumentCancel(app.store.access, accessUser.roleId)
     : false
-  const canUnpostDocuments = roleAllowsDocumentUnpost(accessUser)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [plannerFocusOrderId, setPlannerFocusOrderId] = useState<string | null>(null)
   const [journalNav, setJournalNav] = useState<JournalNavTarget | null>(null)
@@ -322,14 +321,9 @@ export default function App() {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
       }),
-    onUnpostDocument: (documentId: string) => {
-      if (!roleAllowsDocumentUnpost(accessUser)) {
-        return { ok: false as const, error: 'warehouse.doc.errUnpostForbidden' }
-      }
-      return app.unpostWarehouseDoc(documentId, {
-        actorId: app.currentUser?.id,
-        actorName: app.currentUser?.displayName,
-      })
+    onUnpostDocument: (_documentId: string) => {
+      // PHASE W1 — destructive unpost removed; UI should use onCancelDocument.
+      return { ok: false as const, error: 'warehouse.doc.errUnpostRemoved' }
     },
     onRemoveDocumentDraft: (documentId: string) =>
       app.removeWarehouseDraft(documentId, {
@@ -1205,7 +1199,6 @@ export default function App() {
               }
               allowNegativeStock={allowNegativeStock}
               canCancelDocuments={canCancelDocuments}
-              canUnpostDocuments={canUnpostDocuments}
               pendingBatchRuns={app.store.formulations.batchRuns.filter(
                 (r) => (r.status ?? 'confirmed') === 'pending',
               )}
@@ -1411,9 +1404,7 @@ export default function App() {
                 onPostTransfer: warehouseActions.onPostTransfer,
                 onSaveDocumentDraft: warehouseActions.onSaveDocumentDraft,
                 onPostExistingDocument: warehouseActions.onPostExistingDocument,
-                onUnpostDocument: canUnpostDocuments
-                  ? warehouseActions.onUnpostDocument
-                  : undefined,
+                onUnpostDocument: warehouseActions.onUnpostDocument,
                 onAcquireDocumentLock: warehouseActions.onAcquireDocumentLock,
                 onReleaseDocumentLock: warehouseActions.onReleaseDocumentLock,
                 onMergeInvoiceRegistry: warehouseActions.onMergeInvoiceRegistry,

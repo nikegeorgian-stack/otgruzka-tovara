@@ -37,7 +37,12 @@ type Props = {
   readOnly?: boolean
   onSaveDraft: (doc: SaveDraftInput) => PostDocumentResult
   onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  /** @deprecated W1 — unused; use onCancelDocument */
   onUnpostDocument?: (documentId: string) => { ok: boolean; error?: string }
+  onCancelDocument?: (
+    documentId: string,
+    args?: { reason?: string },
+  ) => { ok: boolean; error?: string }
   onAcquireLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }
@@ -63,7 +68,7 @@ export const WarehouseInventoryRevisionEditor = forwardRef<
   readOnly = false,
   onSaveDraft,
   onPostExistingDocument,
-  onUnpostDocument,
+  onCancelDocument,
   onAcquireLock,
   onReleaseLock,
   onQuickEditItem,
@@ -474,17 +479,25 @@ ref,
             )}
           </>
         )}
-        {isPosted && onUnpostDocument && (
+        {isPosted && onCancelDocument && (
           <button
             type="button"
-            className="rounded-sm border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800"
+            className="rounded-sm border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800"
             onClick={() => {
               if (!docId) return
-              const res = onUnpostDocument(docId)
-              setNotice(res.ok ? t('warehouse.doc.unpostSuccess') : t(res.error ?? 'unknown'))
+              const reason = window.prompt(t('warehouse.doc.cancelReasonLabel'))
+              if (reason == null) return
+              if (!reason.trim()) {
+                setNotice(t('warehouse.doc.errCancelReasonRequired'))
+                return
+              }
+              const res = onCancelDocument(docId, { reason: reason.trim() })
+              setNotice(
+                res.ok ? t('warehouse.doc.cancelSuccess') : t(res.error ?? 'unknown'),
+              )
             }}
           >
-            {t('warehouse.doc.unpost')}
+            {t('warehouse.doc.cancel')}
           </button>
         )}
         {!hideCloseButton && (

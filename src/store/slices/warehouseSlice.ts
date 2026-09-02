@@ -200,6 +200,13 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     },
 
     addStockMovement(movement: Omit<StockMovement, 'id' | 'createdAt'>) {
+      // PHASE W1 — balance-changing bare movements require WarehouseDocument.
+      // reserve/unreserve remain (W3 scope) with source IDs; legacy movements stay.
+      const bareAllowed =
+        movement.type === 'reserve' || movement.type === 'unreserve'
+      if (!movement.documentId && !bareAllowed) {
+        return
+      }
       patchWarehouse(setStore, (w) => {
         const item = w.items.find((i) => i.id === movement.itemId)
         const qty = item
@@ -232,6 +239,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       let deleted = false
       patchWarehouse(setStore, (w) => {
         const m = w.movements.find((x) => x.id === id)
+        // Never delete document-linked (posted) movements — use storno.
         if (!m || m.documentId) return w
         deleted = true
         let next: WarehouseStore = {
@@ -378,23 +386,27 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       let result: CancelDocumentResult = { ok: false, error: 'unknown' }
       const existing = getStore().warehouse.documents.find((d) => d.id === documentId)
       const pairId = existing?.transferPairId
-      const groupMeta = pairId
-        ? {
-            origin: 'user' as const,
-            atomic: true as const,
-            transactionGroupId: warehouseTransactionGroupId({
-              kind: 'cancel_transfer_pair',
-              sourceId: pairId,
-              revision: 'cancel',
-            }),
-            transactionGroupKind: 'cancel_transfer_pair',
-            transactionGroupLabel: 'Отмена пары перемещения',
-          }
-        : { origin: 'user' as const }
+      const groupId = warehouseTransactionGroupId({
+        kind: pairId ? 'cancel_transfer_pair' : 'document_cancel',
+        sourceId: pairId ?? documentId,
+        revision: 'cancel',
+      })
+      const groupMeta = {
+        origin: 'user' as const,
+        atomic: true as const,
+        transactionGroupId: groupId,
+        transactionGroupKind: pairId ? 'cancel_transfer_pair' : 'document_cancel',
+        transactionGroupLabel: pairId
+          ? 'Отмена пары перемещения'
+          : 'Сторно складского документа',
+      }
       patchWarehouse(
         setStore,
         (w) => {
-          const out = cancelWarehouseDocument(w, documentId, args ?? {})
+          const out = cancelWarehouseDocument(w, documentId, {
+            ...(args ?? {}),
+            transactionGroupId: groupId,
+          })
           result = out.result
           return out.store
         },

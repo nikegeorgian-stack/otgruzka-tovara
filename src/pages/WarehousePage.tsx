@@ -104,14 +104,12 @@ export function WarehousePage(props: WarehousePageProps) {
     keeperName,
     allowNegativeStock = false,
     canCancelDocuments = false,
-    canUnpostDocuments = false,
     counterparties,
     productionRequests,
     onPostTransfer,
     onCancelDocument,
     onSaveDocumentDraft,
     onPostExistingDocument,
-    onUnpostDocument,
     onRemoveDocumentDraft,
     onAcquireDocumentLock,
     onReleaseDocumentLock,
@@ -829,7 +827,6 @@ export function WarehousePage(props: WarehousePageProps) {
           printMeta={printMeta}
           allowNegativeStock={allowNegativeStock}
           canCancelDocuments={canCancelDocuments}
-          canUnpostDocuments={canUnpostDocuments}
           counterparties={counterparties}
           onUpsertCounterparty={onUpsertCounterparty}
           onOpenCounterparties={onOpenCounterparties}
@@ -841,7 +838,6 @@ export function WarehousePage(props: WarehousePageProps) {
           onCancelDocument={onCancelDocument}
           onSaveDocumentDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
           onRemoveDocumentDraft={onRemoveDocumentDraft}
           onAcquireDocumentLock={onAcquireDocumentLock}
           onReleaseDocumentLock={onReleaseDocumentLock}
@@ -874,7 +870,7 @@ export function WarehousePage(props: WarehousePageProps) {
           onPostOpeningInventory={onPostOpeningInventory}
           onSaveDocumentDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onCancelDocument={onCancelDocument}
           onAcquireDocumentLock={onAcquireDocumentLock}
           onReleaseDocumentLock={onReleaseDocumentLock}
           onQuickEditItem={(item) => {

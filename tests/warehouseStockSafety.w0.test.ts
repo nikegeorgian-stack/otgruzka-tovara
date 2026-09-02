@@ -237,7 +237,9 @@ describe('W0 stock safety', () => {
     }).store
     const receiptDoc = store.documents.find((d) => d.type === 'receipt')!
     const before = structuredClone(store)
-    const cancel = cancelWarehouseDocument(store, receiptDoc.id, {})
+    const cancel = cancelWarehouseDocument(store, receiptDoc.id, {
+      reason: 'test cancel',
+    })
     expect(cancel.result.ok).toBe(false)
     expect(cancel.store.documents).toEqual(before.documents)
     expect(cancel.store.movements).toEqual(before.movements)

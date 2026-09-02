@@ -22,12 +22,40 @@ import {
   warehouseDocumentsEquivalentForIdempotency,
   warehouseIdempotencyKey,
 } from './stockSafety'
-import type { StockMovement, WarehouseDocument, WarehouseStore } from './types'
+import type {
+  StockMovement,
+  WarehouseDocument,
+  WarehouseDocumentLine,
+  WarehouseStore,
+} from './types'
+
+export const BARE_BALANCE_MOVEMENT_BLOCKED = 'warehouse.doc.errBareMovementBlocked'
+export const UNPOST_REMOVED_ERROR = 'warehouse.doc.errUnpostRemoved'
 
 export function warehouseDocumentKindLabel(type: WarehouseDocument['type']): string {
   if (type === 'receipt') return 'Приход'
   if (type === 'issue') return 'Расход'
   return 'Ревизия'
+}
+
+/** Ensure stable lineId + item snapshots (backward compatible for legacy lines). */
+export function ensureDocumentLinesWithSnapshots(
+  store: Pick<WarehouseStore, 'items'>,
+  lines: WarehouseDocumentLine[],
+): WarehouseDocumentLine[] {
+  const itemMap = new Map(store.items.map((i) => [i.id, i]))
+  return lines.map((line) => {
+    const item = itemMap.get(line.itemId)
+    return {
+      ...line,
+      lineId: line.lineId ?? crypto.randomUUID(),
+      itemCodeSnapshot: line.itemCodeSnapshot ?? item?.internalCode,
+      itemNameSnapshot: line.itemNameSnapshot ?? item?.name,
+      unitSnapshot: line.unitSnapshot ?? line.inputUnit ?? item?.unit,
+      plannedQty: line.plannedQty ?? line.quantity,
+      actualQty: line.actualQty ?? line.quantity,
+    }
+  })
 }
 
 function inventoryLinePreview(
@@ -76,15 +104,17 @@ export type AtomicPostResult =
 
 /**
  * Сформировать движения склада по строкам проведённого документа.
- * Движения помечаются `documentId`, что позволяет снимать проведение
- * и перепроводить документ без дублей.
+ * Движения помечаются `documentId` + `documentLineId` (PHASE W1).
+ * Posted movements are immutable — corrections go through reversal documents.
  */
 function buildDocumentMovements(
   store: WarehouseStore,
   full: WarehouseDocument,
 ): StockMovement[] {
   const itemMap = new Map(store.items.map((i) => [i.id, i]))
-  const createdAt = new Date().toISOString()
+  const createdAt = full.postedAt ?? new Date().toISOString()
+  const actorId = full.postedBy ?? full.keeperId
+  const actorName = full.postedByName ?? full.keeperName
 
   if (full.type === 'inventory') {
     const movements: StockMovement[] = []
@@ -104,9 +134,12 @@ function buildDocumentMovements(
         quantity: delta,
         date: full.date,
         documentId: full.id,
+        documentLineId: line.lineId,
         documentNo: full.number,
-        comment: full.comment,
+        comment: line.comment ?? full.comment,
         createdAt,
+        createdBy: actorId,
+        createdByName: actorName,
       })
     }
     return movements
@@ -129,14 +162,17 @@ function buildDocumentMovements(
       quantity: qty,
       date: full.date,
       documentId: full.id,
+      documentLineId: line.lineId,
       documentNo: full.number,
       brigade: full.brigade,
-      comment: full.comment,
+      comment: line.comment ?? full.comment,
       inputUnit: line.inputUnit,
       unitCost,
       batchNo: isReceipt ? line.batchNo : undefined,
       expiryDate: isReceipt ? line.expiryDate : undefined,
       createdAt,
+      createdBy: actorId,
+      createdByName: actorName,
     }
   })
 }
@@ -170,14 +206,18 @@ function findIdempotentDocument(
  */
 function commitPostedDocument(
   store: WarehouseStore,
-  full: WarehouseDocument,
+  rawFull: WarehouseDocument,
   options: {
     skipAudit?: boolean
     reservationSource?: ReservationSourceRef
-    /** When re-posting existing draft: drop prior movements for this documentId first */
+    /** When posting an existing draft: drop any prior movements for this documentId */
     replaceExisting?: boolean
   } = {},
 ): { store: WarehouseStore; result: PostDocumentResult } {
+  const full: WarehouseDocument = {
+    ...rawFull,
+    lines: ensureDocumentLinesWithSnapshots(store, rawFull.lines),
+  }
   // Regular inventory corrections require active accounting; opening inventory is the activation path.
   if (
     full.type === 'inventory' &&
@@ -339,10 +379,8 @@ export function postWarehouseDocument(
 }
 
 /**
- * Провести существующий документ (черновик или перепровести проведённый):
- * удалить прежние движения этого документа, заново сформировать движения,
- * выставить статус «Проведён». Защита от дублей — по `documentId`.
- * Stock safety always applies for issues.
+ * Провести существующий ЧЕРНОВИК.
+ * Posted documents are immutable — use cancel/reversal, never re-post with movement delete.
  */
 export function postExistingWarehouseDocument(
   store: WarehouseStore,
@@ -355,6 +393,9 @@ export function postExistingWarehouseDocument(
   if (doc.status === 'cancelled') {
     return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyCancelled' } }
   }
+  if ((doc.status ?? 'posted') !== 'draft') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errPostedImmutable' } }
+  }
 
   const docForValidation = { ...doc }
   delete (docForValidation as { status?: unknown }).status
@@ -364,31 +405,26 @@ export function postExistingWarehouseDocument(
     return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
   }
 
-  const storeForCheck: WarehouseStore = {
-    ...store,
-    movements: store.movements.filter((m) => m.documentId !== documentId),
-  }
-
   const now = new Date().toISOString()
   const full: WarehouseDocument = {
     ...doc,
+    lines: ensureDocumentLinesWithSnapshots(store, doc.lines),
     status: 'posted',
     postedAt: now,
     postedBy: actor?.actorId,
     postedByName: actor?.actorName,
+    updatedAt: now,
+    updatedBy: actor?.actorId,
+    updatedByName: actor?.actorName,
     lockedBy: undefined,
     lockedByName: undefined,
     lockedAt: undefined,
   }
 
-  const committed = commitPostedDocument(storeForCheck, full, {
+  return commitPostedDocument(store, full, {
     replaceExisting: true,
     reservationSource: options?.reservationSource ?? reservationSourceFromDocument(doc),
   })
-  if (!committed.result.ok) {
-    return { store, result: committed.result }
-  }
-  return committed
 }
 
 /**
@@ -426,7 +462,7 @@ export type SaveDraftInput = Omit<WarehouseDocument, 'id' | 'createdAt' | 'statu
 /**
  * Сохранить документ как ЧЕРНОВИК — без движений и без изменения остатков.
  * Поддерживает создание нового и обновление существующего черновика.
- * Проведённый документ так редактировать нельзя (сначала снять проведение).
+ * Проведённый / отменённый документ так редактировать нельзя.
  */
 export function saveWarehouseDocumentDraft(
   store: WarehouseStore,
@@ -434,8 +470,8 @@ export function saveWarehouseDocumentDraft(
   actor?: { actorId?: string; actorName?: string },
 ): { store: WarehouseStore; result: PostDocumentResult } {
   const existing = doc.id ? store.documents.find((d) => d.id === doc.id) : undefined
-  if (existing && existing.status === 'posted') {
-    return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyPosted' } }
+  if (existing && (existing.status === 'posted' || existing.status === 'cancelled')) {
+    return { store, result: { ok: false, error: 'warehouse.doc.errPostedImmutable' } }
   }
   if (doc.number?.trim() && isDocumentNumberTaken(store.documents, doc.number, doc.id)) {
     return {
@@ -449,14 +485,23 @@ export function saveWarehouseDocumentDraft(
   }
 
   const id = doc.id ?? crypto.randomUUID()
-  const createdAt = existing?.createdAt ?? new Date().toISOString()
+  const now = new Date().toISOString()
+  const createdAt = existing?.createdAt ?? now
   const rest = { ...doc }
   delete (rest as { id?: string }).id
+  const lines = ensureDocumentLinesWithSnapshots(store, rest.lines ?? existing?.lines ?? [])
   const full: WarehouseDocument = {
     ...(existing ?? {}),
     ...rest,
     id,
     createdAt,
+    createdBy: existing?.createdBy ?? actor?.actorId ?? rest.createdBy,
+    createdByName: existing?.createdByName ?? actor?.actorName ?? rest.createdByName,
+    updatedAt: now,
+    updatedBy: actor?.actorId,
+    updatedByName: actor?.actorName,
+    revision: (existing?.revision ?? 0) + 1,
+    lines,
     status: 'draft',
   }
 
@@ -478,41 +523,20 @@ export function saveWarehouseDocumentDraft(
 }
 
 /**
- * Снять проведение («Отменить проведение»): удалить движения документа и
- * вернуть его в черновик (можно редактировать и провести заново).
- * Сторно-, замес- и парные документы так снимать нельзя — для них отмена.
- *
- * RISK W1: destructive unpost (hard-deletes movements) — not rewritten in W0.
+ * @deprecated PHASE W1 — destructive unpost (posted → draft + delete movements) is forbidden.
+ * Fail-closed: always returns an error. Use cancelWarehouseDocument / cancelPosted.
  */
 export function unpostWarehouseDocument(
   store: WarehouseStore,
   documentId: string,
   actor?: { actorId?: string; actorName?: string },
 ): { store: WarehouseStore; result: UnpostDocumentResult } {
-  const doc = store.documents.find((d) => d.id === documentId)
-  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
-  if (doc.status !== 'posted') {
-    return { store, result: { ok: false, error: 'warehouse.doc.errNotPosted' } }
+  void documentId
+  void actor
+  return {
+    store,
+    result: { ok: false, error: UNPOST_REMOVED_ERROR },
   }
-  if (!documentCanBeCancelled(doc) || doc.transferPairId) {
-    return { store, result: { ok: false, error: 'warehouse.doc.errCannotUnpost' } }
-  }
-
-  const documents = store.documents.map((d) =>
-    d.id === documentId
-      ? { ...d, status: 'draft' as const, postedAt: undefined, postedBy: undefined, postedByName: undefined }
-      : d,
-  )
-  const movements = store.movements.filter((m) => m.documentId !== documentId)
-
-  let next: WarehouseStore = { ...store, documents, movements }
-  next = appendWarehouseAudit(next, {
-    action: 'document_unpost',
-    detail: `Снято проведение ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number}`,
-    actorId: actor?.actorId,
-    actorName: actor?.actorName,
-  })
-  return { store: next, result: { ok: true } }
 }
 
 /** Удалить ЧЕРНОВИК документа (только не проведённый, без движений). */
@@ -539,6 +563,10 @@ export function removeWarehouseDraftDocument(
   return { store: next, result: { ok: true } }
 }
 
+/**
+ * @deprecated PHASE W1 — bare inventory movements without WarehouseDocument are blocked.
+ * Use inventory WarehouseDocument lifecycle (or opening inventory).
+ */
 export function runInventoryCount(
   store: WarehouseStore,
   args: {
@@ -549,47 +577,8 @@ export function runInventoryCount(
     comment?: string
   },
 ): WarehouseStore {
-  if (!isWarehouseAccountingActive(store, args.warehouseId)) {
-    return store
-  }
-  const { itemId, warehouseId, counted, date, comment } = args
-  const item = store.items.find((i) => i.id === itemId)
-  if (!item) return store
-
-  let receipt = 0
-  let issue = 0
-  let adjustment = 0
-  for (const m of store.movements) {
-    if (m.itemId !== itemId || m.warehouseId !== warehouseId) continue
-    if (m.type === 'receipt') receipt += Math.abs(m.quantity)
-    else if (m.type === 'issue') issue += Math.abs(m.quantity)
-    else if (m.type === 'adjustment' || m.type === 'inventory') adjustment += m.quantity
-  }
-  const current = receipt - issue + adjustment
-  const delta = counted - current
-  if (Math.abs(delta) < 1e-9) return store
-
-  const movement: StockMovement = {
-    id: crypto.randomUUID(),
-    itemId,
-    warehouseId,
-    type: 'inventory',
-    quantity: delta,
-    date,
-    comment: comment ?? `Инвентаризация: было ${current}, стало ${counted}`,
-    createdAt: new Date().toISOString(),
-  }
-
-  let next: WarehouseStore = {
-    ...store,
-    movements: [...store.movements, movement],
-  }
-  next = appendWarehouseAudit(next, {
-    action: 'inventory',
-    detail: `${item.name}: ${current} → ${counted}`,
-    itemId,
-  })
-  return next
+  void args
+  return store
 }
 
 export type InventoryRevisionLine = {
@@ -601,9 +590,13 @@ export type InventoryRevisionResult = {
   applied: number
   skipped: number
   unchanged: number
+  error?: string
 }
 
-/** Массовая ревизия: корректировка фактических остатков по списку позиций */
+/**
+ * @deprecated PHASE W1 — bare inventory revision movements blocked.
+ * Use inventory WarehouseDocument.
+ */
 export function postInventoryRevision(
   store: WarehouseStore,
   args: {
@@ -613,68 +606,15 @@ export function postInventoryRevision(
     lines: InventoryRevisionLine[]
   },
 ): { store: WarehouseStore; result: InventoryRevisionResult } {
-  const { warehouseId, date, comment, lines } = args
-  if (!isWarehouseAccountingActive(store, warehouseId)) {
-    return { store, result: { applied: 0, skipped: lines.length, unchanged: 0 } }
+  return {
+    store,
+    result: {
+      applied: 0,
+      skipped: args.lines.length,
+      unchanged: 0,
+      error: BARE_BALANCE_MOVEMENT_BLOCKED,
+    },
   }
-  const itemMap = new Map(store.items.map((i) => [i.id, i]))
-  const batchComment =
-    comment?.trim() || `Ревизия от ${date.split('-').reverse().join('.')}`
-
-  let next = store
-  let applied = 0
-  let skipped = 0
-  let unchanged = 0
-
-  for (const line of lines) {
-    const item = itemMap.get(line.itemId)
-    if (!item || !item.active) {
-      skipped++
-      continue
-    }
-    if (line.counted < 0 || Number.isNaN(line.counted)) {
-      skipped++
-      continue
-    }
-
-    let receipt = 0
-    let issue = 0
-    let adjustment = 0
-    for (const m of next.movements) {
-      if (m.itemId !== line.itemId || m.warehouseId !== warehouseId) continue
-      if (m.type === 'receipt') receipt += Math.abs(m.quantity)
-      else if (m.type === 'issue') issue += Math.abs(m.quantity)
-      else if (m.type === 'adjustment' || m.type === 'inventory') adjustment += m.quantity
-    }
-    const current = receipt - issue + adjustment
-    const delta = line.counted - current
-    if (Math.abs(delta) < 1e-9) {
-      unchanged++
-      continue
-    }
-
-    const movement: StockMovement = {
-      id: crypto.randomUUID(),
-      itemId: line.itemId,
-      warehouseId,
-      type: 'inventory',
-      quantity: delta,
-      date,
-      comment: `${batchComment}: было ${current}, стало ${line.counted}`,
-      createdAt: new Date().toISOString(),
-    }
-    next = { ...next, movements: [...next.movements, movement] }
-    applied++
-  }
-
-  if (applied > 0) {
-    next = appendWarehouseAudit(next, {
-      action: 'inventory',
-      detail: `${batchComment} · скорректировано ${applied} поз.`,
-    })
-  }
-
-  return { store: next, result: { applied, skipped, unchanged } }
 }
 
 export type OpeningBalanceLine = {
@@ -685,9 +625,13 @@ export type OpeningBalanceLine = {
 export type OpeningBalanceResult = {
   applied: number
   skipped: number
+  error?: string
 }
 
-/** Начальные остатки: установка остатка для позиций с нулевым учётом */
+/**
+ * @deprecated PHASE W1 — bare opening-balance adjustments blocked.
+ * Use opening inventory document (W0.5).
+ */
 export function postOpeningBalances(
   store: WarehouseStore,
   args: {
@@ -697,66 +641,14 @@ export function postOpeningBalances(
     lines: OpeningBalanceLine[]
   },
 ): { store: WarehouseStore; result: OpeningBalanceResult } {
-  const { warehouseId, date, comment, lines } = args
-  if (!isWarehouseAccountingActive(store, warehouseId)) {
-    return { store, result: { applied: 0, skipped: lines.length } }
+  return {
+    store,
+    result: {
+      applied: 0,
+      skipped: args.lines.length,
+      error: BARE_BALANCE_MOVEMENT_BLOCKED,
+    },
   }
-  const itemMap = new Map(store.items.map((i) => [i.id, i]))
-  const batchComment =
-    comment?.trim() || `Начальный остаток на ${date.split('-').reverse().join('.')}`
-
-  let next = store
-  let applied = 0
-  let skipped = 0
-
-  for (const line of lines) {
-    const item = itemMap.get(line.itemId)
-    if (!item || !item.active) {
-      skipped++
-      continue
-    }
-    if (line.quantity <= 0 || Number.isNaN(line.quantity)) {
-      skipped++
-      continue
-    }
-
-    let receipt = 0
-    let issue = 0
-    let adjustment = 0
-    for (const m of next.movements) {
-      if (m.itemId !== line.itemId || m.warehouseId !== warehouseId) continue
-      if (m.type === 'receipt') receipt += Math.abs(m.quantity)
-      else if (m.type === 'issue') issue += Math.abs(m.quantity)
-      else if (m.type === 'adjustment' || m.type === 'inventory') adjustment += m.quantity
-    }
-    const current = receipt - issue + adjustment
-    if (Math.abs(current) > 1e-9) {
-      skipped++
-      continue
-    }
-
-    const movement: StockMovement = {
-      id: crypto.randomUUID(),
-      itemId: line.itemId,
-      warehouseId,
-      type: 'adjustment',
-      quantity: line.quantity,
-      date,
-      comment: batchComment,
-      createdAt: new Date().toISOString(),
-    }
-    next = { ...next, movements: [...next.movements, movement] }
-    applied++
-  }
-
-  if (applied > 0) {
-    next = appendWarehouseAudit(next, {
-      action: 'inventory',
-      detail: `${batchComment} · установлено ${applied} поз.`,
-    })
-  }
-
-  return { store: next, result: { applied, skipped } }
 }
 
 export function postWarehouseTransfer(
@@ -823,7 +715,12 @@ export function postWarehouseTransfer(
 function cancelInventoryDocument(
   store: WarehouseStore,
   doc: WarehouseDocument,
-  args: { cancelledBy?: string; cancelledByName?: string; reason?: string },
+  args: {
+    cancelledBy?: string
+    cancelledByName?: string
+    reason?: string
+    transactionGroupId?: string
+  },
 ): { store: WarehouseStore; result: CancelDocumentResult } {
   let reversalNumber = nextReversalNumber(doc.number)
   let suffix = 1
@@ -842,9 +739,13 @@ function cancelInventoryDocument(
     id: crypto.randomUUID(),
     quantity: -m.quantity,
     documentId: reversalId,
+    documentLineId: m.documentLineId,
     documentNo: reversalNumber,
+    transactionGroupId: args.transactionGroupId ?? m.transactionGroupId,
     comment: [`Сторно №${doc.number}`, args.reason].filter(Boolean).join(' · '),
     createdAt: now,
+    createdBy: args.cancelledBy,
+    createdByName: args.cancelledByName,
   }))
 
   const reversalDoc: WarehouseDocument = {
@@ -855,7 +756,7 @@ function cancelInventoryDocument(
     warehouseId: doc.warehouseId,
     purpose: 'other',
     comment: [`Сторно №${doc.number}`, args.reason].filter(Boolean).join(' · '),
-    lines: [],
+    lines: doc.lines.map((l) => ({ ...l, lineId: l.lineId ?? crypto.randomUUID() })),
     keeperId: args.cancelledBy,
     keeperName: args.cancelledByName,
     reversesDocumentId: doc.id,
@@ -865,6 +766,9 @@ function cancelInventoryDocument(
     postedBy: args.cancelledBy,
     postedByName: args.cancelledByName,
     createdAt: now,
+    createdBy: args.cancelledBy,
+    createdByName: args.cancelledByName,
+    cancellationReason: args.reason,
   }
 
   const nextStore: WarehouseStore = {
@@ -878,6 +782,7 @@ function cancelInventoryDocument(
               cancelledAt: now,
               cancelledBy: args.cancelledBy,
               cancelledByName: args.cancelledByName,
+              cancellationReason: args.reason,
               reversalDocumentId: reversalId,
             }
           : d,
@@ -889,7 +794,7 @@ function cancelInventoryDocument(
 
   const withAudit = appendWarehouseAudit(nextStore, {
     action: 'document_cancel',
-    detail: `Отмена ревизии №${doc.number} · сторно №${reversalNumber}`,
+    detail: `Отмена ревизии №${doc.number} · сторно №${reversalNumber}${args.reason ? ` · ${args.reason}` : ''}`,
     actorId: args.cancelledBy,
     actorName: args.cancelledByName,
   })
@@ -900,7 +805,12 @@ function cancelInventoryDocument(
 function cancelSingleDocument(
   store: WarehouseStore,
   doc: WarehouseDocument,
-  args: { cancelledBy?: string; cancelledByName?: string; reason?: string },
+  args: {
+    cancelledBy?: string
+    cancelledByName?: string
+    reason?: string
+    transactionGroupId?: string
+  },
 ): { store: WarehouseStore; result: CancelDocumentResult } {
   if (doc.type === 'inventory') {
     return cancelInventoryDocument(store, doc, args)
@@ -914,6 +824,7 @@ function cancelSingleDocument(
     reversalNumber = `${nextReversalNumber(doc.number)}${suffix > 1 ? suffix : ''}`
   }
 
+  const lines = ensureDocumentLinesWithSnapshots(store, doc.lines)
   const reversalOut = postWarehouseDocument(store, {
     type: reversalType,
     number: reversalNumber,
@@ -921,7 +832,7 @@ function cancelSingleDocument(
     warehouseId: doc.warehouseId,
     purpose: 'other',
     comment: [`Сторно №${doc.number}`, args.reason].filter(Boolean).join(' · '),
-    lines: doc.lines,
+    lines,
     keeperId: args.cancelledBy,
     keeperName: args.cancelledByName,
     reversesDocumentId: doc.id,
@@ -949,23 +860,36 @@ function cancelSingleDocument(
   const now = new Date().toISOString()
   const nextStore: WarehouseStore = {
     ...reversalOut.store,
-    documents: reversalOut.store.documents.map((d) =>
-      d.id === doc.id
-        ? {
-            ...d,
-            status: 'cancelled',
-            cancelledAt: now,
-            cancelledBy: args.cancelledBy,
-            cancelledByName: args.cancelledByName,
-            reversalDocumentId: reversalId,
-          }
-        : d,
+    documents: reversalOut.store.documents.map((d) => {
+      if (d.id === doc.id) {
+        return {
+          ...d,
+          status: 'cancelled' as const,
+          cancelledAt: now,
+          cancelledBy: args.cancelledBy,
+          cancelledByName: args.cancelledByName,
+          cancellationReason: args.reason,
+          reversalDocumentId: reversalId,
+        }
+      }
+      if (d.id === reversalId) {
+        return {
+          ...d,
+          cancellationReason: args.reason,
+        }
+      }
+      return d
+    }),
+    movements: reversalOut.store.movements.map((m) =>
+      m.documentId === reversalId && args.transactionGroupId
+        ? { ...m, transactionGroupId: args.transactionGroupId }
+        : m,
     ),
   }
 
   const withAudit = appendWarehouseAudit(nextStore, {
     action: 'document_cancel',
-    detail: `Отмена ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number} · сторно №${reversalNumber}`,
+    detail: `Отмена ${warehouseDocumentKindLabel(doc.type).toLowerCase()} №${doc.number} · сторно №${reversalNumber}${args.reason ? ` · ${args.reason}` : ''}`,
     actorId: args.cancelledBy,
     actorName: args.cancelledByName,
   })
@@ -976,10 +900,29 @@ function cancelSingleDocument(
 export function cancelWarehouseDocument(
   store: WarehouseStore,
   documentId: string,
-  args: { cancelledBy?: string; cancelledByName?: string; reason?: string },
+  args: {
+    cancelledBy?: string
+    cancelledByName?: string
+    reason?: string
+    transactionGroupId?: string
+  },
 ): { store: WarehouseStore; result: CancelDocumentResult } {
   const doc = store.documents.find((d) => d.id === documentId)
   if (!doc) return { store, result: { ok: false, error: 'not_found' } }
+
+  // Idempotent: already cancelled with reversal — do not create a duplicate.
+  if (doc.status === 'cancelled') {
+    const existing = doc.reversalDocumentId
+      ? [doc.reversalDocumentId]
+      : store.documents.filter((d) => d.reversesDocumentId === doc.id).map((d) => d.id)
+    return { store, result: { ok: true, reversalIds: existing } }
+  }
+
+  const reason = args.reason?.trim()
+  if (!reason) {
+    return { store, result: { ok: false, error: 'warehouse.doc.errCancelReasonRequired' } }
+  }
+
   if (!documentCanBeCancelled(doc)) {
     return { store, result: { ok: false, error: 'warehouse.doc.errCannotCancel' } }
   }
@@ -990,6 +933,7 @@ export function cancelWarehouseDocument(
     }
   }
 
+  const cancelArgs = { ...args, reason }
   const targets = doc.transferPairId
     ? store.documents.filter(
         (d) => d.transferPairId === doc.transferPairId && d.status !== 'cancelled',
@@ -999,7 +943,7 @@ export function cancelWarehouseDocument(
   let next = store
   const reversalIds: string[] = []
   for (const target of targets) {
-    const out = cancelSingleDocument(next, target, args)
+    const out = cancelSingleDocument(next, target, cancelArgs)
     if (!out.result.ok) {
       // Atomic: discard any partial cancellations in the pair.
       return { store, result: out.result }

@@ -5110,15 +5110,32 @@ export const en: Dict = {
   'warehouse.doc.saveDraft': 'Save draft',
   'warehouse.doc.draftSaved': 'Draft saved — balances unchanged.',
   'warehouse.doc.postSuccess': 'Document posted, balances updated.',
-  'warehouse.doc.unpost': 'Unpost',
-  'warehouse.doc.unpostSuccess': 'Posting removed, document returned to draft.',
-  'warehouse.doc.readOnlyPosted': 'Posted document — view only. Editing not available.',
+  'warehouse.doc.postConfirm': 'Post this document? After posting it cannot be edited.',
+  'warehouse.doc.unpost': 'Create reversal',
+  'warehouse.doc.unpostSuccess': 'Document cancelled via reversal (not returned to draft).',
+  'warehouse.doc.readOnlyPosted':
+    'Posted document — view only. Fix via reversal or a correcting document.',
   'warehouse.doc.viewTitle': 'View document No.{number}',
   'warehouse.doc.editDraftTitle': 'Edit draft No.{number}',
   'warehouse.doc.errUnpostForbidden': 'Only system administrator can unpost.',
+  'warehouse.doc.errUnpostRemoved':
+    'Destructive unpost was removed. Use storno/cancel on the posted document.',
+  'warehouse.doc.errPostedImmutable':
+    'Posted or cancelled documents cannot be edited. Use storno or a correcting document.',
+  'warehouse.doc.errBareMovementBlocked':
+    'Direct balance changes without a warehouse document are blocked.',
+  'warehouse.doc.errCancelReasonRequired': 'Cancellation reason is required.',
+  'warehouse.doc.errCancelForbidden': 'Not allowed to reverse this document.',
+  'warehouse.doc.immutableNotice':
+    'Posted documents cannot be edited. Create a reversal or correcting document.',
+  'warehouse.doc.linkOriginal': 'Original document',
+  'warehouse.doc.linkReversal': 'Reversal document',
   'warehouse.doc.deleteDraft': 'Delete',
   'warehouse.doc.draftRemoved': 'Draft deleted.',
-  'warehouse.doc.errAlreadyPosted': 'Document already posted — unpost first.',
+  'warehouse.doc.errAlreadyPosted':
+    'Document already posted — editing is blocked. Use storno.',
+  'warehouse.import.errBareMovementsBlocked':
+    'Excel import no longer creates bare movements. Use receipt documents.',
   'warehouse.doc.errInsufficientStock':
     'Insufficient material. Document was not posted; stock was not changed.',
   'warehouse.doc.errIdempotencyConflict':
@@ -5371,7 +5388,7 @@ export const en: Dict = {
   'warehouse.audit.export': 'Export',
   'warehouse.audit.nothing': 'Nothing found',
   'warehouse.doc.cancelTitle': 'Reverse document?',
-  'warehouse.doc.cancelReasonLabel': 'Reversal reason (optional)',
+  'warehouse.doc.cancelReasonLabel': 'Reversal reason (required)',
   'warehouse.doc.cancelConfirm': 'Reverse',
   'warehouse.meta.deleteCategory': 'Delete category',
   'warehouse.meta.deleteLocation': 'Delete warehouse',

@@ -115,7 +115,11 @@ export type StockMovement = {
   quantity: number
   date: string
   documentId?: string
+  /** PHASE W1 — link to WarehouseDocumentLine.lineId */
+  documentLineId?: string
   documentNo?: string
+  /** PHASE W0.6/W1 — cloud atomic group when part of warehouse transaction */
+  transactionGroupId?: string
   brigade?: string
   comment?: string
   /** Резерв под заказ планировщика */
@@ -131,11 +135,24 @@ export type StockMovement = {
   /** Срок годности партии (YYYY-MM-DD) */
   expiryDate?: string
   createdAt: string
+  /** PHASE W1 — immutable actor snapshot */
+  createdBy?: string
+  createdByName?: string
 }
 
 export type WarehouseDocumentLine = {
+  /** PHASE W1 — stable line id (optional on legacy rows) */
+  lineId?: string
   itemId: string
   quantity: number
+  /** Snapshot at post time — rename of item must not rewrite history */
+  itemCodeSnapshot?: string
+  itemNameSnapshot?: string
+  unitSnapshot?: string
+  plannedQty?: number
+  actualQty?: number
+  sourceLocationId?: string
+  destinationLocationId?: string
   /** Снимок учётного остатка на момент ревизии (документ inventory) */
   bookQty?: number
   /** Сомнительные данные при пересчёте */
@@ -158,7 +175,11 @@ export type WarehouseDocument = {
   type: WarehouseDocumentType
   number: string
   date: string
+  /** PHASE W1 — optional datetime (legacy uses `date` only) */
+  documentDateTime?: string
   warehouseId: string
+  sourceWarehouseId?: string
+  destinationWarehouseId?: string
   /** Вид операции / основание */
   purpose?: WarehouseDocumentPurpose
   counterparty?: string
@@ -166,6 +187,11 @@ export type WarehouseDocument = {
   contractId?: string
   /** Снимок номера договора на момент проводки */
   contractNumber?: string
+  basisType?: string
+  basisId?: string
+  basisNumber?: string
+  responsibleEmployeeId?: string
+  responsibleEmployeeNameSnapshot?: string
   brigade?: string
   comment?: string
   writeoffReason?: WriteoffReasonId
@@ -177,6 +203,7 @@ export type WarehouseDocument = {
   cancelledAt?: string
   cancelledBy?: string
   cancelledByName?: string
+  cancellationReason?: string
   reversalDocumentId?: string
   reversesDocumentId?: string
   /** Кладовщик, проводивший документ */
@@ -229,6 +256,13 @@ export type WarehouseDocument = {
   lockedByName?: string
   lockedAt?: string
   createdAt: string
+  createdBy?: string
+  createdByName?: string
+  updatedAt?: string
+  updatedBy?: string
+  updatedByName?: string
+  /** Optimistic revision for concurrent draft edits */
+  revision?: number
 }
 
 /** Строка инвойса RS.ge / eAPI */

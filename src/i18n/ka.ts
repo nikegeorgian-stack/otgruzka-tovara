@@ -5486,15 +5486,32 @@ export const ka: Dict = {
   'warehouse.doc.saveDraft': 'მონახაზად შენახვა',
   'warehouse.doc.draftSaved': 'მონახაზი შენახულია — ნაშთები არ შეცვლილა.',
   'warehouse.doc.postSuccess': 'დოკუმენტი ჩატარდა, ნაშთები განახლდა.',
-  'warehouse.doc.unpost': 'ჩატარების გაუქმება',
-  'warehouse.doc.unpostSuccess': 'ჩატარება მოიხსნა, დოკუმენტი დაბრუნდა მონახაზში.',
-  'warehouse.doc.readOnlyPosted': 'ჩატარებული დოკუმენტი — მხოლოდ ნახვა. რედაქტირება შეუძლებელია.',
+  'warehouse.doc.postConfirm': 'გავატაროთ დოკუმენტი? ჩატარების შემდეგ რედაქტირება შეუძლებელი იქნება.',
+  'warehouse.doc.unpost': 'სტორნოს შექმნა',
+  'warehouse.doc.unpostSuccess': 'დოკუმენტი გაუქმდა სტორნოთი (მონახაზში არ ბრუნდება).',
+  'warehouse.doc.readOnlyPosted':
+    'ჩატარებული დოკუმენტი — მხოლოდ ნახვა. გასწორება სტორნოთი ან მაკორექტირებელი დოკუმენტით.',
   'warehouse.doc.viewTitle': 'დოკუმენტის ნახვა №{number}',
   'warehouse.doc.editDraftTitle': 'შავი ნუსხის რედაქტირება №{number}',
   'warehouse.doc.errUnpostForbidden': 'ჩატარების გაუქმება მხოლოდ სისტემურ ადმინისტრატორს შეუძლია.',
+  'warehouse.doc.errUnpostRemoved':
+    'ჩატარების მოხსნა წაშლილია. გამოიყენეთ სტორნო (გაუქმება).',
+  'warehouse.doc.errPostedImmutable':
+    'ჩატარებული ან გაუქმებული დოკუმენტის რედაქტირება შეუძლებელია. გამოიყენეთ სტორნო.',
+  'warehouse.doc.errBareMovementBlocked':
+    'ნაშთის პირდაპირი ცვლილება დოკუმენტის გარეშე აკრძალულია.',
+  'warehouse.doc.errCancelReasonRequired': 'მიუთითეთ სტორნოს მიზეზი.',
+  'warehouse.doc.errCancelForbidden': 'სტორნოს უფლება არ გაქვთ.',
+  'warehouse.doc.immutableNotice':
+    'ჩატარებული დოკუმენტის რედაქტირება შეუძლებელია. შექმენით სტორნო ან მაკორექტირებელი დოკუმენტი.',
+  'warehouse.doc.linkOriginal': 'საწყისი დოკუმენტი',
+  'warehouse.doc.linkReversal': 'სტორნოს დოკუმენტი',
   'warehouse.doc.deleteDraft': 'წაშლა',
   'warehouse.doc.draftRemoved': 'მონახაზი წაიშალა.',
-  'warehouse.doc.errAlreadyPosted': 'დოკუმენტი უკვე ჩატარებულია — ჯერ მოხსენით ჩატარება.',
+  'warehouse.doc.errAlreadyPosted':
+    'დოკუმენტი უკვე ჩატარებულია — რედაქტირება აკრძალულია. გამოიყენეთ სტორნო.',
+  'warehouse.import.errBareMovementsBlocked':
+    'Excel იმპორტი აღარ ქმნის შიშველ მოძრაობებს. გამოიყენეთ შემოსავლის დოკუმენტები.',
   'warehouse.doc.errInsufficientStock':
     'მასალა არასაკმარისია. დოკუმენტი არ ჩატარებულა, ნაშთები არ შეცვლილა.',
   'warehouse.doc.errIdempotencyConflict':
@@ -5696,7 +5713,7 @@ export const ka: Dict = {
   'warehouse.audit.export': 'ექსპორტი',
   'warehouse.audit.nothing': 'ვერაფერი მოიძებნა',
   'warehouse.doc.cancelTitle': 'დოკუმენტის გაუქმება?',
-  'warehouse.doc.cancelReasonLabel': 'მიზეზი (არასავალდებულო)',
+  'warehouse.doc.cancelReasonLabel': 'მიზეზი (სავალდებულო)',
   'warehouse.doc.cancelConfirm': 'გაუქმება',
   'warehouse.meta.deleteCategory': 'კატეგორიის წაშლა',
   'warehouse.meta.deleteLocation': 'საწყობის წაშლა',

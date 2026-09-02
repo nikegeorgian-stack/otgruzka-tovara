@@ -17,6 +17,7 @@ export type WarehouseTransactionGroupKind =
   | 'warehouse_transfer'
   | 'batch_mix'
   | 'cancel_transfer_pair'
+  | 'document_cancel'
 
 export type TransactionGroupMeta = {
   transactionGroupId: string
