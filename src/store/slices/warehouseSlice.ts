@@ -493,7 +493,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         getStore().warehouse,
         warehouseId,
       )
-      if (imported.result.movementsAdded > 0) {
+      if (imported.result.draftsCreated > 0) {
         setStore((s) => ({ ...s, warehouse: imported.store }))
       }
       return imported.result

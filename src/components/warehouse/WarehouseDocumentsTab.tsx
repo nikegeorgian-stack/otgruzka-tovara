@@ -19,8 +19,14 @@ import {
 import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssuePrintPreview'
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
-import { buildDocumentJournalRows } from '@/lib/warehouse/documentJournal'
 import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
+import {
+  buildDocumentCardMeta,
+  documentSourceKind,
+  isAutomaticDocument,
+  queryDocumentJournal,
+  type JournalSourceFilter,
+} from '@/lib/warehouse/documentJournalQuery'
 import {
   documentCanBeCancelled,
   resolveCounterpartyDisplayName,
@@ -69,6 +75,13 @@ type DocModalState =
   | { mode: 'edit'; doc: WarehouseDocument }
   | { mode: 'view'; doc: WarehouseDocument }
 
+function srcNumber(
+  warehouse: WarehousePageProps['warehouse'],
+  id: string,
+): string {
+  return warehouse.documents.find((d) => d.id === id)?.number ?? id.slice(0, 8)
+}
+
 export function WarehouseDocumentsTab({
   warehouse,
   brigades,
@@ -112,6 +125,10 @@ export function WarehouseDocumentsTab({
     'all',
   )
   const [filterPurpose, setFilterPurpose] = useState<WarehouseDocumentPurpose | 'all'>('all')
+  const [filterSource, setFilterSource] = useState<JournalSourceFilter>('all')
+  const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [journalNotice, setJournalNotice] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<WarehouseDocument | null>(null)
   const [cancelReason, setCancelReason] = useState('')
@@ -123,18 +140,31 @@ export function WarehouseDocumentsTab({
     [warehouse, whId],
   )
 
-  const docs = useMemo(() => {
-    let list = [...warehouse.documents]
-    if (warehouseId) list = list.filter((d) => d.warehouseId === warehouseId)
-    if (filterType !== 'all') list = list.filter((d) => d.type === filterType)
-    if (filterStatus !== 'all') {
-      list = list.filter((d) => (d.status ?? 'posted') === filterStatus)
-    }
-    if (filterPurpose !== 'all') list = list.filter((d) => d.purpose === filterPurpose)
-    return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [warehouse.documents, warehouseId, filterType, filterStatus, filterPurpose])
-
-  const journalRows = useMemo(() => buildDocumentJournalRows(warehouse, docs), [warehouse, docs])
+  const journalRows = useMemo(
+    () =>
+      queryDocumentJournal(warehouse, {
+        warehouseId: warehouseId || undefined,
+        type: filterType,
+        status: filterStatus,
+        purpose: filterPurpose,
+        source: filterSource,
+        search,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      }),
+    [
+      warehouse,
+      warehouseId,
+      filterType,
+      filterStatus,
+      filterPurpose,
+      filterSource,
+      search,
+      dateFrom,
+      dateTo,
+    ],
+  )
+  const docs = useMemo(() => journalRows.map((r) => r.doc), [journalRows])
   const journalTotals = useMemo(
     () =>
       journalRows.reduce(
@@ -276,6 +306,33 @@ export function WarehouseDocumentsTab({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           <label className="text-xs text-stone-500">
+            {t('warehouse.doc.search')}
+            <Input
+              className="ml-1 min-w-[12rem]"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('warehouse.doc.searchPlaceholder')}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
+            {t('warehouse.doc.dateFrom')}
+            <input
+              type="date"
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
+            {t('warehouse.doc.dateTo')}
+            <input
+              type="date"
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
             {t('warehouse.type')}
             <select
               className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
@@ -302,6 +359,34 @@ export function WarehouseDocumentsTab({
             </select>
           </label>
           <label className="text-xs text-stone-500">
+            {t('warehouse.doc.source')}
+            <select
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={filterSource}
+              onChange={(e) => setFilterSource(e.target.value as JournalSourceFilter)}
+            >
+              <option value="all">{t('warehouse.allCategories')}</option>
+              {(
+                [
+                  'manual',
+                  'production',
+                  'batch',
+                  'transfer',
+                  'loading',
+                  'opening',
+                  'reversal',
+                  'procurement',
+                ] as JournalSourceFilter[]
+              )
+                .filter((s) => s !== 'all')
+                .map((s) => (
+                  <option key={s} value={s}>
+                    {t(`warehouse.doc.source.${s}`)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="text-xs text-stone-500">
             {t('warehouse.doc.purpose')}
             <select
               className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
@@ -320,6 +405,7 @@ export function WarehouseDocumentsTab({
                   'return',
                   'writeoff',
                   'transfer',
+                  'opening_inventory',
                   'other',
                 ] as WarehouseDocumentPurpose[]
               ).map((p) => (
@@ -351,14 +437,16 @@ export function WarehouseDocumentsTab({
                 <th className="px-3 py-3">{t('warehouse.doc.number')}</th>
                 <th className="px-3 py-3">{t('warehouse.location')}</th>
                 <th className="px-3 py-3">{t('warehouse.type')}</th>
+                <th className="px-3 py-3">{t('warehouse.doc.source')}</th>
                 <th className="px-3 py-3">{t('warehouse.doc.status')}</th>
+                <th className="px-3 py-3">{t('warehouse.doc.lines')}</th>
                 <th className="px-3 py-3">{t('warehouse.doc.counterparty')}</th>
                 <th className="px-3 py-3 text-right">{t('warehouse.doc.total')}</th>
                 <th className="px-3 py-3 w-32">{t('warehouse.print.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {journalRows.map(({ doc: d, warehouseName, totalSum }) => (
+              {journalRows.map(({ doc: d, warehouseName, totalSum, lineCount }) => (
                 <tr
                   key={d.id}
                   className={`border-b border-grid/60 cursor-pointer hover:bg-stone-50 ${
@@ -368,12 +456,17 @@ export function WarehouseDocumentsTab({
                         ? 'bg-amber-50/40'
                         : ''
                   }`}
-                  title={t('warehouse.doc.doubleClickEdit')}
-                  onDoubleClick={() => openDocumentForEdit(d)}
+                  title={t('warehouse.doc.clickOpen')}
+                  onClick={() => openDocumentForEdit(d)}
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.date}</td>
                   <td className="px-3 py-2.5 font-medium font-mono text-xs">
                     {d.number}
+                    {isAutomaticDocument(d) ? (
+                      <span className="ml-1 rounded bg-sky-100 px-1 text-[10px] text-sky-800">
+                        auto
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5 text-stone-600">{warehouseName}</td>
                   <td className="px-3 py-2.5">
@@ -384,19 +477,27 @@ export function WarehouseDocumentsTab({
                       </span>
                     ) : null}
                   </td>
+                  <td className="px-3 py-2.5 text-xs text-stone-600">
+                    {t(`warehouse.doc.source.${documentSourceKind(d)}`)}
+                  </td>
                   <td className="px-3 py-2.5">
                     {d.status === 'cancelled' ? (
-                      <span className="text-red-700">{t('warehouse.doc.status.cancelled')}</span>
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">
+                        {t('warehouse.doc.status.cancelled')}
+                      </span>
                     ) : d.status === 'draft' ? (
-                      <span className="font-medium text-amber-700">
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">
                         {isDocumentLockedByOther(d, keeperId)
                           ? tf('warehouse.inventory.lockedBy', { name: d.lockedByName ?? '—' })
                           : t('warehouse.doc.status.draft')}
                       </span>
                     ) : (
-                      <span className="text-emerald-700">{t('warehouse.doc.status.posted')}</span>
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800">
+                        {t('warehouse.doc.status.posted')}
+                      </span>
                     )}
                   </td>
+                  <td className="px-3 py-2.5 tabular-nums text-stone-600">{lineCount}</td>
                   <td className="px-3 py-2.5 text-stone-600">
                     {resolveCounterpartyDisplayName(d, counterparties ?? [], '') ||
                       d.keeperName ||
@@ -405,9 +506,9 @@ export function WarehouseDocumentsTab({
                   <td className="px-3 py-2.5 text-right tabular-nums">
                     {totalSum > 0 ? `${formatQty(totalSum)} ₾` : '—'}
                   </td>
-                  <td className="px-3 py-2.5">
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-col gap-1">
-                      {printMeta && d.status !== 'cancelled' && (
+                      {printMeta && (d.type === 'receipt' || d.type === 'issue') && (
                         <button
                           type="button"
                           className="text-xs font-semibold text-teal-700 hover:underline text-left"
@@ -495,7 +596,7 @@ export function WarehouseDocumentsTab({
             </tbody>
             <tfoot>
               <tr className="bg-stone-50 text-xs font-medium text-stone-600">
-                <td colSpan={6} className="px-4 py-2">
+                <td colSpan={8} className="px-4 py-2">
                   {tf('warehouse.doc.journalSummary', {
                     count: String(journalTotals.count),
                     lines: String(journalTotals.lines),
@@ -550,9 +651,79 @@ export function WarehouseDocumentsTab({
         >
           <div className="px-4 py-3">
             {docModal.mode === 'view' && (
-              <p className="mb-3 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                {t('warehouse.doc.immutableNotice')}
-              </p>
+              <div className="mb-3 space-y-2">
+                <p className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {t('warehouse.doc.immutableNotice')}
+                </p>
+                {(() => {
+                  const meta = buildDocumentCardMeta(warehouse, docModal.doc)
+                  return (
+                    <dl className="grid gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2 text-xs text-stone-700 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.source')}</dt>
+                        <dd>{t(`warehouse.doc.source.${meta.sourceKind}`)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.revision')}</dt>
+                        <dd>{meta.revision}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.createdAt')}</dt>
+                        <dd>{meta.createdLabel}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.postedAt')}</dt>
+                        <dd>{meta.postedLabel}</dd>
+                      </div>
+                      {meta.originalId ? (
+                        <div>
+                          <dt className="text-stone-400">{t('warehouse.doc.linkOriginal')}</dt>
+                          <dd>
+                            <button
+                              type="button"
+                              className="text-teal-700 underline"
+                              onClick={() => {
+                                const src = warehouse.documents.find((x) => x.id === meta.originalId)
+                                if (src) openDocumentForEdit(src)
+                              }}
+                            >
+                              {srcNumber(warehouse, meta.originalId)}
+                            </button>
+                          </dd>
+                        </div>
+                      ) : null}
+                      {meta.reversalId ? (
+                        <div>
+                          <dt className="text-stone-400">{t('warehouse.doc.linkReversal')}</dt>
+                          <dd>
+                            <button
+                              type="button"
+                              className="text-teal-700 underline"
+                              onClick={() => {
+                                const rev = warehouse.documents.find((x) => x.id === meta.reversalId)
+                                if (rev) openDocumentForEdit(rev)
+                              }}
+                            >
+                              {srcNumber(warehouse, meta.reversalId)}
+                            </button>
+                          </dd>
+                        </div>
+                      ) : null}
+                      {meta.cancellationReason ? (
+                        <div className="sm:col-span-2">
+                          <dt className="text-stone-400">{t('warehouse.doc.cancelReasonLabel')}</dt>
+                          <dd>{meta.cancellationReason}</dd>
+                        </div>
+                      ) : null}
+                      {meta.technical.idempotencyKey ? (
+                        <div className="sm:col-span-2 font-mono text-[10px] text-stone-400">
+                          idempotency: {meta.technical.idempotencyKey}
+                        </div>
+                      ) : null}
+                    </dl>
+                  )
+                })()}
+              </div>
             )}
             <WarehouseDocumentEditor
               ref={docEditorRef}

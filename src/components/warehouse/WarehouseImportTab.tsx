@@ -73,19 +73,27 @@ export function WarehouseImportTab({
   }
 
   function showResult(result: ImportResult) {
-    const message = tf('warehouse.import.success', {
-      ops: result.movementsAdded,
-      items: result.itemsMatched,
-      sheets: result.sheetsProcessed,
-    })
+    const message =
+      result.draftsCreated > 0
+        ? tf('warehouse.import.draftSuccess', {
+            drafts: String(result.draftsCreated),
+            items: String(result.itemsMatched),
+            sheets: String(result.sheetsProcessed),
+            duplicates: String(result.duplicates),
+          })
+        : tf('warehouse.import.success', {
+            ops: String(result.movementsAdded),
+            items: String(result.itemsMatched),
+            sheets: String(result.sheetsProcessed),
+          })
     if (result.warnings.length > 0) {
       setNotice({
-        type: result.movementsAdded > 0 ? 'info' : 'error',
+        type: result.draftsCreated > 0 ? 'info' : 'error',
         message,
         warnings: result.warnings,
       })
     } else {
-      setNotice({ type: 'success', message })
+      setNotice({ type: result.draftsCreated > 0 ? 'success' : 'info', message })
     }
   }
 

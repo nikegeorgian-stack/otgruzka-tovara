@@ -1,12 +1,21 @@
 import type { WorkSheet } from 'xlsx'
 import { loadXlsx } from '@/lib/lazy/xlsx'
-import type { StockMovement, WarehouseItem, WarehouseStore } from './types'
+import { saveWarehouseDocumentDraft } from './documents'
+import { nextDocumentNumber } from './docNumbering'
+import { warehouseIdempotencyKey } from './stockSafety'
+import type { StockMovement, WarehouseDocumentLine, WarehouseItem, WarehouseStore } from './types'
 
 export type ImportResult = {
+  /** Always 0 after W1/W2 — bare movements are never written. */
   movementsAdded: number
+  /** Draft WarehouseDocument receipts created (not posted). */
+  draftsCreated: number
   itemsMatched: number
   sheetsProcessed: number
+  rejected: number
+  duplicates: number
   warnings: string[]
+  draftDocumentIds?: string[]
 }
 
 export type WarehouseImportErrorCode = 'emptyWorkbook' | 'noData' | 'readFailed'
@@ -158,42 +167,118 @@ export async function importWarehouseFromExcel(
     }
   }
 
-  const createdAt = new Date().toISOString()
-  const movements: StockMovement[] = pending.map((m) => ({
-    ...m,
-    id: crypto.randomUUID(),
-    createdAt,
-  }))
-
-  const matchedItems = new Set(movements.map((m) => m.itemId))
-
-  // PHASE W1 — bare balance movements from Excel import are fail-closed.
-  // Legacy movements already in the ledger stay; new imports must use documents (W2).
-  if (movements.length > 0) {
+  const matchedItems = new Set(pending.map((m) => m.itemId))
+  if (pending.length === 0) {
+    if (warnings.length === 0) throw warehouseImportError('noData')
     return {
       store,
       result: {
         movementsAdded: 0,
-        itemsMatched: matchedItems.size,
+        draftsCreated: 0,
+        itemsMatched: 0,
         sheetsProcessed,
-        warnings: [
-          'warehouse.import.errBareMovementsBlocked',
-          ...warnings,
-        ].slice(0, 30),
+        rejected: warnings.length,
+        duplicates: 0,
+        warnings: warnings.slice(0, 30),
       },
     }
   }
 
-  if (warnings.length === 0) {
-    throw warehouseImportError('noData')
-  }
+  const applied = applyImportPendingAsDraftReceipts(store, {
+    warehouseId: whId,
+    pending,
+    warnings,
+    sheetsProcessed,
+  })
   return {
-    store,
+    store: applied.store,
+    result: {
+      ...applied.result,
+      itemsMatched: matchedItems.size,
+      sheetsProcessed,
+    },
+  }
+}
+
+/**
+ * PHASE W2 — group parsed receipt lines into draft documents (no stock change).
+ * Idempotent via document.idempotencyKey per warehouse+date bucket.
+ */
+export function applyImportPendingAsDraftReceipts(
+  store: WarehouseStore,
+  args: {
+    warehouseId: string
+    pending: Omit<StockMovement, 'id' | 'createdAt'>[]
+    warnings?: string[]
+    sheetsProcessed?: number
+  },
+): { store: WarehouseStore; result: ImportResult } {
+  const byDate = new Map<string, Omit<StockMovement, 'id' | 'createdAt'>[]>()
+  for (const m of args.pending) {
+    if (m.type !== 'receipt') continue
+    const list = byDate.get(m.date) ?? []
+    list.push(m)
+    byDate.set(m.date, list)
+  }
+
+  let next = store
+  let draftsCreated = 0
+  let duplicates = 0
+  const draftDocumentIds: string[] = []
+  const warnings = [...(args.warnings ?? [])]
+
+  for (const [date, rows] of [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const key = warehouseIdempotencyKey({
+      source: 'excel_import',
+      sourceId: `${args.warehouseId}:${date}`,
+      role: 'receipt',
+      warehouseId: args.warehouseId,
+    })
+    const existing = next.documents.find(
+      (d) => d.idempotencyKey === key && d.status !== 'cancelled',
+    )
+    if (existing) {
+      duplicates += 1
+      draftDocumentIds.push(existing.id)
+      continue
+    }
+
+    const lines: WarehouseDocumentLine[] = rows.map((r) => ({
+      lineId: crypto.randomUUID(),
+      itemId: r.itemId,
+      quantity: r.quantity,
+      comment: r.comment,
+    }))
+    const out = saveWarehouseDocumentDraft(next, {
+      type: 'receipt',
+      number: nextDocumentNumber(next.documents, 'receipt', date),
+      date,
+      warehouseId: args.warehouseId,
+      purpose: 'purchase',
+      comment: `Импорт Excel · черновик (проведите вручную)`,
+      lines,
+      idempotencyKey: key,
+    })
+    if (!out.result.ok) {
+      warnings.push(out.result.error)
+      continue
+    }
+    next = out.store
+    draftsCreated += 1
+    draftDocumentIds.push(out.result.documentId)
+  }
+
+  return {
+    store: next,
     result: {
       movementsAdded: 0,
-      itemsMatched: 0,
-      sheetsProcessed,
+      draftsCreated,
+      itemsMatched: new Set(args.pending.map((p) => p.itemId)).size,
+      sheetsProcessed: args.sheetsProcessed ?? 0,
+      rejected: (args.warnings ?? []).length,
+      duplicates,
       warnings: warnings.slice(0, 30),
+      draftDocumentIds,
     },
   }
 }

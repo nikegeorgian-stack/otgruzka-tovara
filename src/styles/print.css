@@ -1294,10 +1294,33 @@
 .warehouse-receipt-brand {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   border-bottom: 2px solid #0f766e;
   padding-bottom: 10px;
   margin-bottom: 14px;
+}
+
+.warehouse-receipt-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.warehouse-receipt-brand-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.warehouse-receipt-storno-banner {
+  font-size: 18pt;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #b91c1c;
+  border: 2px solid #b91c1c;
+  padding: 4px 10px;
+  transform: rotate(-6deg);
 }
 
 .warehouse-receipt-brand-mark {

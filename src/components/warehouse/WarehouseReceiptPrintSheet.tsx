@@ -13,10 +13,22 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
     <article className="warehouse-receipt-page print-sheet-page">
       <div className="warehouse-receipt-content print-sheet-content">
         <header className="warehouse-receipt-brand">
-          <div>
-            <div className="warehouse-receipt-brand-mark">FiberCell</div>
-            <div className="warehouse-receipt-brand-sub">{model.orgLine}</div>
+          <div className="warehouse-receipt-brand-row">
+            <img
+              src={model.brandMarkUrl}
+              alt="Fibercell"
+              className="warehouse-receipt-brand-logo"
+            />
+            <div>
+              <div className="warehouse-receipt-brand-mark">Fibercell</div>
+              <div className="warehouse-receipt-brand-sub">{model.orgLine}</div>
+            </div>
           </div>
+          {model.isStorno ? (
+            <div className="warehouse-receipt-storno-banner" aria-label="СТОРНО">
+              {model.stornoLabel ?? 'СТОРНО'}
+            </div>
+          ) : null}
         </header>
 
         <h1 className="warehouse-receipt-title">{t('warehouse.print.receiptTitle')}</h1>
