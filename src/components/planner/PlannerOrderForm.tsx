@@ -54,6 +54,7 @@ type Props = {
   boxRecipes: BoxRecipe[]
   warehouseItems: WarehouseItem[]
   warehouseMovements: StockMovement[]
+  warehouseAccounting?: import('@/lib/warehouse/types').WarehouseAccountingState[]
   categoryNames: Map<string, string>
   formPackagingPreview: PackagingPlan | null | undefined
   formForStock: ProductionOrder
@@ -76,6 +77,7 @@ export function PlannerOrderForm({
   boxRecipes,
   warehouseItems,
   warehouseMovements,
+  warehouseAccounting,
   categoryNames,
   formPackagingPreview,
   formForStock,
@@ -676,6 +678,7 @@ export function PlannerOrderForm({
                     order={formForStock}
                     warehouseItems={warehouseItems}
                     warehouseMovements={warehouseMovements}
+                    warehouseAccounting={warehouseAccounting}
                   />
                 </div>
               </div>

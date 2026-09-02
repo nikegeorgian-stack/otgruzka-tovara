@@ -4093,6 +4093,9 @@ export const en: Dict = {
   'planner.material.reserveInTab': 'Go to Materials tab to reserve available quantity.',
   'planner.material.checkTab': 'Check reserve on Materials tab',
   'planner.material.shortageBanner': 'Material shortage (≈ {count})',
+  'planner.material.stockUnverified': 'Warehouse stock not verified',
+  'planner.material.stockUnverifiedHint':
+    'Cannot compute shortage or reserve materials until opening inventory is posted.',
   'planner.material.blockTitle': 'Warehouse & reserve',
   'planner.month': 'Month',
   'planner.newOrder': 'New order',
@@ -5116,6 +5119,43 @@ export const en: Dict = {
   'warehouse.doc.deleteDraft': 'Delete',
   'warehouse.doc.draftRemoved': 'Draft deleted.',
   'warehouse.doc.errAlreadyPosted': 'Document already posted — unpost first.',
+  'warehouse.doc.errInsufficientStock':
+    'Insufficient material. Document was not posted; stock was not changed.',
+  'warehouse.doc.errIdempotencyConflict':
+    'A document with this idempotency key already exists with different content.',
+  'warehouse_not_initialized':
+    'Warehouse stock is not verified. Post opening inventory first.',
+  'warehouse.accounting.notInitialized':
+    'Warehouse stock is not verified. Post opening inventory first.',
+  'warehouse.accounting.alreadyActive': 'Accounting for this warehouse is already active.',
+  'warehouse.accounting.errCancelOpeningDependent':
+    'Cannot cancel opening inventory: later movements exist for this warehouse.',
+  'warehouse.accounting.bannerTitle': 'Warehouse stock not verified',
+  'warehouse.accounting.bannerBody':
+    'Computed balances are not treated as factual. Auto-issues and procurement deficits are blocked until opening inventory.',
+  'warehouse.accounting.statusLabel': 'Accounting status',
+  'warehouse.accounting.statusUninitialized': 'Not verified',
+  'warehouse.accounting.statusReconciling': 'Opening inventory in progress',
+  'warehouse.accounting.statusActive': 'Accounting active',
+  'warehouse.accounting.tabOpening': 'Opening inventory',
+  'warehouse.accounting.openOpeningInventory': 'Opening inventory',
+  'warehouse.accounting.pickWarehouse': 'Select a specific warehouse (not “all”).',
+  'warehouse.accounting.openingEmpty': 'Enter counted qty for at least one item.',
+  'warehouse.accounting.draftSaved': 'Opening inventory draft saved. Stock unchanged.',
+  'warehouse.accounting.activated': 'Accounting activated',
+  'warehouse.accounting.activatedAt': 'Activated',
+  'warehouse.accounting.countDate': 'Count date',
+  'warehouse.accounting.bookQty': 'Book (untrusted)',
+  'warehouse.accounting.countedQty': 'Counted',
+  'warehouse.accounting.delta': 'Δ',
+  'warehouse.accounting.bookUntrusted': 'not fact',
+  'warehouse.accounting.saveDraft': 'Save draft',
+  'warehouse.accounting.postAndActivate': 'Post and activate',
+  'warehouse.accounting.confirmTitle': 'Post opening inventory?',
+  'warehouse.accounting.confirmBody':
+    'Only delta movements will be created. History is kept. On success this warehouse becomes active.',
+  'warehouse.accounting.confirmMeta': 'Lines: {lines} · keeper: {keeper}',
+  'warehouse.accounting.confirmPost': 'Post',
   'warehouse.doc.errAlreadyCancelled': 'Document cancelled.',
   'warehouse.doc.errNotPosted': 'Document not posted.',
   'warehouse.doc.errCannotUnpost': 'This document cannot be unposted — use reverse.',

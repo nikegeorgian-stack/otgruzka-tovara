@@ -14,6 +14,12 @@ export type StoreMutationOrigin =
 
 export type StoreUpdateMeta = {
   origin: StoreMutationOrigin
+  /** PHASE W0.6 — explicit atomic transaction group (warehouse business ops). */
+  transactionGroupId?: string
+  transactionGroupKind?: string
+  transactionGroupLabel?: string
+  /** When true with transactionGroupId, all dirty ops from this setStore are one atomic group. */
+  atomic?: boolean
 }
 
 const NON_USER = new Set<StoreMutationOrigin>([

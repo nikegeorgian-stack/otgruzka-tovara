@@ -48,6 +48,10 @@ import {
 import { findOpenDailyIssue, sessionLineCount } from '@/lib/warehouse/dailyIssue'
 import { compressItemPhoto } from '@/lib/warehouse/itemPhoto'
 import { useI18n } from '@/context/I18nContext'
+import {
+  getWarehouseAccountingState,
+  isWarehouseAccountingActive,
+} from '@/lib/warehouse/accountingStatus'
 import { useConfirm } from '@/context/ConfirmContext'
 import { accessPersona } from '@/lib/access/accessPersona'
 import { requestModalClose } from '@/lib/ui/requestModalClose'
@@ -91,6 +95,8 @@ export function WarehousePage(props: WarehousePageProps) {
     onPostDocument,
     onRunInventory,
     onPostOpeningBalances,
+    onSaveOpeningInventoryDraft,
+    onPostOpeningInventory,
     onImportExcel,
     onExportExcel,
     onMergeInvoiceRegistry,
@@ -192,6 +198,8 @@ export function WarehousePage(props: WarehousePageProps) {
   const resolvedKeeperId = keeperId ?? 'local'
   const resolvedKeeperName = keeperName ?? printMeta?.responsible ?? 'Кладовщик'
   const whId = warehouseId || warehouse.locations[0]?.id || ''
+  const accountingState = getWarehouseAccountingState(warehouse, whId)
+  const accountingActive = isWarehouseAccountingActive(warehouse, whId)
 
   const openDailySession = useMemo(
     () =>
@@ -553,6 +561,37 @@ export function WarehousePage(props: WarehousePageProps) {
         />
       )}
 
+      {!embedded && whId && !accountingActive && (
+        <div className="rounded-sm border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p className="font-semibold">{t('warehouse.accounting.bannerTitle')}</p>
+          <p className="mt-1 text-xs">
+            {t('warehouse.accounting.bannerBody')}{' '}
+            <span className="font-medium">
+              ({t('warehouse.accounting.statusLabel')}:{' '}
+              {accountingState.status === 'reconciling'
+                ? t('warehouse.accounting.statusReconciling')
+                : t('warehouse.accounting.statusUninitialized')}
+              )
+            </span>
+          </p>
+          {onPostOpeningInventory && (
+            <button
+              type="button"
+              className="btn-add mt-2"
+              onClick={() => setTab('inventory')}
+            >
+              {t('warehouse.accounting.openOpeningInventory')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!embedded && whId && accountingActive && (
+        <div className="rounded-sm border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-xs text-emerald-900">
+          {t('warehouse.accounting.statusActive')}
+        </div>
+      )}
+
       {!embedded && onOpenDailyIssueSession && (
         <button
           type="button"
@@ -831,6 +870,8 @@ export function WarehousePage(props: WarehousePageProps) {
           asOfIso={asOfIsoMemo}
           onRunInventory={onRunInventory}
           onPostOpeningBalances={onPostOpeningBalances}
+          onSaveOpeningInventoryDraft={onSaveOpeningInventoryDraft}
+          onPostOpeningInventory={onPostOpeningInventory}
           onSaveDocumentDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
           onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}

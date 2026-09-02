@@ -340,6 +340,18 @@ export default function App() {
     onRunInventory: app.runWarehouseInventory,
     onPostInventoryRevision: app.postWarehouseInventoryRevision,
     onPostOpeningBalances: app.postWarehouseOpeningBalances,
+    onSaveOpeningInventoryDraft: (
+      input: Parameters<typeof app.saveOpeningInventoryDraft>[0],
+    ) =>
+      app.saveOpeningInventoryDraft(input, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      }),
+    onPostOpeningInventory: (input: Parameters<typeof app.postOpeningInventory>[0]) =>
+      app.postOpeningInventory(input, {
+        actorId: app.currentUser?.id,
+        actorName: app.currentUser?.displayName,
+      }),
     onAcquireDocumentLock: (documentId: string) =>
       app.acquireWarehouseDocumentLock(documentId, {
         actorId: app.currentUser?.id ?? '',
@@ -1085,6 +1097,7 @@ export default function App() {
               warehouseItems={app.store.warehouse.items}
               warehouseCategories={app.store.warehouse.categories}
               warehouseMovements={app.store.warehouse.movements}
+              warehouseAccounting={app.store.warehouse.accountingByWarehouse}
               activeMonth={app.activeMonth}
               onMonthChange={app.setActiveMonth}
               onSaveOrder={app.upsertProductionOrder}

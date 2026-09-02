@@ -7,6 +7,7 @@ import {
   type PostBatchMixOptions,
   type PostBatchMixResult,
 } from '@/lib/formulations/batch'
+import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
 export function createFormulationBatchSlice({ setStore }: StoreSliceDeps) {
@@ -34,17 +35,31 @@ export function createFormulationBatchSlice({ setStore }: StoreSliceDeps) {
       options?: PostBatchMixOptions,
     ): PostBatchMixResult {
       let result: PostBatchMixResult = { ok: false, error: 'unknown' }
-      patchStore(setStore, (s) => {
-        const r = confirmBatchMix(
-          s.formulations,
-          s.warehouse,
-          { runId, keeperId: keeper?.id, keeperName: keeper?.name },
-          options,
-        )
-        result = r.result
-        if (!r.result.ok) return s
-        return { ...s, formulations: r.formulations, warehouse: r.warehouse }
-      })
+      patchStore(
+        setStore,
+        (s) => {
+          const r = confirmBatchMix(
+            s.formulations,
+            s.warehouse,
+            { runId, keeperId: keeper?.id, keeperName: keeper?.name },
+            options,
+          )
+          result = r.result
+          if (!r.result.ok) return s
+          return { ...s, formulations: r.formulations, warehouse: r.warehouse }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: warehouseTransactionGroupId({
+            kind: 'batch_mix',
+            sourceId: runId,
+            revision: 'confirm',
+          }),
+          transactionGroupKind: 'batch_mix',
+          transactionGroupLabel: 'Подтверждение замеса',
+        },
+      )
       return result
     },
 

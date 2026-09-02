@@ -4392,6 +4392,9 @@ export const ka: Dict = {
   'planner.material.reserveInTab': 'გადადით «მასალები» რეზერვისთვის',
   'planner.material.checkTab': 'შეამოწმეთ «მასალები»',
   'planner.material.shortageBanner': 'მასალა აკლია (≈ {count})',
+  'planner.material.stockUnverified': 'საწყობის ნაშთები დაუდასტურებელია',
+  'planner.material.stockUnverifiedHint':
+    'დეფიციტის გამოთვლა და რეზერვი შეუძლებელია, სანამ საწყობის საწყისი ინვენტარიზაცია არ ჩატარდება.',
   'planner.material.activateWarn': 'მასალა აკლია. მაინც გავუშვათ?',
   'planner.material.blockTitle': 'საწყობი და რეზერვი',
   'planner.month': 'თვე',
@@ -5492,6 +5495,43 @@ export const ka: Dict = {
   'warehouse.doc.deleteDraft': 'წაშლა',
   'warehouse.doc.draftRemoved': 'მონახაზი წაიშალა.',
   'warehouse.doc.errAlreadyPosted': 'დოკუმენტი უკვე ჩატარებულია — ჯერ მოხსენით ჩატარება.',
+  'warehouse.doc.errInsufficientStock':
+    'მასალა არასაკმარისია. დოკუმენტი არ ჩატარებულა, ნაშთები არ შეცვლილა.',
+  'warehouse.doc.errIdempotencyConflict':
+    'ამ იდემპოტენტობის გასაღებით დოკუმენტი უკვე არსებობს სხვა შიგთავსით.',
+  'warehouse_not_initialized':
+    'საწყობის ნაშთები დაუდასტურებელია. ჯერ ჩაატარეთ საწყისი ინვენტარიზაცია.',
+  'warehouse.accounting.notInitialized':
+    'საწყობის ნაშთები დაუდასტურებელია. ჯერ ჩაატარეთ საწყისი ინვენტარიზაცია.',
+  'warehouse.accounting.alreadyActive': 'ამ საწყობის აღრიცხვა უკვე აქტიურია.',
+  'warehouse.accounting.errCancelOpeningDependent':
+    'საწყისი ინვენტარიზაციის გაუქმება შეუძლებელია: შემდეგ უკვე არის მოძრაობები.',
+  'warehouse.accounting.bannerTitle': 'საწყობის ნაშთები დაუდასტურებელია',
+  'warehouse.accounting.bannerBody':
+    'გამოთვლილი ნაშთი ფაქტად არ ითვლება. ავტომატური ჩამოწერა და შესყიდვის დეფიციტი დაბლოკილია საწყის ინვენტარიზაციამდე.',
+  'warehouse.accounting.statusLabel': 'აღრიცხვის სტატუსი',
+  'warehouse.accounting.statusUninitialized': 'დაუდასტურებელი',
+  'warehouse.accounting.statusReconciling': 'მიმდინარეობს საწყისი ინვენტარიზაცია',
+  'warehouse.accounting.statusActive': 'აღრიცხვა აქტიურია',
+  'warehouse.accounting.tabOpening': 'საწყისი ინვენტარიზაცია',
+  'warehouse.accounting.openOpeningInventory': 'საწყისი ინვენტარიზაცია',
+  'warehouse.accounting.pickWarehouse': 'აირჩიეთ კონკრეტული საწყობი (არა «ყველა»).',
+  'warehouse.accounting.openingEmpty': 'მიუთითეთ ფაქტობრივი რაოდენობა მინიმუმ ერთ პოზიციაზე.',
+  'warehouse.accounting.draftSaved': 'საწყისი ინვენტარიზაციის მონახაზი შენახულია. ნაშთები არ შეცვლილა.',
+  'warehouse.accounting.activated': 'აღრიცხვა გააქტიურდა',
+  'warehouse.accounting.activatedAt': 'გააქტიურდა',
+  'warehouse.accounting.countDate': 'გადათვლის თარიღი',
+  'warehouse.accounting.bookQty': 'აღრიცხვა (დაუდასტურებელი)',
+  'warehouse.accounting.countedQty': 'ფაქტი',
+  'warehouse.accounting.delta': 'Δ',
+  'warehouse.accounting.bookUntrusted': 'არა ფაქტი',
+  'warehouse.accounting.saveDraft': 'მონახაზის შენახვა',
+  'warehouse.accounting.postAndActivate': 'ჩატარება და გააქტიურება',
+  'warehouse.accounting.confirmTitle': 'ჩავატაროთ საწყისი ინვენტარიზაცია?',
+  'warehouse.accounting.confirmBody':
+    'შეიქმნება მხოლოდ Δ მოძრაობები. ისტორია შენარჩუნდება. წარმატებისას ეს საწყობი გააქტიურდება.',
+  'warehouse.accounting.confirmMeta': 'სტრიქონი: {lines} · პასუხისმგებელი: {keeper}',
+  'warehouse.accounting.confirmPost': 'ჩატარება',
   'warehouse.doc.errAlreadyCancelled': 'დოკუმენტი გაუქმებულია.',
   'warehouse.doc.errNotPosted': 'დოკუმენტი არ არის ჩატარებული.',
   'warehouse.doc.errCannotUnpost': 'ამ დოკუმენტს ჩატარების მოხსნა არ შეიძლება — გამოიყენეთ სტორნო.',

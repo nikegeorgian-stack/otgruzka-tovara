@@ -37,6 +37,8 @@ export type WarehouseDocumentPurpose =
   | 'transfer'
   | 'other'
   | 'loading'
+  /** PHASE W0.5 — начальная инвентаризация для активации учёта */
+  | 'opening_inventory'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -145,6 +147,8 @@ export type WarehouseDocumentLine = {
   batchNo?: string
   /** Срок годности (YYYY-MM-DD, для прихода) */
   expiryDate?: string
+  /** Комментарий к строке (opening inventory / ревизия) */
+  comment?: string
 }
 
 export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory'
@@ -180,6 +184,10 @@ export type WarehouseDocument = {
   keeperName?: string
   /** Связь с заявкой производства */
   productionRequestId?: string
+  /** Связь с заказом планировщика (резерв материалов) */
+  productionOrderId?: string
+  /** Связь с заданием миксеру (резерв) */
+  mixTaskId?: string
   /** Склад-получатель при перемещении */
   targetWarehouseId?: string
   /** Связанная пара приход/расход при перемещении */
@@ -194,6 +202,13 @@ export type WarehouseDocument = {
   batchRunId?: string
   /** Связь с заявкой кладовщика на пополнение (ЗКл) */
   keeperRequestId?: string
+  /**
+   * Детерминированный ключ идемпотентности (auto-docs).
+   * Старые записи без поля читаются как раньше.
+   */
+  idempotencyKey?: string
+  /** PHASE W0.5 — документ начальной инвентаризации (активация учёта) */
+  isOpeningInventory?: boolean
   docRole?:
     | 'batch_issue'
     | 'batch_receipt'
@@ -476,6 +491,27 @@ export type WarehouseStore = {
   loadingShipments?: LoadingShipment[]
   /** Закрытые учётные периоды склада (YYYY-MM) — проводки запрещены */
   closedMonths?: string[]
+  /**
+   * PHASE W0.5 — статус достоверности учёта по каждому складу.
+   * Отсутствие записи = uninitialized (legacy).
+   */
+  accountingByWarehouse?: WarehouseAccountingState[]
+}
+
+/** PHASE W0.5 — состояние подтверждения остатков по складу */
+export type WarehouseAccountingStatus = 'uninitialized' | 'reconciling' | 'active'
+
+export type WarehouseAccountingState = {
+  /** Stable row id for cloud merge (= warehouseId) */
+  id: string
+  warehouseId: string
+  status: WarehouseAccountingStatus
+  openingInventoryDocumentId?: string
+  activatedAt?: string
+  activatedBy?: string
+  activatedByName?: string
+  note?: string
+  revision?: number
 }
 
 export type ItemBalance = {

@@ -78,7 +78,7 @@ export function syncWorkwearCatalogToWarehouse(
         createdAt: now,
       }
 
-  let next = upsertWarehouseItemInStore(warehouse, item)
+  const next = upsertWarehouseItemInStore(warehouse, item)
   const saved = next.items.find((i) => i.id === item.id)!
 
   return {
@@ -132,11 +132,20 @@ export function postWorkwearWarehouseIssue(
     purpose: 'production_issue',
     comment: args.comment ?? `Выдача СО: ${args.employeeName}`,
     lines: [{ itemId: args.warehouseItemId, quantity: args.quantity }],
-    skipValidation: true,
+    skipFieldValidation: true,
+    idempotencyKey: [
+      'workwear',
+      args.documentNumber,
+      'issue',
+      args.warehouseId,
+      args.warehouseItemId,
+    ].join('::'),
   })
 
-  const doc = posted.store.documents[posted.store.documents.length - 1]!
-  return { warehouse: posted.store, result: { ok: true, documentId: doc.id } }
+  if (!posted.result.ok) {
+    return { warehouse, result: { ok: false, error: 'insufficient_stock' } }
+  }
+  return { warehouse: posted.store, result: { ok: true, documentId: posted.result.documentId } }
 }
 
 export function warehouseStockForCatalogItem(

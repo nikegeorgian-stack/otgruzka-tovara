@@ -18,12 +18,13 @@ import {
 } from '@/lib/planner/materialStock'
 import type { ProductionOrder } from '@/lib/planner/types'
 import { formatQty } from '@/lib/warehouse/stock'
-import type { StockMovement, WarehouseItem } from '@/lib/warehouse/types'
+import type { StockMovement, WarehouseAccountingState, WarehouseItem } from '@/lib/warehouse/types'
 
 type Props = {
   orders: ProductionOrder[]
   warehouseItems: WarehouseItem[]
   warehouseMovements: StockMovement[]
+  warehouseAccounting?: WarehouseAccountingState[]
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
   onSelectOrder?: (orderId: string) => void
@@ -81,6 +82,7 @@ export function PlannerMaterialsPanel({
   orders,
   warehouseItems,
   warehouseMovements,
+  warehouseAccounting,
   onReserveOrder,
   onUnreserveOrder,
   onSelectOrder,
@@ -93,8 +95,12 @@ export function PlannerMaterialsPanel({
   const [notice, setNotice] = useState<string | null>(null)
 
   const warehouse = useMemo(
-    () => ({ items: warehouseItems, movements: warehouseMovements }),
-    [warehouseItems, warehouseMovements],
+    () => ({
+      items: warehouseItems,
+      movements: warehouseMovements,
+      accountingByWarehouse: warehouseAccounting,
+    }),
+    [warehouseItems, warehouseMovements, warehouseAccounting],
   )
 
   const relevantOrders = useMemo(
@@ -195,7 +201,7 @@ export function PlannerMaterialsPanel({
                     {formatQty(row.totalReserved)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono text-xs">
-                    {formatQty(row.available)}
+                    {row.available == null ? '—' : formatQty(row.available)}
                   </td>
                   <td
                     className={`px-3 py-2 text-right font-mono text-xs font-semibold ${
@@ -324,7 +330,7 @@ export function PlannerMaterialsPanel({
                         {formatQty(line.reservedForOrder)}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-xs">
-                        {formatQty(line.available)}
+                        {line.available == null ? '—' : formatQty(line.available)}
                       </td>
                       <td
                         className={`px-3 py-1.5 text-right font-mono text-xs ${

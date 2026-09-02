@@ -251,6 +251,12 @@ export function postLoadingShipment(
       keeperName: posted.keeperName,
       loadingShipmentId: posted.id,
       docRole: 'loading_issue',
+      idempotencyKey: [
+        'loading',
+        posted.id,
+        'loading_issue',
+        posted.warehouseId,
+      ].join('::'),
     })
     if (!out.result.ok) {
       return {
@@ -258,6 +264,9 @@ export function postLoadingShipment(
         result: {
           ok: false,
           error: out.result.error ?? 'warehouse.loading.errGeneric',
+          detail: out.result.shortages
+            ? out.result.shortages.map((s) => s.name).join(', ')
+            : undefined,
         },
       }
     }

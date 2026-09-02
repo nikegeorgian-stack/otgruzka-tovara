@@ -17,6 +17,13 @@ import {
   isStructuralMonthOp,
   isTimesheetCellOp,
 } from './timesheetCellOps'
+import {
+  atomicGroupBlockedConflicts,
+  buildSparseLocalForOps,
+  isAtomicGroupOp,
+  overlayAtomicGroupOntoStore,
+  partitionDirtyOperations,
+} from './transactionGroups'
 
 export type CloudSaveBuildInput = {
   remote: AppStore
@@ -62,6 +69,28 @@ function isMonthsGranularOp(op: DirtyOperation): boolean {
   return isTimesheetCellOp(op) || isStructuralMonthOp(op) || isLegacyWholeMonthsOp(op)
 }
 
+function opTouchesConflict(op: DirtyOperation, c: EntityConflict): boolean {
+  return (
+    c.domain === op.domain &&
+    (op.entityId === '*' || c.entityId === op.entityId || c.entityId === '*')
+  )
+}
+
+function appliedIdsForOps(
+  ops: DirtyOperation[],
+  conflicts: EntityConflict[],
+  completedDeletes: Set<string>,
+  monthApplied: Set<string>,
+): string[] {
+  return ops
+    .filter((op) => {
+      if (isMonthsGranularOp(op)) return monthApplied.has(op.operationId)
+      if (op.type === 'delete' && op.explicit) return completedDeletes.has(op.operationId)
+      return !conflicts.some((c) => opTouchesConflict(op, c))
+    })
+    .map((op) => op.operationId)
+}
+
 /** Core merge used by save build and legacy apply adapter (no lifecycle gate). */
 export function mergeStoreForCloudSave(input: {
   remote: AppStore
@@ -77,22 +106,68 @@ export function mergeStoreForCloudSave(input: {
   completedDeleteOperationIds: string[]
 } {
   const userOps = input.operations.filter((op) => op.origin === 'user')
-  const explicitDeletes = userOps.filter(
-    (op) => op.type === 'delete' && op.explicit && !isMonthsGranularOp(op),
-  )
+  const monthOps = userOps.filter(isMonthsGranularOp)
+  const nonMonth = userOps.filter((op) => !isMonthsGranularOp(op))
+  const { ungrouped, groups } = partitionDirtyOperations(nonMonth)
+
+  const ungroupedDeletes = ungrouped.filter((op) => op.type === 'delete' && op.explicit)
+  // When atomic groups are present, sparse-local ungrouped ops so group entities cannot leak.
+  // Legacy / ungrouped-only saves keep full local (settings and other non-id domains).
+  const ungroupedLocal =
+    groups.size > 0
+      ? buildSparseLocalForOps(input.remote, input.local, ungrouped)
+      : input.local
   const {
-    store: mergedBase,
-    conflicts: domainConflicts,
+    store: ungroupedMerged,
+    conflicts: ungroupedConflicts,
     changedDomains,
     completedDeleteOperationIds,
   } = conservativeMergeForSave(
     input.baseline,
     input.remote,
-    input.local,
-    explicitDeletes,
+    ungroupedLocal,
+    ungroupedDeletes,
   )
 
-  const monthOps = userOps.filter(isMonthsGranularOp)
+  let acc: AppStore = ungroupedMerged
+  const conflicts: EntityConflict[] = [...ungroupedConflicts]
+  const completedDeletes = new Set(completedDeleteOperationIds)
+  const appliedOperationIds: string[] = appliedIdsForOps(
+    ungrouped,
+    ungroupedConflicts,
+    completedDeletes,
+    new Set(),
+  )
+
+  for (const groupOps of groups.values()) {
+    const groupDeletes = groupOps.filter((op) => op.type === 'delete' && op.explicit)
+    const groupLocal = buildSparseLocalForOps(input.remote, input.local, groupOps)
+    const groupMerge = conservativeMergeForSave(
+      input.baseline,
+      input.remote,
+      groupLocal,
+      groupDeletes,
+    )
+    const groupCompleted = new Set(groupMerge.completedDeleteOperationIds)
+    const groupApplied = new Set(
+      appliedIdsForOps(groupOps, groupMerge.conflicts, groupCompleted, new Set()),
+    )
+    const relatedConflicts = groupMerge.conflicts.filter((c) =>
+      groupOps.some((op) => opTouchesConflict(op, c)),
+    )
+    const allOk =
+      relatedConflicts.length === 0 && groupOps.every((op) => groupApplied.has(op.operationId))
+
+    if (allOk) {
+      overlayAtomicGroupOntoStore(acc, groupMerge.store, groupOps)
+      for (const id of groupOps.map((o) => o.operationId)) appliedOperationIds.push(id)
+      for (const id of groupMerge.completedDeleteOperationIds) completedDeletes.add(id)
+      changedDomains.push(...groupMerge.changedDomains)
+    } else {
+      conflicts.push(...atomicGroupBlockedConflicts(groupOps, relatedConflicts))
+    }
+  }
+
   const monthResult = applyMonthsGranularOperations(
     input.remote.months,
     input.baseline.months,
@@ -100,8 +175,8 @@ export function mergeStoreForCloudSave(input: {
     monthOps,
   )
 
-  const merged: AppStore = {
-    ...mergedBase,
+  acc = {
+    ...acc,
     months: monthResult.months,
   }
   if (
@@ -110,31 +185,25 @@ export function mergeStoreForCloudSave(input: {
     changedDomains.push('months')
   }
 
-  const conflicts: EntityConflict[] = [...domainConflicts, ...monthResult.conflicts]
-  const monthApplied = new Set(monthResult.appliedOperationIds)
-  const completedDeletes = new Set(completedDeleteOperationIds)
+  conflicts.push(...monthResult.conflicts)
+  appliedOperationIds.push(...monthResult.appliedOperationIds)
 
-  const privilegeSafe = clampClientPrivilegeFields(merged, input.remote, input.actorEmail ?? null)
+  // Legacy path: if there are no atomic groups and we used sparse ungrouped,
+  // behavior matches entity-level apply. When all ops are ungrouped without sparse
+  // gaps, also accept ops that were stamped without atomic flag (pre-W0.6).
+  if (groups.size === 0 && ungrouped.length === 0 && nonMonth.some((o) => !isAtomicGroupOp(o))) {
+    // no-op — handled above
+  }
+
+  const privilegeSafe = clampClientPrivilegeFields(acc, input.remote, input.actorEmail ?? null)
   assertNoMassStoreWipe(input.remote, privilegeSafe)
-
-  const appliedOperationIds = userOps
-    .filter((op) => {
-      if (isMonthsGranularOp(op)) return monthApplied.has(op.operationId)
-      if (op.type === 'delete' && op.explicit) return completedDeletes.has(op.operationId)
-      return !conflicts.some(
-        (c) =>
-          c.domain === op.domain &&
-          (op.entityId === '*' || c.entityId === op.entityId || c.entityId === '*'),
-      )
-    })
-    .map((op) => op.operationId)
 
   return {
     store: privilegeSafe,
     conflicts,
     changedDomains,
     appliedOperationIds,
-    completedDeleteOperationIds,
+    completedDeleteOperationIds: [...completedDeletes],
   }
 }
 

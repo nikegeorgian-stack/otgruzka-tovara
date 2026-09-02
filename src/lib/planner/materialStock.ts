@@ -1,4 +1,7 @@
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
+import {
+  isWarehouseAccountingActive,
+} from '@/lib/warehouse/accountingStatus'
 import type { StockMovement, WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
 import {
   materialLinesForOrder,
@@ -7,20 +10,44 @@ import {
 } from './materialNeeds'
 import type { ProductionOrder } from './types'
 
-export type WarehouseStockView = Pick<WarehouseStore, 'items' | 'movements'>
+export type WarehouseStockView = Pick<
+  WarehouseStore,
+  'items' | 'movements' | 'accountingByWarehouse'
+>
+
+export type MaterialStockTrust = 'verified' | 'unverified'
 
 function balancesFor(warehouse: WarehouseStockView, warehouseId?: string) {
   return computeAllBalances(warehouse as WarehouseStore, warehouseId)
+}
+
+/** When warehouseId omitted: unverified if ANY location lacks active accounting, or if no accounting data. */
+export function materialStockTrust(
+  warehouse: WarehouseStockView,
+  warehouseId?: string,
+): MaterialStockTrust {
+  if (warehouseId) {
+    return isWarehouseAccountingActive(warehouse, warehouseId) ? 'verified' : 'unverified'
+  }
+  const states = warehouse.accountingByWarehouse ?? []
+  if (states.length === 0) return 'unverified'
+  // Without a specific warehouse, require every known accounting row to be active
+  // and treat missing ledger as unverified (legacy).
+  if (!states.every((s) => s.status === 'active')) return 'unverified'
+  return 'verified'
 }
 
 export type MaterialAvailabilityRow = OrderMaterialLine & {
   orderId: string
   orderNumber: string
   productName: string
-  available: number
+  /** null when warehouse stock is not verified — do not treat as zero */
+  available: number | null
   reservedForOrder: number
+  /** 0 when unverified — never invent a shortage from unknown stock */
   shortage: number
   canReserve: number
+  stockTrust: MaterialStockTrust
 }
 
 export type ItemDemandSummary = {
@@ -30,8 +57,9 @@ export type ItemDemandSummary = {
   role: MaterialRole
   totalNeed: number
   totalReserved: number
-  available: number
+  available: number | null
   shortage: number
+  stockTrust: MaterialStockTrust
 }
 
 export function reservedQtyForOrder(
@@ -59,9 +87,25 @@ export function availabilityForOrderLine(
   orderNumber: string
   productName: string
 } {
+  const trust = materialStockTrust(warehouse, warehouseId)
+  const reservedForOrder = reservedQtyForOrder(warehouse.movements, order.id, line.itemId)
+
+  if (trust === 'unverified') {
+    return {
+      ...line,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      productName: order.productName,
+      available: null,
+      reservedForOrder,
+      shortage: 0,
+      canReserve: 0,
+      stockTrust: 'unverified',
+    }
+  }
+
   const balances = balancesFor(warehouse, warehouseId)
   const available = balances.get(line.itemId)?.available ?? 0
-  const reservedForOrder = reservedQtyForOrder(warehouse.movements, order.id, line.itemId)
   const stillNeed = Math.max(0, line.quantity - reservedForOrder)
   const shortage = Math.max(0, stillNeed - available)
   const canReserve = Math.min(stillNeed, available)
@@ -75,6 +119,7 @@ export function availabilityForOrderLine(
     reservedForOrder,
     shortage,
     canReserve,
+    stockTrust: 'verified',
   }
 }
 
@@ -94,7 +139,9 @@ export function orderHasMaterialShortage(
   warehouse: WarehouseStockView,
   items: WarehouseItem[],
 ): boolean {
-  return materialAvailabilityForOrder(order, warehouse, items).some((r) => r.shortage > 0)
+  return materialAvailabilityForOrder(order, warehouse, items).some(
+    (r) => r.stockTrust === 'verified' && r.shortage > 0,
+  )
 }
 
 export function aggregateItemDemand(
@@ -103,7 +150,8 @@ export function aggregateItemDemand(
   items: WarehouseItem[],
   warehouseId?: string,
 ): ItemDemandSummary[] {
-  const balances = balancesFor(warehouse, warehouseId)
+  const trust = materialStockTrust(warehouse, warehouseId)
+  const balances = trust === 'verified' ? balancesFor(warehouse, warehouseId) : null
   const map = new Map<
     string,
     ItemDemandSummary & { roles: Set<MaterialRole> }
@@ -122,6 +170,7 @@ export function aggregateItemDemand(
           totalReserved: row.reservedForOrder,
           available: row.available,
           shortage: 0,
+          stockTrust: row.stockTrust,
           roles: new Set([row.role]),
         })
       } else {
@@ -133,14 +182,20 @@ export function aggregateItemDemand(
   }
 
   return [...map.values()]
-    .map(({ roles, ...row }) => {
+    .map((entry) => {
+      const { roles: _roles, ...row } = entry
+      void _roles
+      if (trust === 'unverified' || !balances) {
+        return { ...row, available: null, shortage: 0, stockTrust: 'unverified' as const }
+      }
       const available = balances.get(row.itemId)?.available ?? 0
       const shortage = Math.max(0, row.totalNeed - row.totalReserved - available)
-      return { ...row, available, shortage }
+      return { ...row, available, shortage, stockTrust: 'verified' as const }
     })
     .sort((a, b) => b.shortage - a.shortage || a.itemName.localeCompare(b.itemName, 'ru'))
 }
 
 export function formatMaterialShortage(row: MaterialAvailabilityRow): string {
+  if (row.stockTrust === 'unverified') return `${row.itemName}: ?`
   return `${row.itemName}: ${formatQty(row.shortage)} ${row.unit}`
 }

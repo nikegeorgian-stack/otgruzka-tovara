@@ -90,14 +90,15 @@ export function useAppStore() {
     applyAppStoreSeeds(purgeExpiredTrash(initialLoad.current.store)),
   )
   const setStore = useCallback<SetStore>((action, meta) => {
-    const origin = meta?.origin ?? 'user'
+    const resolvedMeta = meta ?? { origin: 'user' as const }
+    const origin = resolvedMeta.origin
     setStoreInner((prev) => {
       // Bulk preview: isolate — reject ordinary user edits (no dirty ops, no store change).
       if (origin === 'user' && isBulkOverwriteBlockingAutosave()) {
         return prev
       }
       const next = typeof action === 'function' ? action(prev) : action
-      applyTrackedStoreUpdate(prev, next, origin)
+      applyTrackedStoreUpdate(prev, next, resolvedMeta)
       return next
     })
   }, [])
@@ -662,6 +663,8 @@ export function useAppStore() {
     runWarehouseInventory: warehouse.runWarehouseInventory,
     postWarehouseInventoryRevision: warehouse.postWarehouseInventoryRevision,
     postWarehouseOpeningBalances: warehouse.postWarehouseOpeningBalances,
+    saveOpeningInventoryDraft: warehouse.saveOpeningInventoryDraft,
+    postOpeningInventory: warehouse.postOpeningInventory,
     acquireWarehouseDocumentLock: warehouse.acquireWarehouseDocumentLock,
     releaseWarehouseDocumentLock: warehouse.releaseWarehouseDocumentLock,
     importWarehouseExcel: warehouse.importWarehouseExcel,

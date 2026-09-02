@@ -95,6 +95,25 @@ export type WarehousePageProps = {
     comment?: string
     lines: { itemId: string; quantity: number }[]
   }) => { applied: number; skipped: number }
+  /** PHASE W0.5 — черновик начальной инвентаризации (активация учёта) */
+  onSaveOpeningInventoryDraft?: (input: {
+    id?: string
+    number: string
+    date: string
+    warehouseId: string
+    comment?: string
+    lines: { itemId: string; countedQty: number; comment?: string }[]
+  }) => PostDocumentResult
+  /** PHASE W0.5 — провести начальную инвентаризацию и активировать склад */
+  onPostOpeningInventory?: (input: {
+    id?: string
+    documentId?: string
+    number: string
+    date: string
+    warehouseId: string
+    comment?: string
+    lines: { itemId: string; countedQty: number; comment?: string }[]
+  }) => PostDocumentResult
   onAcquireDocumentLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }

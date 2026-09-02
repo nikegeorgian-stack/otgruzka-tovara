@@ -6,6 +6,7 @@ import {
   type StoreMutationOrigin,
   type StoreUpdateMeta,
 } from '@/lib/cloud/storeMutationOrigin'
+import { stampOpsWithTransactionGroup } from '@/lib/cloud/transactionGroups'
 import { purgeExpiredTrash } from '@/lib/trash'
 import type { AppStore } from '@/lib/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
@@ -26,12 +27,31 @@ export type StoreSliceDeps = {
 export function applyTrackedStoreUpdate(
   prev: AppStore,
   next: AppStore,
-  origin: StoreMutationOrigin,
+  originOrMeta: StoreMutationOrigin | StoreUpdateMeta,
 ): void {
-  if (!shouldTrackDirtyOps(origin) || next === prev) return
-  cloudDirtyTracker.enqueue(
-    diffStoreToOperations(prev, next, cloudDirtyTracker.getBaseRevision(), origin),
+  const meta: StoreUpdateMeta =
+    typeof originOrMeta === 'string' ? { origin: originOrMeta } : originOrMeta
+  if (!shouldTrackDirtyOps(meta.origin) || next === prev) return
+  let ops = diffStoreToOperations(
+    prev,
+    next,
+    cloudDirtyTracker.getBaseRevision(),
+    meta.origin,
   )
+  if (meta.atomic === true && meta.transactionGroupId) {
+    ops = stampOpsWithTransactionGroup(
+      ops,
+      {
+        transactionGroupId: meta.transactionGroupId,
+        transactionGroupKind: meta.transactionGroupKind ?? 'warehouse',
+        transactionGroupLabel: meta.transactionGroupLabel,
+        atomic: true,
+      },
+      next,
+      prev,
+    )
+  }
+  cloudDirtyTracker.enqueue(ops)
 }
 
 export function patchStore(

@@ -26,6 +26,7 @@ import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehou
 import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
+import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
 import type { StoreSliceDeps } from '../storeApi'
 
 export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
@@ -322,6 +323,16 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
         }
         next = applyProductionPostToSales(next, updated)
         return next
+      }, {
+        origin: 'user',
+        atomic: true,
+        transactionGroupId: warehouseTransactionGroupId({
+          kind: 'production_request',
+          sourceId: id,
+          revision: 'post',
+        }),
+        transactionGroupKind: 'production_request',
+        transactionGroupLabel: 'Проведение заявки производства',
       })
       return result
     },

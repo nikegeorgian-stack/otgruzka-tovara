@@ -21,6 +21,13 @@ import {
   type SaveDraftInput,
 } from '@/lib/warehouse/documents'
 import {
+  postOpeningInventory,
+  saveOpeningInventoryDraft,
+  openingInventorySourceKey,
+  type OpeningInventoryDraftInput,
+} from '@/lib/warehouse/openingInventory'
+import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
+import {
   acquireWarehouseDocumentLock as acquireDocLockInStore,
   releaseWarehouseDocumentLock as releaseDocLockInStore,
 } from '@/lib/warehouse/documentLock'
@@ -340,11 +347,27 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     ): PostDocumentResult {
       let result: PostDocumentResult = { ok: false, error: 'unknown' }
       const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
-      patchWarehouse(setStore, (w) => {
-        const out = postWarehouseTransfer(w, enriched)
-        result = out.result
-        return out.store
+      const sessionRev = `${enriched.date ?? ''}:${enriched.number ?? ''}:${enriched.warehouseId}:${enriched.targetWarehouseId}`
+      const groupId = warehouseTransactionGroupId({
+        kind: 'warehouse_transfer',
+        sourceId: `${enriched.warehouseId}→${enriched.targetWarehouseId}:${enriched.number ?? 'xfer'}`,
+        revision: sessionRev,
       })
+      patchWarehouse(
+        setStore,
+        (w) => {
+          const out = postWarehouseTransfer(w, enriched)
+          result = out.result
+          return out.store
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'warehouse_transfer',
+          transactionGroupLabel: 'Перемещение между складами',
+        },
+      )
       return result
     },
 
@@ -353,11 +376,30 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       args?: { cancelledBy?: string; cancelledByName?: string; reason?: string },
     ): CancelDocumentResult {
       let result: CancelDocumentResult = { ok: false, error: 'unknown' }
-      patchWarehouse(setStore, (w) => {
-        const out = cancelWarehouseDocument(w, documentId, args ?? {})
-        result = out.result
-        return out.store
-      })
+      const existing = getStore().warehouse.documents.find((d) => d.id === documentId)
+      const pairId = existing?.transferPairId
+      const groupMeta = pairId
+        ? {
+            origin: 'user' as const,
+            atomic: true as const,
+            transactionGroupId: warehouseTransactionGroupId({
+              kind: 'cancel_transfer_pair',
+              sourceId: pairId,
+              revision: 'cancel',
+            }),
+            transactionGroupKind: 'cancel_transfer_pair',
+            transactionGroupLabel: 'Отмена пары перемещения',
+          }
+        : { origin: 'user' as const }
+      patchWarehouse(
+        setStore,
+        (w) => {
+          const out = cancelWarehouseDocument(w, documentId, args ?? {})
+          result = out.result
+          return out.store
+        },
+        groupMeta,
+      )
       return result
     },
 
@@ -389,6 +431,47 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         result = out.result
         return out.store
       })
+      return result
+    },
+
+    saveOpeningInventoryDraft(
+      input: OpeningInventoryDraftInput,
+      actor?: { actorId?: string; actorName?: string },
+    ): PostDocumentResult {
+      let result: PostDocumentResult = { ok: false, error: 'warehouse.doc.errGeneric' }
+      patchWarehouse(setStore, (w) => {
+        const out = saveOpeningInventoryDraft(w, input, actor)
+        result = out.result
+        return out.store
+      })
+      return result
+    },
+
+    postOpeningInventory(
+      input: OpeningInventoryDraftInput & { documentId?: string },
+      actor?: { actorId?: string; actorName?: string },
+    ): PostDocumentResult {
+      let result: PostDocumentResult = { ok: false, error: 'warehouse.doc.errGeneric' }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'opening_inventory',
+        sourceId: input.warehouseId,
+        revision: openingInventorySourceKey(input.warehouseId),
+      })
+      patchWarehouse(
+        setStore,
+        (w) => {
+          const out = postOpeningInventory(w, input, actor)
+          result = out.result
+          return out.store
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'opening_inventory',
+          transactionGroupLabel: 'Начальные остатки (инвентаризация)',
+        },
+      )
       return result
     },
 

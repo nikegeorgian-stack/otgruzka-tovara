@@ -4,13 +4,17 @@ import type { PackagingRecipeStore } from '@/lib/packaging/types'
 import { linkedOrderIdsFromRequest } from '@/lib/planner/generateRequests'
 import type { ProductionOrder } from '@/lib/planner/types'
 import { appendWarehouseAudit } from '@/lib/warehouse/audit'
-import { postWarehouseDocument } from '@/lib/warehouse/documents'
+import {
+  postWarehouseDocumentsAtomic,
+  type PostWarehouseDocumentInput,
+} from '@/lib/warehouse/documents'
 import { suggestDocNumber } from '@/lib/warehouse/nomenclatureSearch'
 import {
   ensureProductionWarehouseLocations,
   PRODUCTION_LOCATION_NAMES,
   warehouseLocationId,
 } from '@/lib/warehouse/productionLocations'
+import { warehouseIdempotencyKey } from '@/lib/warehouse/stockSafety'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import { buildProductionConsumeLines, groupConsumeByWarehouse } from './consumeLines'
 import { summarizeRequest } from './stats'
@@ -23,6 +27,7 @@ export type PostProductionResult = {
   store: WarehouseStore
   /** Созданные складские документы (списание / приход ГП). */
   documentIds?: string[]
+  shortages?: import('@/lib/warehouse/stockSafety').StockShortageRow[]
 }
 
 function resolveFinishedProduct(
@@ -50,20 +55,15 @@ function productsFind(products: FinishedProduct[], id: string) {
   return products.find((p) => p.id === id)
 }
 
-/**
- * Проводка сменной заявки на склад:
- * создаёт формальные документы прихода ГП (и перемещения упаковки),
- * а не «голые» движения — для печати, журнала и выгрузки в Balance.
- */
-function postConsumeDocuments(
+function buildConsumeSteps(
   warehouse: WarehouseStore,
   request: ProductionRequest,
   orders: ProductionOrder[],
   finishedProducts: FinishedProduct[],
   packStore: PackagingRecipeStore,
   formulationRecipes: FormulationRecipe[],
-  documentIds: string[],
-): { store: WarehouseStore; ok: boolean; messageKey?: string } {
+): PostWarehouseDocumentInput[] {
+  const orderIds = linkedOrderIdsFromRequest(request)
   const grouped = groupConsumeByWarehouse(
     buildProductionConsumeLines(
       request,
@@ -74,13 +74,13 @@ function postConsumeDocuments(
       formulationRecipes,
     ),
   )
-  let store = warehouse
   const day = request.date.replace(/-/g, '')
+  const steps: PostWarehouseDocumentInput[] = []
   for (const [warehouseId, lines] of grouped) {
-    const number = suggestDocNumber(store.documents, 'issue', request.date) || `ПР-РХ-${day}`
-    const out = postWarehouseDocument(store, {
+    const number = suggestDocNumber(warehouse.documents, 'issue', request.date) || `ПР-РХ-${day}`
+    steps.push({
       type: 'issue',
-      number,
+      number: `${number}-${warehouseId.slice(0, 4)}`,
       date: request.date,
       warehouseId,
       purpose: 'production_issue',
@@ -90,17 +90,23 @@ function postConsumeDocuments(
       productionRequestId: request.id,
       docRole: 'production_issue',
       skipAudit: true,
-      skipValidation: true,
+      skipFieldValidation: true,
+      reservationSource: { productionOrderIds: orderIds },
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'productionRequest',
+        sourceId: request.id,
+        role: 'production_issue',
+        warehouseId,
+      }),
     })
-    if (!out.result.ok) {
-      return { store: out.store, ok: false, messageKey: out.result.error }
-    }
-    store = out.store
-    documentIds.push(out.result.documentId)
   }
-  return { store, ok: true }
+  return steps
 }
 
+/**
+ * Проводка сменной заявки на склад (atomic all-or-nothing).
+ * Stock safety is mandatory; no negative override.
+ */
 export function postProductionRequestToWarehouse(
   warehouse: WarehouseStore,
   request: ProductionRequest,
@@ -109,7 +115,7 @@ export function postProductionRequestToWarehouse(
   packStore: PackagingRecipeStore = { items: [], nextCode: 1, boxes: [], nextBoxCode: 1 },
   formulationRecipes: FormulationRecipe[] = [],
 ): PostProductionResult {
-  let store = ensureProductionWarehouseLocations(warehouse)
+  const store = ensureProductionWarehouseLocations(warehouse)
 
   const alreadyPosted = store.documents.filter(
     (d) => d.productionRequestId === request.id && d.status === 'posted',
@@ -118,21 +124,22 @@ export function postProductionRequestToWarehouse(
     return {
       ok: false,
       messageKey: 'production.post.alreadyPosted',
-      store,
+      store: warehouse,
       documentIds: alreadyPosted.map((d) => d.id),
     }
   }
 
   const summary = summarizeRequest(request)
   const fp = resolveFinishedProduct(request, orders, finishedProducts)
-  const documentIds: string[] = []
   const day = request.date.replace(/-/g, '')
+  const orderIds = linkedOrderIdsFromRequest(request)
+  const steps: PostWarehouseDocumentInput[] = []
 
   if (request.lineId === 'pack') {
     const wipId = warehouseLocationId(store, PRODUCTION_LOCATION_NAMES.wip)
     const finId = warehouseLocationId(store, PRODUCTION_LOCATION_NAMES.finished)
     if (!wipId || !finId) {
-      return { ok: false, messageKey: 'production.post.noLocations', store }
+      return { ok: false, messageKey: 'production.post.noLocations', store: warehouse }
     }
 
     const rolls = request.packaging?.rolls ?? []
@@ -167,12 +174,12 @@ export function postProductionRequestToWarehouse(
       return {
         ok: false,
         messageKey: summary.factMp <= 0 ? 'production.post.noFact' : 'production.post.noProduct',
-        store,
+        store: warehouse,
       }
     }
 
     const issueNo = suggestDocNumber(store.documents, 'issue', request.date)
-    const issueOut = postWarehouseDocument(store, {
+    steps.push({
       type: 'issue',
       number: issueNo || `ПР-УП-${day}-Р`,
       date: request.date,
@@ -184,16 +191,18 @@ export function postProductionRequestToWarehouse(
       productionRequestId: request.id,
       docRole: 'production_issue',
       skipAudit: true,
-      skipValidation: true,
+      skipFieldValidation: true,
+      reservationSource: { productionOrderIds: orderIds },
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'productionRequest',
+        sourceId: request.id,
+        role: 'pack_issue',
+        warehouseId: wipId,
+      }),
     })
-    if (!issueOut.result.ok) {
-      return { ok: false, messageKey: issueOut.result.error, store: issueOut.store }
-    }
-    store = issueOut.store
-    documentIds.push(issueOut.result.documentId)
 
     const receiptNo = suggestDocNumber(store.documents, 'receipt', request.date)
-    const receiptOut = postWarehouseDocument(store, {
+    steps.push({
       type: 'receipt',
       number: receiptNo || `ПР-УП-${day}-П`,
       date: request.date,
@@ -205,29 +214,30 @@ export function postProductionRequestToWarehouse(
       productionRequestId: request.id,
       docRole: 'production_receipt',
       skipAudit: true,
-      skipValidation: true,
+      skipFieldValidation: true,
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'productionRequest',
+        sourceId: request.id,
+        role: 'pack_receipt',
+        warehouseId: finId,
+      }),
     })
-    if (!receiptOut.result.ok) {
-      return { ok: false, messageKey: receiptOut.result.error, store: receiptOut.store }
-    }
-    store = receiptOut.store
-    documentIds.push(receiptOut.result.documentId)
   } else {
     const wipId = warehouseLocationId(store, PRODUCTION_LOCATION_NAMES.wip)
     if (!wipId) {
-      return { ok: false, messageKey: 'production.post.noLocations', store }
+      return { ok: false, messageKey: 'production.post.noLocations', store: warehouse }
     }
 
     const factMp = summary.factMp - (summary.byCategory.defect?.qtyMp ?? 0)
     if (factMp <= 0) {
-      return { ok: false, messageKey: 'production.post.noFact', store }
+      return { ok: false, messageKey: 'production.post.noFact', store: warehouse }
     }
     if (!fp?.warehouseItemId) {
-      return { ok: false, messageKey: 'production.post.noProduct', store }
+      return { ok: false, messageKey: 'production.post.noProduct', store: warehouse }
     }
 
     const receiptNo = suggestDocNumber(store.documents, 'receipt', request.date)
-    const receiptOut = postWarehouseDocument(store, {
+    steps.push({
       type: 'receipt',
       number: receiptNo || `ПР-${request.lineId}-${day}`,
       date: request.date,
@@ -239,34 +249,40 @@ export function postProductionRequestToWarehouse(
       productionRequestId: request.id,
       docRole: 'production_receipt',
       skipAudit: true,
-      skipValidation: true,
+      skipFieldValidation: true,
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'productionRequest',
+        sourceId: request.id,
+        role: 'production_receipt',
+        warehouseId: wipId,
+      }),
     })
-    if (!receiptOut.result.ok) {
-      return { ok: false, messageKey: receiptOut.result.error, store: receiptOut.store }
-    }
-    store = receiptOut.store
-    documentIds.push(receiptOut.result.documentId)
   }
 
-  const consume = postConsumeDocuments(
-    store,
-    request,
-    orders,
-    finishedProducts,
-    packStore,
-    formulationRecipes,
-    documentIds,
+  steps.push(
+    ...buildConsumeSteps(store, request, orders, finishedProducts, packStore, formulationRecipes),
   )
-  if (!consume.ok) {
-    return { ok: false, messageKey: consume.messageKey, store: consume.store }
-  }
-  store = consume.store
 
-  store = appendWarehouseAudit(store, {
+  if (steps.length === 0) {
+    return { ok: false, messageKey: 'production.post.noProduct', store: warehouse }
+  }
+
+  const atomic = postWarehouseDocumentsAtomic(store, steps)
+  if (!atomic.result.ok) {
+    return {
+      ok: false,
+      messageKey: atomic.result.error,
+      store: warehouse,
+      shortages: atomic.result.shortages,
+    }
+  }
+
+  let next = atomic.store
+  next = appendWarehouseAudit(next, {
     action: 'document_post',
-    detail: `Производство ${request.date} линия ${request.lineId} → склад · док. ${documentIds.length}`,
+    detail: `Производство ${request.date} линия ${request.lineId} → склад · док. ${atomic.result.documentIds.length}`,
     productionRequestId: request.id,
   })
 
-  return { ok: true, store, documentIds }
+  return { ok: true, store: next, documentIds: atomic.result.documentIds }
 }

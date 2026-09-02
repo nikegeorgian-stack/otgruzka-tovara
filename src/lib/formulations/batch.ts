@@ -1,7 +1,8 @@
 import type { Locale } from '@/i18n/types'
 import { appendWarehouseAudit } from '@/lib/warehouse/audit'
-import { postWarehouseDocument } from '@/lib/warehouse/documents'
+import { postWarehouseDocumentsAtomic } from '@/lib/warehouse/documents'
 import { computeAllBalances, validateIssueLines } from '@/lib/warehouse/stock'
+import { warehouseIdempotencyKey } from '@/lib/warehouse/stockSafety'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import {
   componentConsumeKg,
@@ -282,7 +283,7 @@ export function confirmBatchMix(
   input: ConfirmBatchInput,
   options?: PostBatchMixOptions,
 ): { formulations: FormulationStore; warehouse: WarehouseStore; result: PostBatchMixResult } {
-  const allowNegativeStock = options?.allowNegativeStock === true
+  void options // W0: allowNegativeStock ignored — stock safety is mandatory in post core.
   const run = (formulations.batchRuns ?? []).find((r) => r.id === input.runId)
   if (!run) {
     return { formulations, warehouse, result: { ok: false, error: 'batch_not_found' } }
@@ -291,16 +292,13 @@ export function confirmBatchMix(
     return { formulations, warehouse, result: { ok: false, error: 'batch_not_pending' } }
   }
 
-  let wh = warehouse
   const issueLines = run.lines.map((l) => ({ itemId: l.warehouseItemId, quantity: l.consumeKg }))
 
-  if (!allowNegativeStock) {
-    const balances = computeAllBalances(wh, run.warehouseId)
-    const check = validateIssueLines(wh.items, balances, issueLines)
-    if (!check.ok) {
-      const msg = check.shortages.map((s) => `${s.name}: ${s.requested} / ${s.available}`).join('; ')
-      return { formulations, warehouse: wh, result: { ok: false, error: msg || 'insufficient_stock' } }
-    }
+  const balances = computeAllBalances(warehouse, run.warehouseId)
+  const check = validateIssueLines(warehouse.items, balances, issueLines)
+  if (!check.ok) {
+    const msg = check.shortages.map((s) => `${s.name}: ${s.requested} / ${s.available}`).join('; ')
+    return { formulations, warehouse, result: { ok: false, error: msg || 'insufficient_stock' } }
   }
 
   const issueNo = `${run.documentNumber}-Р`
@@ -314,37 +312,64 @@ export function confirmBatchMix(
     .filter(Boolean)
     .join(' · ')
 
-  wh = postWarehouseDocument(wh, {
-    type: 'issue',
-    number: issueNo,
-    date: run.mixedAt,
-    warehouseId: run.warehouseId,
-    brigade: run.shiftBrigade,
-    comment: `Накладная списания · ${mixComment}`,
-    lines: issueLines,
-    batchRunId: run.id,
-    docRole: 'batch_issue',
-    skipAudit: true,
-    skipValidation: true,
-  }).store
-  const issueDoc = wh.documents[wh.documents.length - 1]!
+  const atomic = postWarehouseDocumentsAtomic(warehouse, [
+    {
+      type: 'issue',
+      number: issueNo,
+      date: run.mixedAt,
+      warehouseId: run.warehouseId,
+      brigade: run.shiftBrigade,
+      comment: `Накладная списания · ${mixComment}`,
+      lines: issueLines,
+      batchRunId: run.id,
+      docRole: 'batch_issue',
+      skipAudit: true,
+      skipFieldValidation: true,
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'batchRun',
+        sourceId: run.id,
+        role: 'batch_issue',
+        warehouseId: run.warehouseId,
+      }),
+    },
+    {
+      type: 'receipt',
+      number: receiptNo,
+      date: run.mixedAt,
+      warehouseId: run.warehouseId,
+      brigade: run.shiftBrigade,
+      comment: `Оприходование пропитки · ${mixComment} · код ${run.internalCode ?? '—'}`,
+      lines: [{ itemId: run.outputWarehouseItemId, quantity: run.outputKg }],
+      batchRunId: run.id,
+      docRole: 'batch_receipt',
+      skipAudit: true,
+      skipFieldValidation: true,
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'batchRun',
+        sourceId: run.id,
+        role: 'batch_receipt',
+        warehouseId: run.warehouseId,
+      }),
+    },
+  ])
 
-  wh = postWarehouseDocument(wh, {
-    type: 'receipt',
-    number: receiptNo,
-    date: run.mixedAt,
-    warehouseId: run.warehouseId,
-    brigade: run.shiftBrigade,
-    comment: `Оприходование пропитки · ${mixComment} · код ${run.internalCode ?? '—'}`,
-    lines: [{ itemId: run.outputWarehouseItemId, quantity: run.outputKg }],
-    batchRunId: run.id,
-    docRole: 'batch_receipt',
-    skipAudit: true,
-    skipValidation: true,
-  }).store
-  const receiptDoc = wh.documents[wh.documents.length - 1]!
+  if (!atomic.result.ok) {
+    return {
+      formulations,
+      warehouse,
+      result: {
+        ok: false,
+        error: atomic.result.error === 'warehouse.doc.errInsufficientStock'
+          ? 'insufficient_stock'
+          : atomic.result.error,
+      },
+    }
+  }
 
-  wh = appendWarehouseAudit(wh, {
+  const issueDocId = atomic.result.documentIds[0]!
+  const receiptDocId = atomic.result.documentIds[1]!
+
+  const wh = appendWarehouseAudit(atomic.store, {
     action: 'batch_mix',
     detail: `Подтверждён замес ${run.documentNumber} · списание ${issueNo} · приход ${receiptNo}${input.keeperName ? ` · кладовщик ${input.keeperName}` : ''}`,
     batchRunId: run.id,
@@ -355,8 +380,8 @@ export function confirmBatchMix(
   const confirmedRun: FormulationBatchRun = {
     ...run,
     status: 'confirmed',
-    issueDocumentId: issueDoc.id,
-    receiptDocumentId: receiptDoc.id,
+    issueDocumentId: issueDocId,
+    receiptDocumentId: receiptDocId,
     confirmedAt: new Date().toISOString(),
     confirmedBy: input.keeperId,
     confirmedByName: input.keeperName,

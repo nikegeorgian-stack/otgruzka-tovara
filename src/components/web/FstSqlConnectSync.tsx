@@ -28,6 +28,7 @@ import {
   needsPullBeforeWrite,
 } from '@/lib/cloud/cloudSavePipeline'
 import { formatTimesheetConflictDetail } from '@/lib/cloud/timesheetCellOps'
+import { formatAtomicGroupConflictDetail } from '@/lib/cloud/transactionGroups'
 import {
   createIndexedDbDurableJournalAdapter,
   getDurableJournalController,
@@ -78,6 +79,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       },
     )
   })
+}
+
+function formatCloudConflictDetail(
+  c: import('@/lib/cloud/dirtyOperations').EntityConflict,
+): string {
+  if (c.reason === 'atomic_group_conflict' || c.transactionGroupId) {
+    return formatAtomicGroupConflictDetail(c)
+  }
+  return formatTimesheetConflictDetail(c)
 }
 
 type SyncStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'pulling' | 'updated' | 'error' | 'conflict'
@@ -382,7 +392,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         cloudDirtyTracker.setConflicts(build.conflicts)
         setConflictCount(build.conflicts.length)
         setConflictDetails(
-          build.conflicts.slice(0, 8).map((c) => formatTimesheetConflictDetail(c)),
+          build.conflicts.slice(0, 8).map((c) => formatCloudConflictDetail(c)),
         )
         setRemotePending(true)
         // Partial apply: still persist successfully merged ops; keep conflicted pending.
@@ -662,7 +672,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         applyCloud(committed)
         noteCloudPullCompleted(Number(row.revision) || 1)
 
-        const restored = await journal.restoreAfterCloudLoad(committed.months)
+        const restored = await journal.restoreAfterCloudLoad(committed)
         if (cancelled) return
         // sqlWriteCount is always 0 by contract of restoreAfterCloudLoad
 
@@ -681,7 +691,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
             cloudDirtyTracker.setConflicts(restored.conflicts)
             setConflictCount(restored.conflicts.length)
             setConflictDetails(
-              restored.conflicts.slice(0, 8).map((c) => formatTimesheetConflictDetail(c)),
+              restored.conflicts.slice(0, 8).map((c) => formatCloudConflictDetail(c)),
             )
             setRemotePending(true)
           }

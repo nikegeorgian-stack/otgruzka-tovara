@@ -4426,6 +4426,9 @@ export const ru: Dict = {
   'planner.material.reserveInTab': 'Перейдите на вкладку «Материалы», чтобы зарезервировать доступное количество.',
   'planner.material.checkTab': 'Проверьте резерв на вкладке «Материалы»',
   'planner.material.shortageBanner': 'Не хватает материалов (≈ {count})',
+  'planner.material.stockUnverified': 'Остатки склада не подтверждены',
+  'planner.material.stockUnverifiedHint':
+    'Нельзя считать дефицит и резервировать материалы, пока не проведена начальная инвентаризация склада.',
   'planner.material.activateWarn':
     'По заказу не хватает материалов на складе. Всё равно запустить в работу?',
   'planner.material.blockTitle': 'Склад и резерв',
@@ -5507,6 +5510,43 @@ export const ru: Dict = {
   'warehouse.doc.deleteDraft': 'Удалить',
   'warehouse.doc.draftRemoved': 'Черновик удалён.',
   'warehouse.doc.errAlreadyPosted': 'Документ уже проведён — сначала снимите проведение.',
+  'warehouse.doc.errInsufficientStock':
+    'Недостаточно материала. Документ не проведён, остатки не изменены.',
+  'warehouse.doc.errIdempotencyConflict':
+    'Документ с таким ключом идемпотентности уже существует с другим содержимым.',
+  'warehouse_not_initialized':
+    'Остатки склада не подтверждены. Проведите начальную инвентаризацию.',
+  'warehouse.accounting.notInitialized':
+    'Остатки склада не подтверждены. Проведите начальную инвентаризацию.',
+  'warehouse.accounting.alreadyActive': 'Учёт по этому складу уже активирован.',
+  'warehouse.accounting.errCancelOpeningDependent':
+    'Нельзя отменить начальную инвентаризацию: после неё уже есть движения по складу.',
+  'warehouse.accounting.bannerTitle': 'Остатки склада не подтверждены',
+  'warehouse.accounting.bannerBody':
+    'Текущий расчётный остаток нельзя считать фактическим. Автосписания и дефицит закупок заблокированы до начальной инвентаризации.',
+  'warehouse.accounting.statusLabel': 'Статус учёта',
+  'warehouse.accounting.statusUninitialized': 'Не подтверждён',
+  'warehouse.accounting.statusReconciling': 'Идёт начальная инвентаризация',
+  'warehouse.accounting.statusActive': 'Учёт активирован',
+  'warehouse.accounting.tabOpening': 'Начальная инвентаризация',
+  'warehouse.accounting.openOpeningInventory': 'Начальная инвентаризация',
+  'warehouse.accounting.pickWarehouse': 'Выберите конкретный склад (не «все склады»).',
+  'warehouse.accounting.openingEmpty': 'Укажите фактическое количество хотя бы по одной позиции.',
+  'warehouse.accounting.draftSaved': 'Черновик начальной инвентаризации сохранён. Остатки не изменены.',
+  'warehouse.accounting.activated': 'Учёт активирован',
+  'warehouse.accounting.activatedAt': 'Активирован',
+  'warehouse.accounting.countDate': 'Дата пересчёта',
+  'warehouse.accounting.bookQty': 'Учёт (не подтверждён)',
+  'warehouse.accounting.countedQty': 'Факт',
+  'warehouse.accounting.delta': 'Δ',
+  'warehouse.accounting.bookUntrusted': 'не факт',
+  'warehouse.accounting.saveDraft': 'Сохранить черновик',
+  'warehouse.accounting.postAndActivate': 'Провести и активировать учёт',
+  'warehouse.accounting.confirmTitle': 'Провести начальную инвентаризацию?',
+  'warehouse.accounting.confirmBody':
+    'Будут созданы движения только на разницу (Δ). История склада сохранится. После успеха учёт этого склада станет активным.',
+  'warehouse.accounting.confirmMeta': 'Строк: {lines} · ответственный: {keeper}',
+  'warehouse.accounting.confirmPost': 'Провести',
   'warehouse.doc.errAlreadyCancelled': 'Документ отменён.',
   'warehouse.doc.errNotPosted': 'Документ не проведён.',
   'warehouse.doc.errCannotUnpost': 'У этого документа нельзя снять проведение — используйте сторно.',

@@ -1,7 +1,27 @@
 import { appendWarehouseAudit } from './audit'
+import {
+  assertWarehouseAllowsStockIssue,
+  isWarehouseAccountingActive,
+  setWarehouseAccountingStatus,
+  WAREHOUSE_NOT_INITIALIZED,
+} from './accountingStatus'
 import { isDocumentNumberTaken, nextReversalNumber } from './docNumbering'
 import { documentCanBeCancelled, validateWarehouseDocumentInput } from './documentValidation'
+import {
+  isOpeningInventoryDocument,
+  openingInventoryHasDependentMovements,
+} from './openingInventory'
 import { computeItemBalance, toBaseQty } from './stock'
+import {
+  buildOwnUnreserveMovements,
+  checkIssueStockSafety,
+  IDEMPOTENCY_CONFLICT_ERROR,
+  reservationSourceFromDocument,
+  type ReservationSourceRef,
+  type StockShortageRow,
+  warehouseDocumentsEquivalentForIdempotency,
+  warehouseIdempotencyKey,
+} from './stockSafety'
 import type { StockMovement, WarehouseDocument, WarehouseStore } from './types'
 
 export function warehouseDocumentKindLabel(type: WarehouseDocument['type']): string {
@@ -25,14 +45,34 @@ function inventoryLinePreview(
 }
 
 export type PostDocumentResult =
-  | { ok: true; documentId: string }
-  | { ok: false; error: string; fieldErrors?: Record<string, string> }
+  | { ok: true; documentId: string; idempotent?: boolean }
+  | {
+      ok: false
+      error: string
+      fieldErrors?: Record<string, string>
+      shortages?: StockShortageRow[]
+    }
 
 export type CancelDocumentResult =
   | { ok: true; reversalIds: string[] }
-  | { ok: false; error: string }
+  | { ok: false; error: string; shortages?: StockShortageRow[] }
 
 export type UnpostDocumentResult = { ok: true } | { ok: false; error: string }
+
+/** Input for a single post step (field skip ≠ stock safety). */
+export type PostWarehouseDocumentInput = Omit<WarehouseDocument, 'id' | 'createdAt'> & {
+  skipAudit?: boolean
+  /** Skip field validation only — stock safety always runs for issues. */
+  skipFieldValidation?: boolean
+  /** @deprecated Alias of skipFieldValidation; never bypasses stock safety. */
+  skipValidation?: boolean
+  /** Own reservation sources that may be consumed by this issue. */
+  reservationSource?: ReservationSourceRef
+}
+
+export type AtomicPostResult =
+  | { ok: true; documentIds: string[] }
+  | { ok: false; error: string; fieldErrors?: Record<string, string>; shortages?: StockShortageRow[] }
 
 /**
  * Сформировать движения склада по строкам проведённого документа.
@@ -114,14 +154,142 @@ export function isInvoiceAlreadyPosted(
   )
 }
 
+function findIdempotentDocument(
+  store: WarehouseStore,
+  key: string | undefined,
+): WarehouseDocument | undefined {
+  if (!key?.trim()) return undefined
+  return store.documents.find(
+    (d) => d.idempotencyKey === key && d.status !== 'cancelled',
+  )
+}
+
+/**
+ * Internal posting helper — stock safety is mandatory for `issue`.
+ * `skipValidation` / `skipFieldValidation` only skip field validation.
+ */
+function commitPostedDocument(
+  store: WarehouseStore,
+  full: WarehouseDocument,
+  options: {
+    skipAudit?: boolean
+    reservationSource?: ReservationSourceRef
+    /** When re-posting existing draft: drop prior movements for this documentId first */
+    replaceExisting?: boolean
+  } = {},
+): { store: WarehouseStore; result: PostDocumentResult } {
+  // Regular inventory corrections require active accounting; opening inventory is the activation path.
+  if (
+    full.type === 'inventory' &&
+    !isOpeningInventoryDocument(full) &&
+    !isWarehouseAccountingActive(store, full.warehouseId)
+  ) {
+    return {
+      store,
+      result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED },
+    }
+  }
+
+  if (full.type === 'issue') {
+    const gate = assertWarehouseAllowsStockIssue(store, full.warehouseId)
+    if (!gate.ok) {
+      return { store, result: { ok: false, error: gate.error } }
+    }
+    const source =
+      options.reservationSource ?? reservationSourceFromDocument(full)
+    const stock = checkIssueStockSafety(store, {
+      warehouseId: full.warehouseId,
+      lines: full.lines,
+      reservationSource: source,
+    })
+    if (!stock.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: stock.error,
+          shortages: stock.shortages,
+        },
+      }
+    }
+
+    const movements = buildDocumentMovements(store, full)
+    const unreserves = buildOwnUnreserveMovements(store, {
+      warehouseId: full.warehouseId,
+      date: full.date,
+      documentId: full.id,
+      documentNo: full.number,
+      aggregated: stock.aggregated,
+      reservationSource: source,
+    })
+    const cleaned = options.replaceExisting
+      ? store.movements.filter((m) => m.documentId !== full.id)
+      : store.movements
+    const documents = options.replaceExisting
+      ? store.documents.map((d) => (d.id === full.id ? full : d))
+      : [...store.documents, full]
+
+    let next: WarehouseStore = {
+      ...store,
+      documents,
+      movements: [...cleaned, ...movements, ...unreserves],
+    }
+    if (!options.skipAudit) {
+      next = appendWarehouseAudit(next, {
+        action: full.reversesDocumentId ? 'document_cancel' : 'document_post',
+        detail: full.reversesDocumentId
+          ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${warehouseDocumentKindLabel(full.type)} №${full.number}`
+          : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.${inventoryLinePreview(store, full)}`,
+        actorId: full.keeperId ?? full.postedBy,
+        actorName: full.keeperName ?? full.postedByName,
+      })
+    }
+    return { store: next, result: { ok: true, documentId: full.id } }
+  }
+
+  // receipt / inventory — no stock-safety gate (receipt may heal negative balance)
+  const movements = buildDocumentMovements(store, full)
+  const cleaned = options.replaceExisting
+    ? store.movements.filter((m) => m.documentId !== full.id)
+    : store.movements
+  const documents = options.replaceExisting
+    ? store.documents.map((d) => (d.id === full.id ? full : d))
+    : [...store.documents, full]
+
+  let next: WarehouseStore = {
+    ...store,
+    documents,
+    movements: [...cleaned, ...movements],
+  }
+  if (!options.skipAudit) {
+    next = appendWarehouseAudit(next, {
+      action: full.reversesDocumentId ? 'document_cancel' : 'document_post',
+      detail: full.reversesDocumentId
+        ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${warehouseDocumentKindLabel(full.type)} №${full.number}`
+        : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.${inventoryLinePreview(store, full)}`,
+      actorId: full.keeperId ?? full.postedBy,
+      actorName: full.keeperName ?? full.postedByName,
+    })
+  }
+  return { store: next, result: { ok: true, documentId: full.id } }
+}
+
 export function postWarehouseDocument(
   store: WarehouseStore,
-  doc: Omit<WarehouseDocument, 'id' | 'createdAt'> & { skipAudit?: boolean; skipValidation?: boolean },
+  doc: PostWarehouseDocumentInput,
 ): { store: WarehouseStore; result: PostDocumentResult } {
-  const { skipAudit, skipValidation, ...docRest } = doc
+  const {
+    skipAudit,
+    skipValidation,
+    skipFieldValidation,
+    reservationSource,
+    ...docRest
+  } = doc
+  const skipFields = skipFieldValidation === true || skipValidation === true
 
-  if (!skipValidation) {
-    const { status: _status, ...docForValidation } = docRest
+  if (!skipFields) {
+    const docForValidation = { ...docRest }
+    delete (docForValidation as { status?: unknown }).status
     const validation = validateWarehouseDocumentInput(store, docForValidation)
     if (!validation.ok) {
       const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
@@ -133,6 +301,31 @@ export function postWarehouseDocument(
     return { store, result: { ok: false, error: 'warehouse.invoice.alreadyPosted' } }
   }
 
+  const existingIdem = findIdempotentDocument(store, docRest.idempotencyKey)
+  if (existingIdem) {
+    if (
+      warehouseDocumentsEquivalentForIdempotency(existingIdem, {
+        type: docRest.type,
+        warehouseId: docRest.warehouseId,
+        purpose: docRest.purpose,
+        docRole: docRest.docRole,
+        lines: docRest.lines,
+        productionRequestId: docRest.productionRequestId,
+        batchRunId: docRest.batchRunId,
+        loadingShipmentId: docRest.loadingShipmentId,
+        transferPairId: docRest.transferPairId,
+        purchaseOrderId: docRest.purchaseOrderId,
+        keeperRequestId: docRest.keeperRequestId,
+      })
+    ) {
+      return {
+        store,
+        result: { ok: true, documentId: existingIdem.id, idempotent: true },
+      }
+    }
+    return { store, result: { ok: false, error: IDEMPOTENCY_CONFLICT_ERROR } }
+  }
+
   const id = crypto.randomUUID()
   const createdAt = new Date().toISOString()
   const full: WarehouseDocument = {
@@ -142,24 +335,88 @@ export function postWarehouseDocument(
     createdAt,
   }
 
-  const movements: StockMovement[] = buildDocumentMovements(store, full)
+  return commitPostedDocument(store, full, { skipAudit, reservationSource })
+}
 
-  let next: WarehouseStore = {
+/**
+ * Провести существующий документ (черновик или перепровести проведённый):
+ * удалить прежние движения этого документа, заново сформировать движения,
+ * выставить статус «Проведён». Защита от дублей — по `documentId`.
+ * Stock safety always applies for issues.
+ */
+export function postExistingWarehouseDocument(
+  store: WarehouseStore,
+  documentId: string,
+  actor?: { actorId?: string; actorName?: string },
+  options?: { reservationSource?: ReservationSourceRef },
+): { store: WarehouseStore; result: PostDocumentResult } {
+  const doc = store.documents.find((d) => d.id === documentId)
+  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
+  if (doc.status === 'cancelled') {
+    return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyCancelled' } }
+  }
+
+  const docForValidation = { ...doc }
+  delete (docForValidation as { status?: unknown }).status
+  const validation = validateWarehouseDocumentInput(store, docForValidation, documentId)
+  if (!validation.ok) {
+    const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
+    return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
+  }
+
+  const storeForCheck: WarehouseStore = {
     ...store,
-    documents: [...store.documents, full],
-    movements: [...store.movements, ...movements],
+    movements: store.movements.filter((m) => m.documentId !== documentId),
   }
-  if (!skipAudit) {
-    next = appendWarehouseAudit(next, {
-      action: full.reversesDocumentId ? 'document_cancel' : 'document_post',
-      detail: full.reversesDocumentId
-        ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${warehouseDocumentKindLabel(full.type)} №${full.number}`
-        : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.${inventoryLinePreview(store, full)}`,
-      actorId: full.keeperId,
-      actorName: full.keeperName,
-    })
+
+  const now = new Date().toISOString()
+  const full: WarehouseDocument = {
+    ...doc,
+    status: 'posted',
+    postedAt: now,
+    postedBy: actor?.actorId,
+    postedByName: actor?.actorName,
+    lockedBy: undefined,
+    lockedByName: undefined,
+    lockedAt: undefined,
   }
-  return { store: next, result: { ok: true, documentId: id } }
+
+  const committed = commitPostedDocument(storeForCheck, full, {
+    replaceExisting: true,
+    reservationSource: options?.reservationSource ?? reservationSourceFromDocument(doc),
+  })
+  if (!committed.result.ok) {
+    return { store, result: committed.result }
+  }
+  return committed
+}
+
+/**
+ * Pure in-memory multi-document post: all steps succeed or state is unchanged.
+ */
+export function postWarehouseDocumentsAtomic(
+  store: WarehouseStore,
+  docs: PostWarehouseDocumentInput[],
+): { store: WarehouseStore; result: AtomicPostResult } {
+  let next = store
+  const documentIds: string[] = []
+  for (const doc of docs) {
+    const out = postWarehouseDocument(next, doc)
+    if (!out.result.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: out.result.error,
+          fieldErrors: out.result.fieldErrors,
+          shortages: out.result.shortages,
+        },
+      }
+    }
+    next = out.store
+    documentIds.push(out.result.documentId)
+  }
+  return { store: next, result: { ok: true, documentIds } }
 }
 
 export type SaveDraftInput = Omit<WarehouseDocument, 'id' | 'createdAt' | 'status'> & {
@@ -193,7 +450,8 @@ export function saveWarehouseDocumentDraft(
 
   const id = doc.id ?? crypto.randomUUID()
   const createdAt = existing?.createdAt ?? new Date().toISOString()
-  const { id: _omitId, ...rest } = doc
+  const rest = { ...doc }
+  delete (rest as { id?: string }).id
   const full: WarehouseDocument = {
     ...(existing ?? {}),
     ...rest,
@@ -220,65 +478,11 @@ export function saveWarehouseDocumentDraft(
 }
 
 /**
- * Провести существующий документ (черновик или перепровести проведённый):
- * удалить прежние движения этого документа, заново сформировать движения,
- * выставить статус «Проведён». Защита от дублей — по `documentId`.
- */
-export function postExistingWarehouseDocument(
-  store: WarehouseStore,
-  documentId: string,
-  actor?: { actorId?: string; actorName?: string },
-): { store: WarehouseStore; result: PostDocumentResult } {
-  const doc = store.documents.find((d) => d.id === documentId)
-  if (!doc) return { store, result: { ok: false, error: 'not_found' } }
-  if (doc.status === 'cancelled') {
-    return { store, result: { ok: false, error: 'warehouse.doc.errAlreadyCancelled' } }
-  }
-
-  const { status: _status, ...docForValidation } = doc
-  const validation = validateWarehouseDocumentInput(store, docForValidation, documentId)
-  if (!validation.ok) {
-    const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
-    return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
-  }
-
-  const movements = buildDocumentMovements(store, doc)
-  const cleaned = store.movements.filter((m) => m.documentId !== documentId)
-  const now = new Date().toISOString()
-
-  const documents = store.documents.map((d) =>
-    d.id === documentId
-      ? {
-          ...d,
-          status: 'posted' as const,
-          postedAt: now,
-          postedBy: actor?.actorId,
-          postedByName: actor?.actorName,
-          lockedBy: undefined,
-          lockedByName: undefined,
-          lockedAt: undefined,
-        }
-      : d,
-  )
-
-  let next: WarehouseStore = {
-    ...store,
-    documents,
-    movements: [...cleaned, ...movements],
-  }
-  next = appendWarehouseAudit(next, {
-    action: 'document_post',
-    detail: `${warehouseDocumentKindLabel(doc.type)} №${doc.number} · ${doc.lines.length} поз. проведён${inventoryLinePreview(store, doc)}`,
-    actorId: actor?.actorId,
-    actorName: actor?.actorName,
-  })
-  return { store: next, result: { ok: true, documentId } }
-}
-
-/**
  * Снять проведение («Отменить проведение»): удалить движения документа и
  * вернуть его в черновик (можно редактировать и провести заново).
  * Сторно-, замес- и парные документы так снимать нельзя — для них отмена.
+ *
+ * RISK W1: destructive unpost (hard-deletes movements) — not rewritten in W0.
  */
 export function unpostWarehouseDocument(
   store: WarehouseStore,
@@ -345,6 +549,9 @@ export function runInventoryCount(
     comment?: string
   },
 ): WarehouseStore {
+  if (!isWarehouseAccountingActive(store, args.warehouseId)) {
+    return store
+  }
   const { itemId, warehouseId, counted, date, comment } = args
   const item = store.items.find((i) => i.id === itemId)
   if (!item) return store
@@ -407,6 +614,9 @@ export function postInventoryRevision(
   },
 ): { store: WarehouseStore; result: InventoryRevisionResult } {
   const { warehouseId, date, comment, lines } = args
+  if (!isWarehouseAccountingActive(store, warehouseId)) {
+    return { store, result: { applied: 0, skipped: lines.length, unchanged: 0 } }
+  }
   const itemMap = new Map(store.items.map((i) => [i.id, i]))
   const batchComment =
     comment?.trim() || `Ревизия от ${date.split('-').reverse().join('.')}`
@@ -488,6 +698,9 @@ export function postOpeningBalances(
   },
 ): { store: WarehouseStore; result: OpeningBalanceResult } {
   const { warehouseId, date, comment, lines } = args
+  if (!isWarehouseAccountingActive(store, warehouseId)) {
+    return { store, result: { applied: 0, skipped: lines.length } }
+  }
   const itemMap = new Map(store.items.map((i) => [i.id, i]))
   const batchComment =
     comment?.trim() || `Начальный остаток на ${date.split('-').reverse().join('.')}`
@@ -557,25 +770,54 @@ export function postWarehouseTransfer(
   const receiptNo = `${args.number.trim()}-П`
   const baseComment = [args.comment, 'Перемещение между складами'].filter(Boolean).join(' · ')
 
-  const issueOut = postWarehouseDocument(store, {
-    ...args,
-    type: 'issue',
-    number: issueNo,
-    comment: baseComment,
-    transferPairId: pairId,
-    docRole: 'transfer_issue',
-  })
-  if (!issueOut.result.ok) return issueOut
-
-  return postWarehouseDocument(issueOut.store, {
-    ...args,
-    type: 'receipt',
-    number: receiptNo,
-    warehouseId: args.targetWarehouseId,
-    comment: baseComment,
-    transferPairId: pairId,
-    docRole: 'transfer_receipt',
-  })
+  const atomic = postWarehouseDocumentsAtomic(store, [
+    {
+      ...args,
+      type: 'issue',
+      number: issueNo,
+      comment: baseComment,
+      transferPairId: pairId,
+      docRole: 'transfer_issue',
+      purpose: args.purpose ?? 'transfer',
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'transfer',
+        sourceId: pairId,
+        role: 'transfer_issue',
+        warehouseId: args.warehouseId,
+      }),
+    },
+    {
+      ...args,
+      type: 'receipt',
+      number: receiptNo,
+      warehouseId: args.targetWarehouseId,
+      comment: baseComment,
+      transferPairId: pairId,
+      docRole: 'transfer_receipt',
+      purpose: args.purpose ?? 'transfer',
+      idempotencyKey: warehouseIdempotencyKey({
+        source: 'transfer',
+        sourceId: pairId,
+        role: 'transfer_receipt',
+        warehouseId: args.targetWarehouseId,
+      }),
+    },
+  ])
+  if (!atomic.result.ok) {
+    return {
+      store,
+      result: {
+        ok: false,
+        error: atomic.result.error,
+        fieldErrors: atomic.result.fieldErrors,
+        shortages: atomic.result.shortages,
+      },
+    }
+  }
+  return {
+    store: atomic.store,
+    result: { ok: true, documentId: atomic.result.documentIds[0]! },
+  }
 }
 
 function cancelInventoryDocument(
@@ -684,10 +926,23 @@ function cancelSingleDocument(
     keeperName: args.cancelledByName,
     reversesDocumentId: doc.id,
     docRole: 'reversal',
-    skipValidation: true,
+    skipFieldValidation: true,
+    idempotencyKey: warehouseIdempotencyKey({
+      source: 'reversal',
+      sourceId: doc.id,
+      role: 'reversal',
+      warehouseId: doc.warehouseId,
+    }),
   })
   if (!reversalOut.result.ok) {
-    return { store, result: { ok: false, error: reversalOut.result.error } }
+    return {
+      store,
+      result: {
+        ok: false,
+        error: reversalOut.result.error,
+        shortages: reversalOut.result.shortages,
+      },
+    }
   }
 
   const reversalId = reversalOut.result.documentId
@@ -728,6 +983,12 @@ export function cancelWarehouseDocument(
   if (!documentCanBeCancelled(doc)) {
     return { store, result: { ok: false, error: 'warehouse.doc.errCannotCancel' } }
   }
+  if (isOpeningInventoryDocument(doc) && openingInventoryHasDependentMovements(store, doc)) {
+    return {
+      store,
+      result: { ok: false, error: 'warehouse.accounting.errCancelOpeningDependent' },
+    }
+  }
 
   const targets = doc.transferPairId
     ? store.documents.filter(
@@ -739,9 +1000,23 @@ export function cancelWarehouseDocument(
   const reversalIds: string[] = []
   for (const target of targets) {
     const out = cancelSingleDocument(next, target, args)
-    if (!out.result.ok) return out
+    if (!out.result.ok) {
+      // Atomic: discard any partial cancellations in the pair.
+      return { store, result: out.result }
+    }
     next = out.store
     reversalIds.push(...out.result.reversalIds)
+  }
+
+  // Opening inventory cancel (only when no dependents): leave warehouse unverified — never silently "active".
+  if (isOpeningInventoryDocument(doc) && doc.status === 'posted') {
+    next = setWarehouseAccountingStatus(next, doc.warehouseId, 'uninitialized', {
+      openingInventoryDocumentId: undefined,
+      activatedAt: undefined,
+      activatedBy: undefined,
+      activatedByName: undefined,
+      note: 'opening_inventory_cancelled',
+    })
   }
 
   return { store: next, result: { ok: true, reversalIds } }

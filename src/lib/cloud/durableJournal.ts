@@ -9,6 +9,11 @@ import {
   isStructuralMonthOp,
   isTimesheetCellOp,
 } from './timesheetCellOps'
+import {
+  classifyAtomicGroupAgainstRemote,
+  isAtomicGroupOp,
+  partitionDirtyOperations,
+} from './transactionGroups'
 
 export const DURABLE_JOURNAL_SCHEMA_VERSION = 1 as const
 export const DURABLE_JOURNAL_DB_NAME = 'fst-cloud-ops-journal'
@@ -48,6 +53,11 @@ export type DurableJournalRecord = {
   baselineEntity?: unknown
   baselineFingerprint?: string
   pendingLocal?: unknown
+  /** PHASE W0.6 */
+  transactionGroupId?: string
+  transactionGroupKind?: string
+  transactionGroupLabel?: string
+  atomic?: boolean
   createdAt: string
   updatedAt: string
   state: DurableJournalOpState
@@ -62,7 +72,12 @@ export type DurableJournalAdapter = {
   hasAnyForOtherScope?(scopeKey: string): Promise<boolean>
 }
 
-export type JournalClassifyKind = 'recoverable' | 'idempotent' | 'conflict' | 'unsupported'
+export type JournalClassifyKind =
+  | 'recoverable'
+  | 'idempotent'
+  | 'conflict'
+  | 'unsupported'
+  | 'partial_remote_group'
 
 export type ClassifiedJournalOp = {
   record: DurableJournalRecord
@@ -85,7 +100,10 @@ export function journalRecordKey(scopeKey: string, operationId: string): string 
 }
 
 export function shouldPersistOperationToJournal(op: DirtyOperation): boolean {
-  return op.origin === 'user' && (isTimesheetCellOp(op) || isStructuralMonthOp(op))
+  return (
+    op.origin === 'user' &&
+    (isTimesheetCellOp(op) || isStructuralMonthOp(op) || isAtomicGroupOp(op))
+  )
 }
 
 /** Strip PII / secrets — only timesheet op metadata. */
@@ -113,6 +131,10 @@ export function dirtyOpToJournalRecord(
     baselineEntity: op.baselineEntity,
     baselineFingerprint: op.baselineFingerprint,
     pendingLocal: op.pendingLocal,
+    transactionGroupId: op.transactionGroupId,
+    transactionGroupKind: op.transactionGroupKind,
+    transactionGroupLabel: op.transactionGroupLabel,
+    atomic: op.atomic,
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
     state,
@@ -134,6 +156,10 @@ export function journalRecordToDirtyOp(record: DurableJournalRecord): DirtyOpera
     baselineEntity: record.baselineEntity,
     baselineFingerprint: record.baselineFingerprint,
     pendingLocal: record.pendingLocal,
+    transactionGroupId: record.transactionGroupId,
+    transactionGroupKind: record.transactionGroupKind,
+    transactionGroupLabel: record.transactionGroupLabel,
+    atomic: record.atomic,
   }
 }
 
@@ -153,12 +179,13 @@ export function markStaleIfNeeded(
 }
 
 /**
- * Classify journal ops against fresh remote using T1 three-way rules.
+ * Classify journal ops against fresh remote using T1 three-way rules + W0.6 groups.
  * Does not perform SQL writes.
+ * `remote` may be full AppStore (preferred for warehouse groups) or months-only (legacy T2).
  */
 export function classifyJournalOpsAgainstRemote(
   records: DurableJournalRecord[],
-  remoteMonths: AppStore['months'],
+  remote: AppStore | AppStore['months'],
 ): {
   classified: ClassifiedJournalOp[]
   unsupported: DurableJournalRecord[]
@@ -180,8 +207,68 @@ export function classifyJournalOpsAgainstRemote(
   const conflicts: EntityConflict[] = []
   const idempotentIds: string[] = []
 
-  for (const record of supported) {
-    const op = journalRecordToDirtyOp(record)
+  const remoteStore: AppStore =
+    remote && typeof remote === 'object' && 'version' in (remote as object)
+      ? (remote as AppStore)
+      : ({ version: 6, months: remote as AppStore['months'] } as AppStore)
+  const remoteMonths = remoteStore.months
+
+  const ops = supported.map(journalRecordToDirtyOp)
+  const recordById = new Map(supported.map((r) => [r.operationId, r]))
+  const { ungrouped, groups } = partitionDirtyOperations(ops)
+
+  for (const [gid, groupOps] of groups) {
+    const kind = classifyAtomicGroupAgainstRemote(groupOps, remoteStore)
+    for (const op of groupOps) {
+      const record = recordById.get(op.operationId)!
+      if (kind === 'idempotent') {
+        classified.push({ record, op, kind: 'idempotent' })
+        idempotentIds.push(op.operationId)
+      } else if (kind === 'recoverable') {
+        classified.push({ record, op, kind: 'recoverable' })
+        recoverableOps.push(op)
+      } else if (kind === 'partial_remote_group') {
+        const conflict: EntityConflict = {
+          operationId: op.operationId,
+          domain: op.domain,
+          entityId: op.entityId,
+          reason: 'atomic_group_conflict',
+          message:
+            'partial_remote_group: связанная складская операция частично уже в облаке; автоматическая запись запрещена',
+          transactionGroupId: gid,
+          transactionGroupKind: op.transactionGroupKind,
+        }
+        classified.push({ record, op, kind: 'partial_remote_group', conflict })
+        conflictOps.push(op)
+        conflicts.push(conflict)
+      } else if (kind === 'unsupported') {
+        classified.push({ record, op, kind: 'unsupported' })
+        unsupported.push(record)
+      } else {
+        const conflict: EntityConflict = {
+          operationId: op.operationId,
+          domain: op.domain,
+          entityId: op.entityId,
+          reason: 'atomic_group_conflict',
+          message:
+            'Связанная складская операция не сохранена целиком из-за конфликта. Данные в облаке не изменены.',
+          transactionGroupId: gid,
+          transactionGroupKind: op.transactionGroupKind,
+        }
+        classified.push({ record, op, kind: 'conflict', conflict })
+        conflictOps.push(op)
+        conflicts.push(conflict)
+      }
+    }
+  }
+
+  for (const op of ungrouped) {
+    const record = recordById.get(op.operationId)!
+    if (!isTimesheetCellOp(op) && !isStructuralMonthOp(op)) {
+      classified.push({ record, op, kind: 'unsupported' })
+      unsupported.push(record)
+      continue
+    }
     const alone = applyMonthsGranularOperations(remoteMonths, remoteMonths, remoteMonths, [op])
     if (alone.conflicts.length > 0) {
       const conflict = alone.conflicts[0]!
@@ -215,6 +302,7 @@ export function classifyJournalOpsAgainstRemote(
   }
 
   for (const r of unsupported) {
+    if (classified.some((c) => c.record.operationId === r.operationId)) continue
     classified.push({
       record: r,
       op: journalRecordToDirtyOp(r),
@@ -224,7 +312,7 @@ export function classifyJournalOpsAgainstRemote(
 
   return {
     classified,
-    unsupported,
+    unsupported: [...new Map(unsupported.map((r) => [r.operationId, r])).values()],
     recoverableOps,
     conflictOps,
     conflicts,
@@ -237,12 +325,13 @@ export function previewRecoveredMonths(
   remoteMonths: AppStore['months'],
   recoverableOps: DirtyOperation[],
 ): AppStore['months'] {
-  if (!recoverableOps.length) return remoteMonths
+  const monthOps = recoverableOps.filter((o) => isTimesheetCellOp(o) || isStructuralMonthOp(o))
+  if (!monthOps.length) return remoteMonths
   return applyMonthsGranularOperations(
     remoteMonths,
     remoteMonths,
     remoteMonths,
-    recoverableOps,
+    monthOps,
   ).months
 }
 
@@ -514,7 +603,7 @@ export class DurableJournalController {
    * After fresh cloud load: classify journal, remove idempotent, hold recoverable.
    * Never SQL-writes.
    */
-  async restoreAfterCloudLoad(remoteMonths: AppStore['months']): Promise<{
+  async restoreAfterCloudLoad(remote: AppStore | AppStore['months']): Promise<{
     recoverableOps: DirtyOperation[]
     conflictOps: DirtyOperation[]
     conflicts: EntityConflict[]
@@ -523,6 +612,10 @@ export class DurableJournalController {
     previewMonths: AppStore['months']
     sqlWriteCount: 0
   }> {
+    const remoteMonths =
+      remote && typeof remote === 'object' && 'version' in (remote as object)
+        ? (remote as AppStore).months
+        : (remote as AppStore['months'])
     const empty = {
       recoverableOps: [] as DirtyOperation[],
       conflictOps: [] as DirtyOperation[],
@@ -553,7 +646,7 @@ export class DurableJournalController {
     this.cache.clear()
     for (const r of records) this.cache.set(r.operationId, r)
 
-    const classified = classifyJournalOpsAgainstRemote(records, remoteMonths)
+    const classified = classifyJournalOpsAgainstRemote(records, remote)
     this.unsupportedCount = classified.unsupported.length
 
     // Idempotent: safe remove without SQL write

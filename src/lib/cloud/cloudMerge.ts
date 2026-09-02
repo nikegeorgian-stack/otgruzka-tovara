@@ -827,6 +827,13 @@ function mergeWarehouse(
       onConflict,
     ),
     closedMonths: mergeStringSet(b.closedMonths ?? [], r.closedMonths ?? [], l.closedMonths ?? []),
+    accountingByWarehouse: mergeItemsByKey(
+      b.accountingByWarehouse as Array<Record<string, unknown>> | undefined,
+      r.accountingByWarehouse as Array<Record<string, unknown>> | undefined,
+      l.accountingByWarehouse as Array<Record<string, unknown>> | undefined,
+      (row) => String((row as { warehouseId?: string; id?: string }).warehouseId || (row as { id?: string }).id || ''),
+      onConflict,
+    ) as WarehouseStore['accountingByWarehouse'],
   }
 }
 

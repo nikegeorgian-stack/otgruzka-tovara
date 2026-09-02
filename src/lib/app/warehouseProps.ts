@@ -22,6 +22,8 @@ type WarehouseActions = Pick<
   | 'onRunInventory'
   | 'onPostInventoryRevision'
   | 'onPostOpeningBalances'
+  | 'onSaveOpeningInventoryDraft'
+  | 'onPostOpeningInventory'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
   | 'onQuickEditItem'

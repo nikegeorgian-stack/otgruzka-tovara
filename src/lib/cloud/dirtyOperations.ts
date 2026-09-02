@@ -1,5 +1,6 @@
 import type { StoreMutationOrigin } from './storeMutationOrigin'
 import { getPathValue } from './stableIdPaths'
+import { sanitizeAcknowledgeIds, expandOperationIdsToWholeGroups } from './transactionGroups'
 
 export type DirtyOperationType = 'create' | 'update' | 'delete'
 
@@ -46,17 +47,29 @@ export type DirtyOperation = {
   cloudSnapshot?: unknown
   /** PHASE T1 — granular timesheet cell patch (client-only). */
   timesheetCell?: TimesheetCellPatch
+  /** PHASE W0.6 — explicit atomic warehouse transaction group. */
+  transactionGroupId?: string
+  transactionGroupKind?: string
+  transactionGroupLabel?: string
+  atomic?: boolean
 }
 
 export type EntityConflict = {
   operationId?: string
   domain: string
   entityId: string
-  reason: 'remote_newer' | 'concurrent_edit' | 'missing_local_entity' | 'domain_conflict'
+  reason:
+    | 'remote_newer'
+    | 'concurrent_edit'
+    | 'missing_local_entity'
+    | 'domain_conflict'
+    | 'atomic_group_conflict'
   message: string
   pendingLocal?: unknown
   cloudSnapshot?: unknown
   baselineSnapshot?: unknown
+  transactionGroupId?: string
+  transactionGroupKind?: string
 }
 
 let opSeq = 0
@@ -211,15 +224,33 @@ export class DirtyOperationTracker {
     return this.pending.some((op) => op.origin === 'user')
   }
 
-  /** Drop only ops that were successfully persisted — never wipe the rest. */
+  /** Drop only ops that were successfully persisted — never wipe the rest.
+   * PHASE W0.6: atomic groups are all-or-nothing — subset ack is rejected. */
   acknowledgePersisted(operationIds: string[]): void {
     if (!operationIds.length) return
-    const done = new Set(operationIds)
+    const { safeIds, diagnostic } = sanitizeAcknowledgeIds(this.pending, operationIds)
+    if (diagnostic) {
+      console.error('[cloudDirtyTracker]', diagnostic)
+      this.conflicts = [
+        ...this.conflicts,
+        {
+          domain: 'warehouse',
+          entityId: '*',
+          reason: 'atomic_group_conflict',
+          message: diagnostic,
+        },
+      ]
+    }
+    if (!safeIds.length) {
+      this.emit()
+      return
+    }
+    const done = new Set(safeIds)
     this.pending = this.pending.filter((op) => !done.has(op.operationId))
     this.emit()
     if (this.journalAck) {
       const ack = this.journalAck
-      this.queueJournal(() => ack(operationIds))
+      this.queueJournal(() => ack(safeIds))
     }
   }
 
@@ -237,16 +268,24 @@ export class DirtyOperationTracker {
     this.emit()
   }
 
-  /** Cancel pending ops that match current conflicts (e.g. accept remote). */
+  /** Cancel pending ops that match current conflicts (e.g. accept remote).
+   * PHASE W0.6: discarding any member drops the whole atomic group. */
   discardConflictingPending(): string[] {
     if (!this.conflicts.length) return []
     const byOpId = new Set(
       this.conflicts.map((c) => c.operationId).filter((id): id is string => Boolean(id)),
     )
     const keys = new Set(this.conflicts.map((c) => `${c.domain}::${c.entityId}`))
+    const seedIds: string[] = []
+    for (const op of this.pending) {
+      if (byOpId.has(op.operationId) || keys.has(`${op.domain}::${op.entityId}`)) {
+        seedIds.push(op.operationId)
+      }
+    }
+    const dropSet = new Set(expandOperationIdsToWholeGroups(this.pending, seedIds))
     const dropped: string[] = []
     this.pending = this.pending.filter((op) => {
-      if (byOpId.has(op.operationId) || keys.has(`${op.domain}::${op.entityId}`)) {
+      if (dropSet.has(op.operationId)) {
         dropped.push(op.operationId)
         return false
       }
@@ -272,10 +311,11 @@ export class DirtyOperationTracker {
     this.emit()
   }
 
-  /** Explicit discard of selected operation IDs (recovery UX). */
+  /** Explicit discard of selected operation IDs (recovery UX).
+   * PHASE W0.6: subset of an atomic group expands to the whole group. */
   discardPendingByIds(operationIds: string[]): string[] {
     if (!operationIds.length) return []
-    const done = new Set(operationIds)
+    const done = new Set(expandOperationIdsToWholeGroups(this.pending, operationIds))
     const dropped: string[] = []
     this.pending = this.pending.filter((op) => {
       if (done.has(op.operationId)) {

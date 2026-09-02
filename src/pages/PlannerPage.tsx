@@ -86,6 +86,7 @@ type Props = {
   warehouseItems: WarehouseItem[]
   warehouseCategories: WarehouseCategory[]
   warehouseMovements: StockMovement[]
+  warehouseAccounting?: import('@/lib/warehouse/types').WarehouseAccountingState[]
   activeMonth: string
   onMonthChange: (m: string) => void
   onSaveOrder: (o: ProductionOrder) => void
@@ -136,6 +137,7 @@ export function PlannerPage({
   warehouseItems,
   warehouseCategories,
   warehouseMovements,
+  warehouseAccounting,
   activeMonth,
   onMonthChange,
   onSaveOrder,
@@ -271,8 +273,12 @@ export function PlannerPage({
   }, [form, packagingRecipes, locale])
 
   const warehouseCtx = useMemo(
-    () => ({ items: warehouseItems, movements: warehouseMovements }),
-    [warehouseItems, warehouseMovements],
+    () => ({
+      items: warehouseItems,
+      movements: warehouseMovements,
+      accountingByWarehouse: warehouseAccounting,
+    }),
+    [warehouseItems, warehouseMovements, warehouseAccounting],
   )
 
   const materialShortageCount = useMemo(
@@ -601,6 +607,7 @@ export function PlannerPage({
             boxRecipes={boxRecipes}
             warehouseItems={warehouseItems}
             warehouseMovements={warehouseMovements}
+            warehouseAccounting={warehouseAccounting}
             categoryNames={categoryNames}
             formPackagingPreview={formPackagingPreview}
             formForStock={formForStock}
@@ -871,6 +878,7 @@ export function PlannerPage({
                     order={selected}
                     warehouseItems={warehouseItems}
                     warehouseMovements={warehouseMovements}
+                    warehouseAccounting={warehouseAccounting}
                   />
                 )}
 
@@ -1280,6 +1288,7 @@ export function PlannerPage({
           orders={orders}
           warehouseItems={warehouseItems}
           warehouseMovements={warehouseMovements}
+          warehouseAccounting={warehouseAccounting}
           onReserveOrder={onReserveMaterials}
           onUnreserveOrder={onUnreserveMaterials}
           onSelectOrder={(id) => {
