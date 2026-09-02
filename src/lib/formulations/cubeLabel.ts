@@ -1,5 +1,7 @@
 import type { FormulationBatchRun } from './types'
 import { formulationColorLabel } from './types'
+import { intlLocale } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
 import { productColorSwatch, type ProductColorSwatch } from './colorMap'
 
 export type CubeLabelModel = {
@@ -40,7 +42,7 @@ async function buildBarcodeDataUrl(code: string): Promise<string | undefined> {
 export async function buildCubeLabelModel(
   run: FormulationBatchRun,
   opts: {
-    locale: 'ru' | 'ka'
+    locale: Locale
     site?: string
     warehouseName?: string
     labelText?: string
@@ -93,9 +95,9 @@ export async function buildCubeLabelModel(
   }
 }
 
-export function formatMixDate(iso: string, locale: 'ru' | 'ka'): string {
+export function formatMixDate(iso: string, locale: Locale): string {
   try {
-    return new Date(iso + 'T12:00:00').toLocaleDateString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+    return new Date(iso + 'T12:00:00').toLocaleDateString(intlLocale(locale), {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',

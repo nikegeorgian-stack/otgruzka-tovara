@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { ruNameToKa } from '@/lib/i18n/ruToKaName'
+import { ruNameToEn } from '@/lib/i18n/ruToEnName'
 import { EmployeePhoto } from '@/components/ui/EmployeePhoto'
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
+import { CandidateQuestionnaireModal } from '@/components/hr/CandidateQuestionnaireModal'
 import { EducationSection, ExperienceSection } from '@/components/hr/HrCardSections'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
+import { questionnaireAnsweredCount } from '@/lib/hr/candidateQuestionnaire'
 import { fileToDataUrl } from '@/lib/hr/files'
 import {
   CANDIDATE_STATUSES,
@@ -12,6 +16,7 @@ import {
   createNewCandidate,
   isHireStatus,
 } from '@/lib/hr/candidates'
+import { suggestLoginFromDisplayName } from '@/lib/access/suggestLogin'
 import type { Candidate, CandidateStatus, EmployeeGender } from '@/lib/hr/types'
 import type { Locale } from '@/i18n/types'
 
@@ -19,7 +24,15 @@ type Props = {
   candidates: Candidate[]
   onUpsert: (c: Candidate) => void
   onRemove: (id: string) => void
-  onHire: (id: string) => void
+  /** Возвращает id созданного сотрудника */
+  onHire: (id: string) => string | null
+  /** Опционально создать веб-кабинет (роль employee) после найма */
+  onCreateEmployeeCabinet?: (input: {
+    employeeId: string
+    displayName: string
+    login: string
+    password: string
+  }) => Promise<void>
 }
 
 const toneClass: Record<ReturnType<typeof candidateStatusTone>, string> = {
@@ -29,14 +42,27 @@ const toneClass: Record<ReturnType<typeof candidateStatusTone>, string> = {
   bad: 'bg-red-100 text-red-700',
 }
 
-export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Props) {
+export function CandidatesPanel({
+  candidates,
+  onUpsert,
+  onRemove,
+  onHire,
+  onCreateEmployeeCabinet,
+}: Props) {
   const { t, locale } = useI18n()
   const loc = locale as Locale
   const { confirm } = useConfirm()
   const [q, setQ] = useState('')
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | ''>('')
   const [editing, setEditing] = useState<Candidate | null>(null)
+  const [anketaFor, setAnketaFor] = useState<Candidate | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [hireTarget, setHireTarget] = useState<Candidate | null>(null)
+  const [createCabinet, setCreateCabinet] = useState(false)
+  const [cabinetLogin, setCabinetLogin] = useState('')
+  const [cabinetPassword, setCabinetPassword] = useState('')
+  const [hireBusy, setHireBusy] = useState(false)
+  const [hireError, setHireError] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -55,12 +81,62 @@ export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Prop
   }, [candidates, q, statusFilter])
 
   async function handleHire(c: Candidate) {
-    const ok = await confirm({
-      message: t('hr.candidate.hireConfirm').replace('{name}', c.fullName || '—'),
-    })
-    if (!ok) return
-    onHire(c.id)
-    setNotice(t('hr.candidate.hireDone').replace('{name}', c.fullName || '—'))
+    setHireTarget(c)
+    setCreateCabinet(false)
+    const fromEmail = c.email?.trim().toLowerCase() || ''
+    setCabinetLogin(
+      fromEmail ||
+        suggestLoginFromDisplayName(c.fullName || '', { asEmail: true }),
+    )
+    setCabinetPassword('')
+    setHireError(null)
+  }
+
+  async function confirmHire() {
+    if (!hireTarget) return
+    if (createCabinet) {
+      if (!cabinetLogin.trim() || !cabinetPassword.trim()) {
+        setHireError(t('hr.candidate.hireCabinetRequired'))
+        return
+      }
+      if (!onCreateEmployeeCabinet) {
+        setHireError(t('hr.candidate.hireCabinetUnavailable'))
+        return
+      }
+    }
+    setHireBusy(true)
+    setHireError(null)
+    try {
+      const employeeId = onHire(hireTarget.id)
+      if (!employeeId) {
+        setHireError(t('hr.candidate.hireFailed'))
+        return
+      }
+      if (createCabinet && onCreateEmployeeCabinet) {
+        await onCreateEmployeeCabinet({
+          employeeId,
+          displayName: hireTarget.fullName || cabinetLogin.trim(),
+          login: cabinetLogin.trim().toLowerCase(),
+          password: cabinetPassword,
+        })
+        setNotice(
+          t('hr.candidate.hireDoneWithCabinet').replace('{name}', hireTarget.fullName || '—'),
+        )
+      } else {
+        setNotice(
+          `${t('hr.candidate.hireDone').replace('{name}', hireTarget.fullName || '—')}. ${t('hr.candidate.hireCabinetHint')}`,
+        )
+      }
+      setHireTarget(null)
+    } catch (err) {
+      const code = err instanceof Error ? err.message : ''
+      if (code === 'login_taken') setHireError(t('hr.candidate.hireCabinetErrLoginTaken'))
+      else if (code === 'password_required') setHireError(t('hr.candidate.hireCabinetRequired'))
+      else if (code === 'login_required') setHireError(t('hr.candidate.hireCabinetRequired'))
+      else setHireError(t('hr.candidate.hireFailed'))
+    } finally {
+      setHireBusy(false)
+    }
   }
 
   async function handleRemove(c: Candidate) {
@@ -97,6 +173,7 @@ export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Prop
           type="button"
           className="btn-add"
           onClick={() => setEditing(createNewCandidate())}
+          data-coach="hr:addCandidate"
         >
           {t('hr.candidate.add')}
         </button>
@@ -109,6 +186,70 @@ export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Prop
             ✕
           </button>
         </div>
+      )}
+
+      {hireTarget && (
+        <ModalBackdrop
+          open
+          ephemeral
+          onClose={() => !hireBusy && setHireTarget(null)}
+          panelClassName="w-full max-w-md rounded-sm border border-grid bg-white p-4 shadow-lg"
+        >
+          <h3 className="text-base font-semibold text-ink">{t('hr.candidate.hire')}</h3>
+          <p className="mt-2 text-sm text-stone-600">
+            {t('hr.candidate.hireConfirm').replace('{name}', hireTarget.fullName || '—')}
+          </p>
+          <label className="mt-4 flex items-start gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={createCabinet}
+              disabled={hireBusy || !onCreateEmployeeCabinet}
+              onChange={(e) => setCreateCabinet(e.target.checked)}
+            />
+            <span>{t('hr.candidate.hireCreateCabinet')}</span>
+          </label>
+          {createCabinet && (
+            <div className="mt-3 space-y-2">
+              <input
+                className="w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                placeholder={t('hr.candidate.hireCabinetLogin')}
+                value={cabinetLogin}
+                disabled={hireBusy}
+                onChange={(e) => setCabinetLogin(e.target.value)}
+                autoComplete="off"
+              />
+              <input
+                type="password"
+                className="w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                placeholder={t('hr.candidate.hireCabinetPassword')}
+                value={cabinetPassword}
+                disabled={hireBusy}
+                onChange={(e) => setCabinetPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+          {hireError && <p className="mt-3 text-sm text-red-700">{hireError}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-sm border border-grid px-3 py-1.5 text-sm"
+              disabled={hireBusy}
+              onClick={() => setHireTarget(null)}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="rounded-sm bg-teal-700 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+              disabled={hireBusy}
+              onClick={() => void confirmHire()}
+            >
+              {t('hr.candidate.hire')}
+            </button>
+          </div>
+        </ModalBackdrop>
       )}
 
       <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
@@ -156,7 +297,19 @@ export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Prop
                   {c.interviewDate || '—'}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <div className="flex justify-end gap-3">
+                  <div className="flex flex-wrap justify-end gap-3">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-teal-800 hover:underline"
+                      onClick={() => setAnketaFor(c)}
+                      data-coach="hr:anketaOpen"
+                      title={t('hr.anketa.open')}
+                    >
+                      {t('hr.anketa.open')}
+                      {questionnaireAnsweredCount(c.questionnaire) > 0
+                        ? ` (${questionnaireAnsweredCount(c.questionnaire)})`
+                        : ''}
+                    </button>
                     {isHireStatus(c.status) && (
                       <button
                         type="button"
@@ -192,6 +345,26 @@ export function CandidatesPanel({ candidates, onUpsert, onRemove, onHire }: Prop
             onUpsert(c)
             setEditing(null)
           }}
+          onOpenAnketa={() => {
+            setAnketaFor(editing)
+          }}
+        />
+      )}
+
+      {anketaFor && (
+        <CandidateQuestionnaireModal
+          candidate={anketaFor}
+          onClose={() => setAnketaFor(null)}
+          onSave={(questionnaire) => {
+            const next = {
+              ...anketaFor,
+              questionnaire,
+              updatedAt: new Date().toISOString(),
+            }
+            onUpsert(next)
+            setAnketaFor(null)
+            if (editing?.id === next.id) setEditing(next)
+          }}
         />
       )}
     </div>
@@ -202,14 +375,18 @@ function CandidateEditor({
   candidate,
   onSave,
   onClose,
+  onOpenAnketa,
 }: {
   candidate: Candidate
   onSave: (c: Candidate) => void
   onClose: () => void
+  onOpenAnketa: () => void
 }) {
   const { t, locale } = useI18n()
   const loc = locale as Locale
   const [c, setC] = useState<Candidate>(candidate)
+  const nameKaManualRef = useRef(!!candidate.nameKa?.trim())
+  const nameEnManualRef = useRef(!!candidate.nameEn?.trim())
   const isNew = !candidate.fullName
 
   function patch(p: Partial<Candidate>) {
@@ -223,55 +400,112 @@ function CandidateEditor({
     <ModalBackdrop
       open
       onClose={onClose}
-      className="app-dialog-backdrop fixed inset-0 flex items-start justify-center overflow-y-auto p-4 pt-8 sm:items-center sm:pt-4"
-      panelClassName="app-dialog-panel mb-8 w-full max-w-2xl rounded-sm bg-white shadow-sm"
+      panelClassName="app-dialog-panel flex w-full max-w-2xl flex-col overflow-hidden rounded-t-sm border border-grid bg-white shadow-sm sm:rounded-sm"
     >
-        <div className="flex items-center justify-between border-b border-grid px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-grid bg-stone-50 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
             <EmployeePhoto
               photoDataUrl={c.photoDataUrl}
               gender={c.gender ?? 'unknown'}
               className="h-14 w-12 shrink-0 rounded-sm object-cover ring-1 ring-grid"
             />
-            <div>
-              <p className="text-base font-bold text-ink">
+            <div className="min-w-0">
+              <p className="truncate text-base font-bold text-ink">
                 {isNew ? t('hr.candidate.new') : c.fullName}
               </p>
+              {c.nameKa ? (
+                <p className="truncate text-xs text-stone-500">{c.nameKa}</p>
+              ) : null}
               <span className="text-xs text-stone-500">
                 {candidateStatusLabel(c.status, loc)}
               </span>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded-sm border border-grid px-3 py-1.5 text-sm hover:bg-paper-dark"
-              onClick={onClose}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className="rounded-sm bg-accent px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-              disabled={!c.fullName.trim()}
-              onClick={() => onSave({ ...c, fullName: c.fullName.trim() })}
-            >
-              {t('common.save')}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="rounded-sm p-2 text-stone-400 transition hover:bg-stone-100 hover:text-ink"
+            aria-label={t('common.close')}
+            onClick={onClose}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <path
+                d="M5 5l10 10M15 5L5 15"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
         </div>
 
-        <div className="max-h-[64vh] space-y-5 overflow-y-auto p-6">
+        <div className="app-dialog-body space-y-5 px-4 py-4 sm:px-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className={`${labelCls} sm:col-span-2`}>
-              ФИО
-              <input
-                className={field}
-                value={c.fullName}
-                onChange={(e) => patch({ fullName: e.target.value })}
-                autoFocus
-              />
-            </label>
+            <div className="sm:col-span-2 rounded-sm border border-grid bg-stone-50/80 p-3">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                  {t('hr.nameBlock.title')}
+                </p>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-40"
+                  disabled={!c.fullName.trim()}
+                  onClick={() => {
+                    nameKaManualRef.current = false
+                    nameEnManualRef.current = false
+                    patch({
+                      nameKa: ruNameToKa(c.fullName) || undefined,
+                      nameEn: ruNameToEn(c.fullName) || undefined,
+                    })
+                  }}
+                >
+                  {t('hr.nameBlock.fromRu')}
+                </button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className={labelCls}>
+                  {t('hr.nameBlock.ru')}
+                  <input
+                    className={`${field} bg-white`}
+                    value={c.fullName}
+                    onChange={(e) => {
+                      const fullName = e.target.value
+                      const next: Partial<Candidate> = { fullName }
+                      const suggestedKa = ruNameToKa(fullName)
+                      const suggestedEn = ruNameToEn(fullName)
+                      if (!nameKaManualRef.current && suggestedKa) next.nameKa = suggestedKa
+                      if (!nameEnManualRef.current && suggestedEn) next.nameEn = suggestedEn
+                      patch(next)
+                    }}
+                    autoFocus
+                  />
+                </label>
+                <label className={labelCls}>
+                  {t('hr.nameBlock.ka')}
+                  <input
+                    className={`${field} bg-white`}
+                    value={c.nameKa ?? ''}
+                    onChange={(e) => {
+                      nameKaManualRef.current = true
+                      patch({ nameKa: e.target.value })
+                    }}
+                    placeholder="ნიკა წულაია"
+                  />
+                </label>
+                <label className={labelCls}>
+                  {t('hr.nameBlock.en')}
+                  <input
+                    className={`${field} bg-white`}
+                    value={c.nameEn ?? ''}
+                    onChange={(e) => {
+                      nameEnManualRef.current = true
+                      patch({ nameEn: e.target.value })
+                    }}
+                    placeholder="Nika Tsulaia"
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-stone-400">{t('hr.nameBlock.autoHint')}</p>
+            </div>
             <label className={labelCls}>
               {t('hr.candidate.status')}
               <select
@@ -421,6 +655,35 @@ function CandidateEditor({
             />
           </label>
         </div>
+
+        <footer className="app-dialog-footer flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-grid bg-stone-50 px-4 pt-3 sm:px-6">
+          <button
+            type="button"
+            className="rounded-sm border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-100"
+            onClick={onOpenAnketa}
+            data-coach="hr:anketaOpen"
+          >
+            {t('hr.anketa.open')}
+          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-sm border border-grid bg-white px-4 py-2 text-sm hover:bg-paper-dark"
+              onClick={onClose}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              data-modal-primary
+              className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              disabled={!c.fullName.trim()}
+              onClick={() => onSave({ ...c, fullName: c.fullName.trim() })}
+            >
+              {t('common.save')}
+            </button>
+          </div>
+        </footer>
     </ModalBackdrop>
   )
 }

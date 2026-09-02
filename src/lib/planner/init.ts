@@ -1,3 +1,4 @@
+import { normalizeMeshCell } from '@/lib/finishedProducts/catalog'
 import { guessColorFromText, isValidProductColor } from '@/lib/finishedProducts/colors'
 import { newId } from '@/lib/production/files'
 import type {
@@ -79,12 +80,16 @@ export function normalizeProductionOrder(order: ProductionOrder): ProductionOrde
     rawMaterialKind: order.rawMaterialKind || undefined,
     rawMaterialItemId: order.rawMaterialItemId || undefined,
     packagingRecipeId: order.packagingRecipeId || undefined,
+    boxRecipeId: order.boxRecipeId || undefined,
     formulationRecipeId: order.formulationRecipeId || undefined,
     formulationRecipeStatus: normalizeRecipeStatus(
       order.formulationRecipeStatus,
       order.formulationRecipeId,
     ),
     targetGsm: order.targetGsm && order.targetGsm > 0 ? order.targetGsm : undefined,
+    meshCellSize: normalizeMeshCell(order.meshCellSize),
+    orderedRolls: order.orderedRolls && order.orderedRolls > 0 ? order.orderedRolls : undefined,
+    rollsPerBox: order.rollsPerBox && order.rollsPerBox > 0 ? order.rollsPerBox : undefined,
     labelNote: order.labelNote?.trim() || undefined,
     salesOrderId: order.salesOrderId || undefined,
     salesLineId: order.salesLineId || undefined,

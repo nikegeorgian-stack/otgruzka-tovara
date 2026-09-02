@@ -2,19 +2,25 @@ import { useMemo, useState, useEffect } from 'react'
 import { AttendanceLogPanel } from '@/components/hr/AttendanceLogPanel'
 import { BilingualText } from '@/components/employee/BilingualText'
 import { CandidatesPanel } from '@/components/hr/CandidatesPanel'
-import { EmployeeEditorHost } from '@/components/hr/EmployeeEditorHost'
+import { useEmployeeEditorApi } from '@/context/EmployeeEditorContext'
 import { HrDocumentOpenButton } from '@/components/hr/HrDocumentOpenButton'
+import { HrStaffRatesPanel } from '@/components/hr/HrStaffRatesPanel'
 import { HrPersonalFile } from '@/components/hr/HrPersonalFile'
 import { HrRegistryImportPanel } from '@/components/hr/HrRegistryImportPanel'
 import { HrTrashPanel } from '@/components/hr/HrTrashPanel'
+import { HrFiredPanel } from '@/components/hr/HrFiredPanel'
 import { HrVacationForm } from '@/components/hr/HrVacationForm'
 import { HrViewDefaultsDialog } from '@/components/hr/HrViewDefaultsDialog'
 import { PayrollPanel } from '@/components/hr/PayrollPanel'
+import { SickConfirmPanel, VacationConfirmPanel } from '@/components/finance/SickConfirmPanel'
+import type { FinanceActions } from '@/components/finance/financeTypes'
 import { WorkshopMasterRosterPanel } from '@/components/hr/WorkshopMasterRosterPanel'
+import { WorkshopMasterCoveragePanel } from '@/components/access/WorkshopMasterCoveragePanel'
 import { AppDialog } from '@/components/ui/AppDialog'
 import { Button } from '@/components/ui/Button'
 import { EmployeePhoto } from '@/components/ui/EmployeePhoto'
 import { FormNotice } from '@/components/ui/FormNotice'
+import { SharedDataNotice } from '@/components/ui/SharedDataNotice'
 import { Input } from '@/components/ui/Input'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -31,12 +37,14 @@ import { useWorkspaceWidgets } from '@/hooks/useWorkspaceWidgets'
 import type { WorkspaceWidgetDef } from '@/lib/ui/workspaceWidgets'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
-import { isSysAdmin } from '@/lib/access/permissions'
+import {
+  isSysAdmin,
+  canManageMasterCoverage,
+  canViewFullHrPersonnel,
+} from '@/lib/access/permissions'
 import type { AppUser } from '@/lib/access/types'
 import { newId } from '@/lib/hr/files'
-import { useEmployeeEditor } from '@/hooks/useEmployeeEditor'
 import { hrStatusLabel } from '@/lib/hr/labels'
-import { terminationSegments } from '@/lib/hr/timesheetRange'
 import {
   allEmployeeAbsences,
   allEmployeeDocuments,
@@ -46,6 +54,10 @@ import {
   isExpiringSoon,
   isOverdue,
 } from '@/lib/hr/stats'
+import { allEmployeeContracts, employeeHasExpiringContract } from '@/lib/hr/contracts'
+import { HrEmploymentContractsPanel } from '@/components/hr/HrEmploymentContractsPanel'
+import { HrDocumentsMonitorDialog } from '@/components/hr/HrDocumentsMonitorDialog'
+import { countDocumentMonitorProblems } from '@/lib/hr/documentMonitor'
 import { employeeSearchHr } from '@/lib/hr/sync'
 import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
 import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
@@ -68,7 +80,13 @@ export type HrPageProps = {
   onRemoveEmployee: (id: string) => void
   onUpsertCandidate: (c: Candidate) => void
   onRemoveCandidate: (id: string) => void
-  onHireCandidate: (id: string) => void
+  onHireCandidate: (id: string) => string | null
+  onCreateEmployeeCabinet?: (input: {
+    employeeId: string
+    displayName: string
+    login: string
+    password: string
+  }) => Promise<void>
   onSetEmployeeFactRange: (
     month: string,
     employeeId: string,
@@ -86,6 +104,8 @@ export type HrPageProps = {
   onSectionChange?: (section: HrSection) => void
   /** Облачный кабинет HR — без лишних вкладок */
   webHrMode?: boolean
+  /** Реальный sysadmin (не превью кабинета HR) — корзина и восстановление */
+  realSysAdmin?: boolean
   /** Мастер цеха — только просмотр списка (ФИО, должность, договор) */
   workshopMasterMode?: boolean
   webUserName?: string
@@ -95,25 +115,44 @@ export type HrPageProps = {
     viewId: K,
     patch: NonNullable<UserViewDefaults[K]>,
   ) => void
+  /** Подтверждение больничных и отпусков (HR / финансы). */
+  financeActions?: FinanceActions
+  onNavigateToDirectory?: (section: 'positions') => void
+  onOpenFinance?: () => void
+  onUpsertWorkshopMasterCoverage?: (input: {
+    id?: string
+    coverUserId: string
+    absentUserId: string
+    brigades?: string[]
+    fromDate: string
+    toDate: string
+    note?: string
+    post?: boolean
+  }) => void
+  onPostWorkshopMasterCoverage?: (coverageId: string) => void
+  onEndWorkshopMasterCoverage?: (coverageId: string) => void
 }
 
 const HR_WEB_SECTIONS: HrSection[] = [
   'employees',
-  'cards',
+  'contracts',
   'documents',
   'absences',
   'trainings',
   'pay',
+  'fired',
+  'settings',
 ]
 
 const HR_TABS: { id: HrSection; labelKey: string }[] = [
   { id: 'employees', labelKey: 'hr.tab.employees' },
-  { id: 'cards', labelKey: 'hr.tab.cards' },
+  { id: 'contracts', labelKey: 'hr.tab.contracts' },
   { id: 'candidates', labelKey: 'hr.tab.candidates' },
   { id: 'documents', labelKey: 'hr.tab.documents' },
   { id: 'absences', labelKey: 'hr.tab.absences' },
   { id: 'trainings', labelKey: 'hr.tab.trainings' },
   { id: 'pay', labelKey: 'hr.tab.pay' },
+  { id: 'fired', labelKey: 'hr.tab.fired' },
   { id: 'trash', labelKey: 'hr.tab.trash' },
   { id: 'reports', labelKey: 'hr.tab.reports' },
   { id: 'settings', labelKey: 'hr.tab.settings' },
@@ -125,7 +164,7 @@ export function HrPage({
   onMonthChange,
   initialSection = 'employees',
   employees,
-  hrStructuralUnits,
+  hrStructuralUnits: _hrStructuralUnits,
   hrPositions,
   brigades,
   currentUser,
@@ -135,6 +174,7 @@ export function HrPage({
   onUpsertCandidate,
   onRemoveCandidate,
   onHireCandidate,
+  onCreateEmployeeCabinet,
   onSetEmployeeFactRange,
   onRestoreTrashEmployee,
   onPurgeTrashEmployee,
@@ -145,33 +185,56 @@ export function HrPage({
   onClearAllPersonnel,
   onSectionChange,
   webHrMode = false,
+  realSysAdmin = false,
   workshopMasterMode = false,
   webUserName,
   userHrDefaults,
   currentUserId,
   onSaveViewDefaults,
+  financeActions,
+  onNavigateToDirectory,
+  onOpenFinance,
+  onUpsertWorkshopMasterCoverage,
+  onPostWorkshopMasterCoverage,
+  onEndWorkshopMasterCoverage,
 }: HrPageProps) {
   const { t, tf, locale, employeeNameLines, employeePositionLines } = useI18n()
   const { confirm } = useConfirm()
-  const admin = isSysAdmin(currentUser)
+  const admin = realSysAdmin || isSysAdmin(currentUser)
+  const canCoverage = canManageMasterCoverage(currentUser)
+  const fullPersonnel = canViewFullHrPersonnel(currentUser)
+  const trashCount =
+    (store.trash?.employees?.length ?? 0) + (store.trash?.candidates?.length ?? 0)
+  const firedCount = useMemo(
+    () => employees.filter((e) => (e.hrStatus ?? 'active') === 'fired').length,
+    [employees],
+  )
   const visibleTabs = useMemo(
     () =>
       webHrMode
         ? HR_TABS.filter((tab) =>
-            [...HR_WEB_SECTIONS, ...(admin ? (['settings'] as HrSection[]) : [])].includes(
-              tab.id,
-            ),
+            [
+              ...HR_WEB_SECTIONS,
+              ...(admin ? (['trash'] as HrSection[]) : []),
+              ...(admin || canCoverage ? (['settings'] as HrSection[]) : []),
+            ].includes(tab.id),
           )
         : HR_TABS.filter((tab) => (tab.id === 'trash' ? admin : true)),
-    [webHrMode, admin],
+    [webHrMode, admin, canCoverage],
   )
-  const [section, setSection] = useState<HrSection>(initialSection)
+  const [section, setSection] = useState<HrSection>(() =>
+    (initialSection as string) === 'cards' ? 'employees' : initialSection,
+  )
   const [defaultsOpen, setDefaultsOpen] = useState(false)
   const widgets = useWorkspaceWidgets('hr')
   const [q, setQ] = useState('')
   const [docQ, setDocQ] = useState('')
+  const [trainQ, setTrainQ] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [statusFilters, setStatusFilters] = useState<Set<HrStatus>>(new Set())
+  const [contractAlertFilter, setContractAlertFilter] = useState(false)
+  const [contractFilter, setContractFilter] = useState<'all' | 'expiring' | 'overdue'>('all')
+  const [docMonitorOpen, setDocMonitorOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [employeeSort, setEmployeeSort] = useState<TableSortState<EmployeeSortKey>>({
     key: null,
@@ -190,7 +253,7 @@ export function HrPage({
       return next
     })
   }
-  const employeeEditor = useEmployeeEditor(brigades, employees)
+  const employeeEditor = useEmployeeEditorApi()
   const [showPosition, setShowPosition] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [newPos, setNewPos] = useState({
@@ -206,6 +269,10 @@ export function HrPage({
   })
 
   const kpis = useMemo(() => computeHrKpis(employees), [employees])
+  const docMonitorProblems = useMemo(
+    () => countDocumentMonitorProblems(employees),
+    [employees],
+  )
 
   const departments = useMemo(() => {
     const s = new Set<string>()
@@ -219,21 +286,33 @@ export function HrPage({
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
     const list = employees.filter((e) => {
+      const status = e.hrStatus ?? 'active'
+      if (status === 'fired') return false
       if (deptFilter && (e.department ?? e.brigade) !== deptFilter) return false
-      if (statusFilters.size > 0 && !statusFilters.has(e.hrStatus ?? 'active')) return false
+      if (statusFilters.size > 0 && !statusFilters.has(status)) return false
+      if (contractAlertFilter && !employeeHasExpiringContract(e)) return false
       if (!s) return true
       return employeeSearchHr(e).includes(s)
     })
     return sortEmployees(list, employeeSort, locale)
-  }, [employees, q, deptFilter, statusFilters, employeeSort, locale])
+  }, [employees, q, deptFilter, statusFilters, contractAlertFilter, employeeSort, locale])
 
   const selected = employees.find((e) => e.id === selectedId) ?? null
   const allDocs = useMemo(() => allEmployeeDocuments(employees), [employees])
+  const allContracts = useMemo(() => allEmployeeContracts(employees), [employees])
   const allAbs = useMemo(() => allEmployeeAbsences(employees), [employees])
   const allTrain = useMemo(() => allEmployeeTrainings(employees), [employees])
+  const filteredTrain = useMemo(() => {
+    const s = trainQ.trim().toLowerCase()
+    if (!s) return allTrain
+    return allTrain.filter(
+      ({ employeeName, training }) =>
+        employeeName.toLowerCase().includes(s) || training.title.toLowerCase().includes(s),
+    )
+  }, [allTrain, trainQ])
 
   useEffect(() => {
-    setSection(initialSection)
+    setSection((initialSection as string) === 'cards' ? 'employees' : initialSection)
   }, [initialSection])
 
   function submitPosition(e: React.FormEvent) {
@@ -269,24 +348,6 @@ export function HrPage({
     setNotice(null)
   }
 
-  function handleSaveEmployee(updated: Employee) {
-    const prev = employees.find((e) => e.id === updated.id)
-    onSaveEmployee(updated)
-    // Увольнение: очищаем факт в табеле с даты увольнения и далее.
-    if (updated.hrStatus === 'fired' && updated.terminationDate) {
-      const changed =
-        !prev ||
-        prev.hrStatus !== 'fired' ||
-        prev.terminationDate !== updated.terminationDate
-      if (changed) {
-        const segs = terminationSegments(Object.keys(store.months), updated.terminationDate)
-        for (const seg of segs) {
-          onSetEmployeeFactRange(seg.monthKey, updated.id, seg.fromDay, seg.toDay, '')
-        }
-      }
-    }
-  }
-
   async function handleDeleteEmployee(e: Employee) {
     const ok = await confirm({
       message: t('hr.deleteConfirm').replace('{name}', e.fullName || '—'),
@@ -301,6 +362,7 @@ export function HrPage({
     | { kind: 'status'; statuses: HrStatus[] }
     | { kind: 'clear' }
     | { kind: 'section'; section: HrSection }
+    | { kind: 'contracts'; filter: 'expiring' | 'overdue' }
     | undefined
 
   const kpiItems: {
@@ -327,12 +389,26 @@ export function HrPage({
     {
       label: t('hr.kpi.fired'),
       value: kpis.fired,
-      action: { kind: 'status', statuses: ['fired'] },
-      active: statusFilters.has('fired'),
+      action: { kind: 'section', section: 'fired' },
+      active: section === 'fired',
     },
     { label: t('hr.kpi.candidates'), value: candidates.length, action: { kind: 'section', section: 'candidates' } },
     { label: t('hr.kpi.docExp'), value: kpis.expiringDocs, tone: 'warn', action: { kind: 'section', section: 'documents' } },
     { label: t('hr.kpi.docOver'), value: kpis.overdueDocs, tone: 'warn', action: { kind: 'section', section: 'documents' } },
+    {
+      label: t('hr.kpi.contractExp'),
+      value: kpis.expiringContracts,
+      tone: 'warn',
+      action: { kind: 'contracts', filter: 'expiring' },
+      active: section === 'contracts' && contractFilter === 'expiring',
+    },
+    {
+      label: t('hr.kpi.contractOver'),
+      value: kpis.overdueContracts,
+      tone: 'warn',
+      action: { kind: 'contracts', filter: 'overdue' },
+      active: section === 'contracts' && contractFilter === 'overdue',
+    },
     { label: t('hr.kpi.trainOver'), value: kpis.overdueTrainings, tone: 'warn', action: { kind: 'section', section: 'trainings' } },
   ]
 
@@ -340,15 +416,19 @@ export function HrPage({
     if (!action) return
     if (action.kind === 'clear') {
       setStatusFilters(new Set())
-      if (section !== 'employees' && section !== 'cards') changeSection('employees')
+      if (section !== 'employees') changeSection('employees')
       return
     }
     if (action.kind === 'status') {
       setStatusFilters(new Set(action.statuses))
-      if (section !== 'employees' && section !== 'cards') changeSection('employees')
+      if (section !== 'employees') changeSection('employees')
       return
     }
     if (action.kind === 'section') changeSection(action.section)
+    if (action.kind === 'contracts') {
+      changeSection('contracts')
+      setContractFilter(action.filter)
+    }
   }
 
   function changeSection(id: HrSection) {
@@ -363,8 +443,8 @@ export function HrPage({
       labelKey: 'workspace.widget.analytics',
       icon: '◫',
       badge:
-        kpis.expiringDocs + kpis.overdueDocs + kpis.overdueTrainings > 0
-          ? kpis.expiringDocs + kpis.overdueDocs + kpis.overdueTrainings
+        kpis.expiringDocs + kpis.overdueDocs + kpis.expiringContracts + kpis.overdueContracts + kpis.overdueTrainings > 0
+          ? kpis.expiringDocs + kpis.overdueDocs + kpis.expiringContracts + kpis.overdueContracts + kpis.overdueTrainings
           : undefined,
     },
   ]
@@ -390,7 +470,7 @@ export function HrPage({
         ))}
       </select>
       <div className="flex flex-wrap items-center gap-1.5" title={t('hr.filterStatusHint')}>
-        {(['active', 'vacation', 'sick', 'fired'] as HrStatus[]).map((s) => {
+        {(['active', 'vacation', 'sick'] as HrStatus[]).map((s) => {
           const on = statusFilters.has(s)
           return (
             <button
@@ -423,23 +503,54 @@ export function HrPage({
             ✕ {t('hr.allStatuses')}
           </button>
         )}
+        <button
+          type="button"
+          title={t('hr.contractAlertFilterHint')}
+          onClick={() => setContractAlertFilter((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-semibold transition ${
+            contractAlertFilter
+              ? 'border-amber-500 bg-amber-50 text-amber-800'
+              : 'border-grid bg-white text-stone-600 hover:border-amber-400'
+          }`}
+        >
+          ⚠ {t('hr.contractAlertFilter')}
+        </button>
       </div>
     </div>
   )
 
-  if (workshopMasterMode) {
+  // Мастер / директор / любой без роли HR|финансы|админ — только ФИО и должность.
+  if (workshopMasterMode || !fullPersonnel) {
     return (
       <PageLayout>
         <PageHeader
-          badge={t('web.workshopMaster.badge')}
-          title={
-            webUserName
-              ? tf('web.workshopMaster.welcome', { name: webUserName })
-              : t('web.workshopMaster.title')
+          badge={
+            workshopMasterMode ? t('web.workshopMaster.badge') : t('hr.limited.badge')
           }
-          subtitle={t('web.workshopMaster.pageSubtitle')}
+          title={
+            workshopMasterMode
+              ? webUserName
+                ? tf('web.workshopMaster.welcome', { name: webUserName })
+                : t('web.workshopMaster.title')
+              : t('hr.limited.title')
+          }
+          subtitle={
+            workshopMasterMode
+              ? t('web.workshopMaster.pageSubtitle')
+              : t('hr.limited.subtitle')
+          }
         />
-        <WorkshopMasterRosterPanel employees={employees} />
+        <WorkshopMasterRosterPanel
+          employees={employees}
+          hintKey={
+            workshopMasterMode ? 'workshopMaster.rosterHint' : 'hr.limited.hint'
+          }
+          readOnlyKey={
+            workshopMasterMode
+              ? 'workshopMaster.rosterReadOnly'
+              : 'hr.limited.readOnly'
+          }
+        />
       </PageLayout>
     )
   }
@@ -458,12 +569,26 @@ export function HrPage({
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <TabBar
-              tabs={visibleTabs.map((tab) => ({ id: tab.id, label: t(tab.labelKey) }))}
+              coachPrefix="hr"
+              tabs={visibleTabs.map((tab) => ({
+                id: tab.id,
+                label: t(tab.labelKey),
+                count:
+                  tab.id === 'trash' ? trashCount : tab.id === 'fired' ? firedCount : undefined,
+              }))}
               value={section}
               onChange={(id) => changeSection(id as HrSection)}
             />
             <PageActionOverflow
               items={[
+                {
+                  id: 'docMonitor',
+                  label:
+                    docMonitorProblems.overdue + docMonitorProblems.expiring > 0
+                      ? `${t('hr.docMonitor.open')} (${docMonitorProblems.overdue + docMonitorProblems.expiring})`
+                      : t('hr.docMonitor.open'),
+                  onClick: () => setDocMonitorOpen(true),
+                },
                 {
                   id: 'defaults',
                   label: t('viewDefaults.open'),
@@ -485,7 +610,7 @@ export function HrPage({
         openId={widgets.openId}
         onToggle={widgets.toggle}
         leading={
-          section === 'employees' || section === 'cards' ? (
+          section === 'employees' ? (
             <input
               className="w-full rounded-sm border border-grid bg-white px-2 py-1.5 text-sm"
               placeholder={t('hr.search')}
@@ -516,7 +641,7 @@ export function HrPage({
         subtitle={t('workspace.widget.filtersHint')}
         onClose={widgets.close}
       >
-        {section === 'employees' || section === 'cards' ? (
+        {section === 'employees' ? (
           employeeFilters
         ) : (
           <p className="text-sm text-stone-500">{t('hr.kpi.filterHint')}</p>
@@ -547,13 +672,14 @@ export function HrPage({
         <p className="mt-2 text-[11px] text-stone-400">{t('hr.kpi.filterHint')}</p>
       </WorkspaceWidgetDrawer>
 
-      {(section === 'employees' || section === 'cards') && (
+      {section === 'employees' && (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               className="btn-add"
               onClick={() => employeeEditor.openNew()}
+              data-coach="hr:addEmployee"
             >
               {t('hr.addEmployee')}
             </button>
@@ -564,15 +690,20 @@ export function HrPage({
             >
               {t('hr.addPosition')}
             </button>
+            {admin ? (
+              <button
+                type="button"
+                className="rounded-sm border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800"
+                onClick={() => changeSection('trash')}
+                data-coach="hr:openTrash"
+              >
+                {t('hr.openTrash')}
+                {trashCount > 0 ? ` (${trashCount})` : ''}
+              </button>
+            ) : null}
           </div>
 
-          <div
-            className={
-              section === 'cards' && selected
-                ? 'grid gap-4 lg:grid-cols-2'
-                : ''
-            }
-          >
+          <div className="grid gap-4 lg:grid-cols-2">
             <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
               <table className="min-w-full text-sm">
                 <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
@@ -586,7 +717,15 @@ export function HrPage({
                       className="px-3 py-2"
                     />
                     <SortableTableHeader
-                      label="№"
+                      label={t('hr.employeeNumber.short')}
+                      sortKey="employeeNumber"
+                      activeKey={employeeSort.key}
+                      dir={employeeSort.dir}
+                      onSort={handleEmployeeSort}
+                      className="px-3 py-2"
+                    />
+                    <SortableTableHeader
+                      label={t('hr.tabNumber.short')}
                       sortKey="tab"
                       activeKey={employeeSort.key}
                       dir={employeeSort.dir}
@@ -619,10 +758,7 @@ export function HrPage({
                       className={`border-t border-grid cursor-pointer hover:bg-orange-50/40 ${
                         selectedId === e.id ? 'bg-orange-50' : ''
                       }`}
-                      onClick={() => {
-                        setSelectedId(e.id)
-                        if (section === 'employees') employeeEditor.openEdit(e)
-                      }}
+                      onClick={() => setSelectedId(e.id)}
                     >
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2.5">
@@ -642,6 +778,9 @@ export function HrPage({
                             />
                           </div>
                         </div>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-xs font-semibold text-ink">
+                        {e.employeeNumber || '—'}
                       </td>
                       <td className="px-3 py-2.5 font-mono text-xs text-stone-500">{e.tabNumber}</td>
                       <td className="px-3 py-2.5 text-xs">{e.department ?? e.brigade}</td>
@@ -665,6 +804,7 @@ export function HrPage({
                             className="text-xs font-semibold text-accent hover:underline"
                             onClick={(ev) => {
                               ev.stopPropagation()
+                              setSelectedId(e.id)
                               employeeEditor.openEdit(e)
                             }}
                           >
@@ -691,18 +831,38 @@ export function HrPage({
               )}
             </div>
 
-            {section === 'cards' && selected && (
+            {selected ? (
               <HrPersonalFile
                 employee={selected}
                 onOpenFull={() => employeeEditor.openEdit(selected)}
+                onSaveEmployee={onSaveEmployee}
               />
+            ) : (
+              <p className="rounded-sm border border-dashed border-grid p-6 text-sm text-stone-500">
+                {t('hrInspector.pickEmployee')}
+              </p>
             )}
           </div>
         </>
       )}
 
+      {section === 'contracts' && (
+        <HrEmploymentContractsPanel
+          rows={allContracts}
+          contractFilter={contractFilter}
+          onContractFilterChange={setContractFilter}
+          onOpenEmployee={(id) => {
+            setSelectedId(id)
+            employeeEditor.openEdit(employees.find((e) => e.id === id)!)
+          }}
+        />
+      )}
+
       {section === 'documents' && (
         <div className="space-y-3">
+          <p className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
+            {t('hrInspector.documents.hint')}
+          </p>
           <input
             className="w-full max-w-md rounded-sm border border-grid bg-white px-3 py-2 text-sm"
             placeholder={t('hr.docSearch')}
@@ -759,6 +919,14 @@ export function HrPage({
           onUpsert={onUpsertCandidate}
           onRemove={onRemoveCandidate}
           onHire={onHireCandidate}
+          onCreateEmployeeCabinet={onCreateEmployeeCabinet}
+        />
+      )}
+
+      {section === 'fired' && (
+        <HrFiredPanel
+          employees={employees}
+          onOpenEmployee={(emp) => employeeEditor.openEdit(emp)}
         />
       )}
 
@@ -775,12 +943,45 @@ export function HrPage({
 
       {section === 'absences' && (
         <div className="space-y-4">
+          {financeActions ? (
+            <SharedDataNotice
+              action={
+                onOpenFinance ? (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-accent hover:underline"
+                    onClick={onOpenFinance}
+                  >
+                    {t('sharedRoot.openFinance')}
+                  </button>
+                ) : undefined
+              }
+            >
+              {t('sharedRoot.sickHr')}
+            </SharedDataNotice>
+          ) : null}
           <HrVacationForm
             employees={employees}
             existingMonthKeys={Object.keys(store.months)}
             onSaveEmployee={onSaveEmployee}
             onSetEmployeeFactRange={onSetEmployeeFactRange}
           />
+          {financeActions && (
+            <>
+              <VacationConfirmPanel
+                store={store}
+                month={month}
+                onMonthChange={onMonthChange}
+                actions={financeActions}
+              />
+              <SickConfirmPanel
+                store={store}
+                month={month}
+                onMonthChange={onMonthChange}
+                actions={financeActions}
+              />
+            </>
+          )}
           <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-stone-50 text-xs uppercase text-stone-500">
@@ -800,6 +1001,13 @@ export function HrPage({
                   </td>
                 </tr>
               ))}
+              {allAbs.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-6 text-center text-sm text-stone-500">
+                    {t('hr.empty')}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
           </div>
@@ -807,7 +1015,14 @@ export function HrPage({
       )}
 
       {section === 'trainings' && (
-        <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
+        <div className="space-y-3">
+          <input
+            className="w-full max-w-md rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+            placeholder={t('hr.search')}
+            value={trainQ}
+            onChange={(e) => setTrainQ(e.target.value)}
+          />
+          <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-stone-50 text-xs uppercase text-stone-500">
               <tr>
@@ -817,7 +1032,7 @@ export function HrPage({
               </tr>
             </thead>
             <tbody>
-              {allTrain.map(({ employeeName, training }) => {
+              {filteredTrain.map(({ employeeName, training }) => {
                 const d = daysUntil(training.validUntil)
                 return (
                   <tr key={training.id} className="border-t border-grid">
@@ -832,13 +1047,37 @@ export function HrPage({
                   </tr>
                 )
               })}
+              {filteredTrain.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-6 text-center text-sm text-stone-500">
+                    {t('hr.empty')}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {section === 'pay' && (
         <div className="space-y-4">
+          <SharedDataNotice
+            action={
+              onOpenFinance ? (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-accent hover:underline"
+                  onClick={onOpenFinance}
+                >
+                  {t('sharedRoot.openFinance')}
+                </button>
+              ) : undefined
+            }
+          >
+            {t('sharedRoot.payrollHr')}
+          </SharedDataNotice>
+          <HrStaffRatesPanel employees={employees} onSaveEmployee={onSaveEmployee} month={month} />
           <AttendanceLogPanel
             employees={employees}
             site={store.settings.site}
@@ -875,6 +1114,17 @@ export function HrPage({
 
       {section === 'settings' && (
         <div className="space-y-4">
+          {canCoverage &&
+            onUpsertWorkshopMasterCoverage &&
+            onPostWorkshopMasterCoverage &&
+            onEndWorkshopMasterCoverage && (
+              <WorkshopMasterCoveragePanel
+                store={store}
+                onUpsert={onUpsertWorkshopMasterCoverage}
+                onPost={onPostWorkshopMasterCoverage}
+                onEnd={onEndWorkshopMasterCoverage}
+              />
+            )}
           {onImportEmployeeRegistry && (!webHrMode || admin) && (
             <HrRegistryImportPanel
               employees={employees}
@@ -887,22 +1137,32 @@ export function HrPage({
             <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
               {t('hr.settings.positions')}
             </h3>
-            <p className="mt-1 text-xs text-stone-500">{t('directories.positionsHint')}</p>
-            <ul className="mt-3 space-y-2 text-sm">
-              {hrPositions.map((p) => (
-                <li key={p.id} className="flex justify-between border-b border-grid py-2">
-                  <span>
-                    {p.title} · {p.department}
-                  </span>
-                  <span className="font-mono text-xs text-stone-500">
-                    {p.salary} {p.currency}
-                  </span>
-                </li>
-              ))}
-              {hrPositions.length === 0 && (
-                <li className="text-stone-500">{t('hr.settings.emptyPositions')}</li>
-              )}
-            </ul>
+            <p className="mt-1 text-xs text-stone-500">{t('sharedRoot.orgHrSettings')}</p>
+            {onNavigateToDirectory ? (
+              <button
+                type="button"
+                className="mt-3 text-sm font-semibold text-accent hover:underline"
+                onClick={() => onNavigateToDirectory('positions')}
+              >
+                {t('sharedRoot.openDirectoryPositions')}
+              </button>
+            ) : (
+              <ul className="mt-3 space-y-2 text-sm">
+                {hrPositions.map((p) => (
+                  <li key={p.id} className="flex justify-between border-b border-grid py-2">
+                    <span>
+                      {p.title} · {p.department}
+                    </span>
+                    <span className="font-mono text-xs text-stone-500">
+                      {p.salary} {p.currency}
+                    </span>
+                  </li>
+                ))}
+                {hrPositions.length === 0 && (
+                  <li className="text-stone-500">{t('hr.settings.emptyPositions')}</li>
+                )}
+              </ul>
+            )}
           </section>
           <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
             <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
@@ -951,19 +1211,6 @@ export function HrPage({
         </form>
       </AppDialog>
 
-      <EmployeeEditorHost
-        ctx={employeeEditor.ctx}
-        employees={employees}
-        brigades={brigades}
-        hrStructuralUnits={hrStructuralUnits}
-        hrPositions={hrPositions}
-        onSave={(e) => {
-          handleSaveEmployee(e)
-          employeeEditor.close()
-        }}
-        onClose={employeeEditor.close}
-      />
-
       {defaultsOpen && currentUserId && onSaveViewDefaults && (
         <HrViewDefaultsDialog
           tabs={visibleTabs}
@@ -975,6 +1222,16 @@ export function HrPage({
           onClose={() => setDefaultsOpen(false)}
         />
       )}
+
+      <HrDocumentsMonitorDialog
+        open={docMonitorOpen}
+        onClose={() => setDocMonitorOpen(false)}
+        employees={employees}
+        onOpenEmployee={(id) => {
+          const e = employees.find((x) => x.id === id)
+          if (e) employeeEditor.openEdit(e)
+        }}
+      />
     </PageLayout>
   )
 }

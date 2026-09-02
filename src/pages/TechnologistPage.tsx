@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { TechnologistRecipesPanel } from '@/components/technologist/TechnologistRecipesPanel'
 import { FormulationCubeLabelModal } from '@/components/technologist/FormulationCubeLabelModal'
 import { FormulationMixerPanel } from '@/components/technologist/FormulationMixerPanel'
@@ -9,6 +9,11 @@ import { TechnologistQcHub } from '@/components/technologist/TechnologistQcHub'
 import { WastewaterCubesPanel } from '@/components/technologist/WastewaterCubesPanel'
 import { TechnologistRoomClimateWidget } from '@/components/technologist/TechnologistRoomClimateWidget'
 import { TechnologistRoomClimateJournal } from '@/components/technologist/TechnologistRoomClimateJournal'
+import {
+  TechnologistHandoffSoftBanner,
+  TechnologistShiftHandoffPanel,
+} from '@/components/technologist/TechnologistShiftHandoffPanel'
+import { countPendingHandoffs } from '@/lib/technologist/shiftHandoff'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -29,13 +34,23 @@ import type {
   ImpregnationQcRecord,
   IncomingControlRecord,
   RoomClimateRecord,
+  ShiftHandoffRecord,
   TechnologistQcStore,
 } from '@/lib/technologist/types'
 import type { WastewaterTransition, WastewaterTransitionPatch } from '@/lib/wastewater/transitions'
 import type { WastewaterCube, WastewaterStore } from '@/lib/wastewater/types'
 import type { WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
 
-type Tab = 'stock' | 'recipes' | 'recipeRequests' | 'mixer' | 'tasks' | 'journal' | 'qc' | 'wastewater'
+type Tab =
+  | 'stock'
+  | 'recipes'
+  | 'recipeRequests'
+  | 'mixer'
+  | 'tasks'
+  | 'journal'
+  | 'qc'
+  | 'wastewater'
+  | 'handoff'
 
 type Props = {
   formulations: FormulationStore
@@ -53,8 +68,10 @@ type Props = {
   onUpsertRecipe: (r: FormulationRecipe) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onPostBatch: (input: PostBatchMixInput) => PostBatchMixResult
-  onCreateMixTask: (input: MixTaskInput) => { ok: boolean; task?: import('@/lib/formulations/types').FormulationMixTask }
+  onCreateMixTask: (input: MixTaskInput) => import('@/store/slices/mixTasksSlice').CreateMixTaskResult
   onCancelMixTask: (id: string) => void
+  onReserveMixTask: (taskId: string) => import('@/lib/formulations/mixTaskReserve').MixTaskReserveResult
+  onUnreserveMixTask: (taskId: string) => boolean
   onAssignProductionOrderRecipe: (orderId: string, recipeId: string) => boolean
   onRequestItem: (input: import('@/lib/warehouse/itemRequests').CreateItemRequestInput) => void
   onProposeRename: (
@@ -76,6 +93,17 @@ type Props = {
   onRemoveImpregnationQc: (id: string) => void
   onAddRoomClimateReading: (entry: Omit<RoomClimateRecord, 'id' | 'createdAt'>) => void
   onRemoveRoomClimateReading: (id: string) => void
+  onUpsertShiftHandoff: (
+    entry: Omit<ShiftHandoffRecord, 'id' | 'createdAt' | 'updatedAt' | 'acknowledgements'> & {
+      id?: string
+    },
+  ) => void
+  onAcknowledgeShiftHandoff: (id: string, who: { userId?: string; userName: string }) => void
+  onSetShiftHandoffStatus: (id: string, status: ShiftHandoffRecord['status']) => void
+  onRemoveShiftHandoff: (id: string) => void
+  /** Открыть вкладку из пульта срочного */
+  focusTab?: Tab | null
+  onFocusTabConsumed?: () => void
   onCreateWastewaterCube: (input: {
     wasteType: string
     color: string
@@ -111,6 +139,8 @@ export function TechnologistPage({
   onPostBatch,
   onCreateMixTask,
   onCancelMixTask,
+  onReserveMixTask,
+  onUnreserveMixTask,
   onAssignProductionOrderRecipe,
   onRequestItem,
   onProposeRename,
@@ -124,6 +154,12 @@ export function TechnologistPage({
   onRemoveImpregnationQc,
   onAddRoomClimateReading,
   onRemoveRoomClimateReading,
+  onUpsertShiftHandoff,
+  onAcknowledgeShiftHandoff,
+  onSetShiftHandoffStatus,
+  onRemoveShiftHandoff,
+  focusTab,
+  onFocusTabConsumed,
   onCreateWastewaterCube,
   onUpsertWastewaterCube,
   onApplyWastewaterCubeTransition,
@@ -132,6 +168,12 @@ export function TechnologistPage({
   const { t, tf, locale } = useI18n()
   const [tab, setTab] = useState<Tab>('stock')
   const [labelRun, setLabelRun] = useState<FormulationBatchRun | null>(null)
+
+  useEffect(() => {
+    if (!focusTab) return
+    setTab(focusTab)
+    onFocusTabConsumed?.()
+  }, [focusTab, onFocusTabConsumed])
 
   const categoryNames = useMemo(
     () => new Map(warehouse.categories.map((c) => [c.id, c.name])),
@@ -161,6 +203,11 @@ export function TechnologistPage({
   ).length
 
   const recipeRequestCount = countOpenRecipeRequests(plannerOrders)
+  const handoffPending = countPendingHandoffs(
+    technologistQc.shiftHandoffs,
+    operatorId,
+    operatorName,
+  )
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'stock', label: t('technologist.tab.stock') },
@@ -179,6 +226,11 @@ export function TechnologistPage({
     { id: 'wastewater', label: t('technologist.tab.wastewater'), count: activeWastewaterCount || undefined },
     { id: 'journal', label: t('technologist.tab.journal'), count: runs.length + technologistQc.roomClimateLog.length },
     { id: 'qc', label: t('technologist.tab.qc') },
+    {
+      id: 'handoff',
+      label: t('technologist.tab.handoff'),
+      count: handoffPending || undefined,
+    },
   ]
 
   return (
@@ -197,7 +249,33 @@ export function TechnologistPage({
         }
       />
 
-      <TabBar tabs={tabs} value={tab} onChange={setTab} className="mb-4" />
+      <TabBar coachPrefix="technologist" tabs={tabs} value={tab} onChange={setTab} className="mb-4" />
+
+      {tab !== 'handoff' ? (
+        <TechnologistHandoffSoftBanner
+          records={technologistQc.shiftHandoffs ?? []}
+          operatorId={operatorId}
+          operatorName={operatorName}
+          onOpenTab={() => setTab('handoff')}
+        />
+      ) : null}
+
+      {tab === 'handoff' && (
+        <TechnologistShiftHandoffPanel
+          records={technologistQc.shiftHandoffs ?? []}
+          operatorId={operatorId}
+          operatorName={operatorName}
+          onUpsert={onUpsertShiftHandoff}
+          onAcknowledge={(id) =>
+            onAcknowledgeShiftHandoff(id, {
+              userId: operatorId,
+              userName: operatorName ?? t('technologist.badge'),
+            })
+          }
+          onSetStatus={onSetShiftHandoffStatus}
+          onRemove={onRemoveShiftHandoff}
+        />
+      )}
 
       {tab === 'stock' && (
         <TechnologistStockPanel
@@ -258,6 +336,8 @@ export function TechnologistPage({
           operatorName={operatorName}
           onCreateMixTask={onCreateMixTask}
           onCancelMixTask={onCancelMixTask}
+          onReserveMixTask={onReserveMixTask}
+          onUnreserveMixTask={onUnreserveMixTask}
         />
       )}
 

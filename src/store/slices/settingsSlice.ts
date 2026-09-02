@@ -6,6 +6,8 @@ import {
 import { purgeExpiredTrash } from '@/lib/trash'
 import {
   addMonthToStore,
+  clearMonthTimesheetInStore,
+  clearMonthsBeforeInStore,
   isMonthArchived,
   isMonthClosed,
   setMonthArchived,
@@ -37,7 +39,7 @@ export type SettingsSliceExtras = {
 }
 
 export function createSettingsSlice(
-  { setStore }: StoreSliceDeps,
+  { setStore, getActor }: StoreSliceDeps,
   { getActiveMonth, setActiveMonth }: SettingsSliceExtras,
 ) {
   return {
@@ -45,13 +47,29 @@ export function createSettingsSlice(
       patchStore(setStore, fn)
     },
 
+    /**
+     * Cloud hydration / pull — never opens bulk gate, never creates dirty ops.
+     * Origin is passed explicitly (safe across startTransition).
+     */
+    applyCloudStore(next: AppStore) {
+      const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
+      setStore(ensureMonthReady(seeded, getActiveMonth()))
+    },
+
+    /** Import / restore / reset preview only — blocks autosave until cancel. */
+    replaceStoreForBulk(next: AppStore, _kind: string = 'import') {
+      const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
+      setStore(ensureMonthReady(seeded, getActiveMonth()))
+      return { ok: true as const }
+    },
+
     replaceStore(next: AppStore) {
       const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
-      if (import.meta.env.VITE_FST_WEB === 'true') {
-        setStore(seeded)
-        return
-      }
       setStore(ensureMonthReady(seeded, getActiveMonth()))
+    },
+
+    cancelBulkPreview() {
+      // no-op in P
     },
 
     resetStore() {
@@ -63,6 +81,44 @@ export function createSettingsSlice(
 
     addMonth(month: string) {
       applyStoreUpdate(setStore, (s) => ensureMonthReady(addMonthToStore(s, month), month))
+    },
+
+    /**
+     * Техническая очистка табеля за месяц (только для sysadmin из UI).
+     * Пустые бригады и ячейки; финансы не трогает.
+     */
+    clearMonthTimesheet(month: string) {
+      applyStoreUpdate(setStore, (s) => {
+        let next = clearMonthTimesheetInStore(s, month)
+        const a = getActor?.() ?? null
+        next = appendAudit(next, {
+          action: 'month_clear',
+          month,
+          by: a?.id,
+          byName: a?.name,
+          detail: `Табель очищен · бригады и ячейки пустые${a?.name ? ` · ${a.name}` : ''}`,
+        })
+        return next
+      })
+    },
+
+    /**
+     * Preview-only: очистить месяцы до beforeMonth — блокирует autosave до Cancel.
+     * Refuses when pending ops / conflicts / active outbox / other bulk preview exist.
+     */
+    clearMonthsBefore(beforeMonth: string) {
+      applyStoreUpdate(setStore, (s) => {
+        const { store: clearedStore, cleared } = clearMonthsBeforeInStore(s, beforeMonth)
+        if (!cleared.length) return s
+        const a = getActor?.() ?? null
+        return appendAudit(clearedStore, {
+          action: 'month_clear',
+          month: beforeMonth,
+          by: a?.id,
+          byName: a?.name,
+          detail: `Очищены месяцы до ${beforeMonth}: ${cleared.join(', ')}${a?.name ? ` · ${a.name}` : ''}`,
+        })
+      })
     },
 
     removeMonth(month: string) {
@@ -118,12 +174,16 @@ export function createSettingsSlice(
           next = appendAudit(next, {
             action: 'payroll_snapshot',
             month,
+            by: actor?.id,
+            byName: actor?.name,
             detail: `Зафиксирован расчёт ЗП: ${snapshot.rows.length} сотр.${actor?.name ? ` · ${actor.name}` : ''}`,
           })
         }
         return appendAudit(next, {
           action: closed ? 'month_close' : 'month_reopen',
           month,
+          by: actor?.id,
+          byName: actor?.name,
           detail: closed
             ? `Месяц закрыт${actor?.name ? ` · ${actor.name}` : ''}`
             : `Месяц переоткрыт${actor?.name ? ` · ${actor.name}` : ''}`,
@@ -141,6 +201,9 @@ export function createSettingsSlice(
           signatures: patchSettings.signatures
             ? { ...s.settings.signatures, ...patchSettings.signatures }
             : s.settings.signatures,
+          employer: patchSettings.employer
+            ? { ...s.settings.employer, ...patchSettings.employer }
+            : s.settings.employer,
         },
       }))
     },

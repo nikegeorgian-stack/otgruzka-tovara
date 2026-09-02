@@ -1,5 +1,6 @@
 import { newId } from '@/lib/hr/files'
 import { applyHrStatus } from '@/lib/hr/sync'
+import { suggestNextEmployeeNumber } from '@/lib/hr/employeeNumber'
 import { suggestNextTabNumber } from '@/lib/hr/tabNumber'
 import type { Employee } from '@/lib/types'
 
@@ -15,6 +16,7 @@ export function createNewEmployee(
       id: newId(),
       fullName: '',
       tabNumber: suggestNextTabNumber(employees),
+      employeeNumber: suggestNextEmployeeNumber(employees),
       position: '',
       brigade,
       schedule: '2/2 11ч',
@@ -23,8 +25,12 @@ export function createNewEmployee(
       active: true,
       hireDate: today,
       hrDocuments: [],
+      hrDocumentsTrash: [],
       hrAbsences: [],
+      hrJournal: [],
       hrTrainings: [],
+      hrContracts: [],
+      hrContractsTrash: [],
       department: brigade,
       line: brigade,
       currency: 'GEL',

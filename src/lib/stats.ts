@@ -1,7 +1,12 @@
-import { hoursForCode } from './codes'
+import { hoursForCode, isWorkDayCode } from './codes'
 import { daysInMonth, parseMonthKey } from './dates'
 import { isTransferredOut } from './dayTransfer'
 import { factWorkedHours } from './factExtra'
+import {
+  creditedAbsenceHours,
+  type AbsenceConfirmState,
+} from './absenceConfirm'
+import { sumPlanHours } from './hr/absencePlan'
 import { NO_STRUCTURAL_UNIT_ID } from './monthViewOptions'
 import type { DayCode, Employee, MonthSheet } from './types'
 
@@ -40,7 +45,7 @@ function sumHours(marks: Record<string, DayCode>): number {
 }
 
 function workShifts(marks: Record<string, DayCode>): number {
-  return Object.values(marks).filter((c) => c === '8' || c === '11' || c === 'Н' || c === '22').length
+  return Object.values(marks).filter((c) => isWorkDayCode(c)).length
 }
 
 export function getFactMark(
@@ -61,37 +66,49 @@ export function rowStats(
   days: number,
   year: number,
   month: number,
+  employee?: Employee,
+  confirm?: AbsenceConfirmState,
+  asOfDate?: string,
 ): RowStats {
   const plan = sheet.plan[rowId] ?? {}
   let factHours = 0
   let factShifts = 0
   let mismatches = 0
   const factAgg: Record<string, DayCode> = {}
+  const planToDate: Record<string, DayCode> = {}
 
   for (let d = 1; d <= days; d++) {
     const key = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    if (asOfDate && key > asOfDate) continue
     const p = plan[key] ?? ''
+    planToDate[key] = p
     const f = getFactMark(sheet, rowId, key)
     factAgg[key] = f
     if (isTransferredOut(sheet, rowId, key)) {
       factHours += 0
     } else {
-      factHours += factWorkedHours(sheet, rowId, key, f)
-      if (f === '8' || f === '11' || f === 'Н' || f === '22') factShifts++
+      const absenceCredit =
+        employee && confirm ? creditedAbsenceHours(employee, year, month, d, f, confirm) : 0
+      if (absenceCredit > 0) factHours += absenceCredit
+      else factHours += factWorkedHours(sheet, rowId, key, f)
+      if (isWorkDayCode(f)) factShifts++
     }
     if (p !== f) mismatches++
   }
 
   return {
-    planHours: sumHours(plan),
+    planHours: employee
+      ? sumPlanHours(employee, plan, year, month, days, asOfDate)
+      : sumHours(planToDate),
     factHours,
-    planShifts: workShifts(plan),
+    planShifts: workShifts(planToDate),
     factShifts,
-    v: countCode(plan, 'В'),
+    v: countCode(planToDate, 'В'),
     ot: countCode(factAgg, 'ОТ'),
     oo: countCode(factAgg, 'ОО'),
     b: countCode(factAgg, 'Б'),
     x: countCode(factAgg, 'X'),
+    /** Только явный код «ПР» (простой). Неподтверждённые ОТ/Б — не сюда (иначе отпуск «похоже» на простой). */
     pr: countCode(factAgg, 'ПР'),
     mismatches,
   }
@@ -100,6 +117,8 @@ export function rowStats(
 export type MonthStatsFilter = {
   brigades?: string[]
   structuralUnitIds?: string[]
+  /** Подтверждения отсутствий по сотруднику (для зачёта ОТ/Б в факт). */
+  confirmForEmployee?: (employeeId: string) => AbsenceConfirmState | undefined
 }
 
 export function monthStats(
@@ -119,6 +138,7 @@ export function monthStats(
 
   const brigadeList = Array.isArray(filter) ? filter : filter?.brigades
   const unitList = Array.isArray(filter) ? undefined : filter?.structuralUnitIds
+  const confirmForEmployee = Array.isArray(filter) ? undefined : filter?.confirmForEmployee
   const brigadeSet = brigadeList?.length ? new Set(brigadeList) : null
   const unitSet = unitList?.length ? new Set(unitList) : null
 
@@ -131,7 +151,15 @@ export function monthStats(
       const unitKey = emp.structuralUnitId ?? NO_STRUCTURAL_UNIT_ID
       if (!unitSet.has(unitKey)) continue
     }
-    const rs = rowStats(sheet, row.id, days, year, month)
+    const rs = rowStats(
+      sheet,
+      row.id,
+      days,
+      year,
+      month,
+      emp,
+      row.employeeId ? confirmForEmployee?.(row.employeeId) : undefined,
+    )
     planHours += rs.planHours
     factHours += rs.factHours
     mismatches += rs.mismatches

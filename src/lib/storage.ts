@@ -1,15 +1,17 @@
 import seedEmployees from '@/data/seed-employees.json'
 import { DEFAULT_BRIGADES } from './brigades.constants'
+import { normalizeBrigadeHasBrigadier } from './brigadeHasBrigadier'
 import { defaultArchivedMonths } from './monthManage'
 import { defaultMonths, ensureMonth } from './monthSheet'
 import {
   AI_PROVIDER_PRESETS,
   normalizeAiProvider,
 } from './ai/providers'
+import { normalizePayrollAccrualRules } from './finance/payrollAccrualRules'
+import { normalizeStaffRate } from './payrollRates'
 import { DEFAULT_SHIFT_TEMPLATES } from './shiftTemplates'
 import {
   createDefaultCounterparties,
-  findA2LineCounterparty,
   normalizeCounterpartyStore,
 } from './counterparties/init'
 import {
@@ -28,22 +30,54 @@ import {
   createDefaultTechnologistQc,
   normalizeTechnologistQc,
 } from './technologist/init'
+import { createDefaultOtcStore, normalizeOtcStore } from './otc/init'
 import {
   createDefaultWastewaterStore,
   normalizeWastewaterStore,
 } from './wastewater/init'
+import {
+  createDefaultEngineerLog,
+  normalizeEngineerLogStore,
+} from './engineerLog/init'
+import { createDefaultTasksStore, normalizeTasksStore } from './tasks/init'
+import {
+  createDefaultNightShiftStore,
+  normalizeNightShiftStore,
+} from './nightShift/init'
+import {
+  createDefaultTimesheetEntryStore,
+  normalizeTimesheetEntryStore,
+} from './timesheetEntries/init'
+import {
+  createDefaultAttendanceStore,
+  normalizeAttendanceStore,
+} from './attendance/init'
+import {
+  createDefaultMealsStore,
+  normalizeMealsStore,
+} from './meals/init'
+import {
+  createDefaultProtocolsStore,
+  normalizeProtocolsStore,
+} from './protocols/init'
+import {
+  createDefaultOrgChartStore,
+  ensureOrgChartSeed,
+  normalizeOrgChartStore,
+} from './orgChart/init'
 import { createDefaultProduction, normalizeProduction } from './production/init'
 import { createDefaultProcurement, normalizeProcurementStore } from './procurement/init'
 import { createDefaultSales, normalizeSalesStore } from './sales/init'
 import { createDefaultAiChat, normalizeAiChatStore } from './aiChat/init'
+import { ensureEmployeeNumbers } from './hr/employeeNumber'
 import { createDefaultAccessStore, normalizeAccessStore } from './access/init'
 import { createDefaultWarehouse, normalizeWarehouse } from './warehouse/init'
 import { ensureLoadingSeeds } from './warehouse/loadingSeeds'
-import { zeroAllWarehouseBalances } from './warehouse/zeroBalances'
 import { createDefaultItOfficeStore, normalizeItOfficeStore } from './itOffice/init'
 import { createDefaultWorkwear, normalizeWorkwear } from './workwear/init'
 import { createDefaultFinanceStore, normalizeFinanceStore } from './finance/init'
 import { normalizeMonthSheet, purgeExpiredTrash } from './trash'
+import { applyHrEmbeddedTrashTombstones } from './hr/documentTrash'
 import { normalizeCandidate } from './hr/candidates'
 import type { AppStore, Candidate, Employee, HrPosition, HrStructuralUnit, MonthSheet } from './types'
 import { ensureOrgStructureSeed } from './hr/orgStructure'
@@ -94,26 +128,49 @@ function normalizeEmployee(emp: Employee): Employee {
       ? 'vacation'
       : emp.employmentStatus === 'terminated'
         ? 'fired'
-        : emp.employmentStatus === 'maternity'
+        : emp.employmentStatus === 'maternity' || emp.employmentStatus === 'sick'
           ? 'sick'
           : 'active')
-  return {
+  const employmentStatus =
+    emp.employmentStatus === 'maternity' && (hrStatus === 'sick' || !emp.hrStatus)
+      ? 'sick'
+      : (emp.employmentStatus ?? 'active')
+  return applyHrEmbeddedTrashTombstones({
     ...emp,
     shiftMode: emp.shiftMode ?? 'day',
-    employmentStatus: emp.employmentStatus ?? 'active',
+    employmentStatus,
     hourlyRate: emp.hourlyRate ?? undefined,
     monthlySalary: emp.monthlySalary ?? undefined,
+    staffRate: (() => {
+      if (emp.staffRate == null) return undefined
+      const n = normalizeStaffRate(emp.staffRate)
+      return n === 1 ? undefined : n
+    })(),
     department: emp.department ?? emp.brigade,
     line: emp.line ?? emp.brigade,
     hrStatus,
     hrDocuments: emp.hrDocuments ?? [],
+    hrDocumentsTrash: emp.hrDocumentsTrash ?? [],
+    hrContracts: emp.hrContracts ?? [],
+    hrContractsTrash: emp.hrContractsTrash ?? [],
     hrAbsences: emp.hrAbsences ?? [],
     hrTrainings: emp.hrTrainings ?? [],
     education: emp.education ?? [],
     workExperience: emp.workExperience ?? [],
     bankAccounts: emp.bankAccounts ?? [],
     relatives: emp.relatives ?? [],
-  }
+    monthPremiums: (() => {
+      const raw = emp.monthPremiums
+      if (!raw || typeof raw !== 'object') return undefined
+      const out: Record<string, number> = {}
+      for (const [k, v] of Object.entries(raw)) {
+        if (!/^\d{4}-\d{2}$/.test(k)) continue
+        const n = typeof v === 'number' ? v : Number(v)
+        if (Number.isFinite(n) && n > 0) out[k] = Math.round(n)
+      }
+      return Object.keys(out).length ? out : undefined
+    })(),
+  })
 }
 
 function normalizeOrgStructure(
@@ -127,7 +184,14 @@ function normalizeOrgStructure(
 function normalizeSettings(
   settings: Partial<AppStore['settings']> | undefined,
 ): AppStore['settings'] {
-  const locale = settings?.locale === 'ka' ? 'ka' : 'ru'
+  const locale =
+    settings?.locale === 'ka' ? 'ka' : settings?.locale === 'en' ? 'en' : 'ru'
+  const defaultAdvancePercent =
+    typeof settings?.defaultAdvancePercent === 'number' &&
+    Number.isFinite(settings.defaultAdvancePercent)
+      ? Math.min(100, Math.max(0, settings.defaultAdvancePercent))
+      : 30
+
   return {
     responsible: settings?.responsible ?? '',
     site: settings?.site ?? 'Пропитка',
@@ -135,6 +199,14 @@ function normalizeSettings(
     tourCompleted: settings?.tourCompleted ?? false,
     lastBackupDate: settings?.lastBackupDate,
     signatures: settings?.signatures ?? {},
+    employer: settings?.employer ?? {},
+    docHeader: settings?.docHeader,
+    brigadierBonus: settings?.brigadierBonus,
+    defaultAdvancePercent,
+    payrollAccrual: settings?.payrollAccrual
+      ? normalizePayrollAccrualRules(settings.payrollAccrual)
+      : undefined,
+    warehouseBalancesZeroedAt: settings?.warehouseBalancesZeroedAt,
     ai: (() => {
       const provider = settings?.ai?.provider ?? 'off'
       const normalized = settings?.ai?.provider ? provider : normalizeAiProvider({ ...settings?.ai, provider })
@@ -169,6 +241,7 @@ function mergeEmployeesFromSeed(oldEmployees: Employee[]): Employee[] {
       ...emp,
       id: prev.id,
       tabNumber: prev.tabNumber || emp.tabNumber,
+      employeeNumber: prev.employeeNumber || emp.employeeNumber,
       brigade: prev.brigade || emp.brigade,
       schedule: prev.schedule || emp.schedule,
       group2x2: prev.group2x2 ?? emp.group2x2,
@@ -187,21 +260,21 @@ function mergeEmployeesFromSeed(oldEmployees: Employee[]): Employee[] {
 }
 
 function withLoadingSeeds(store: AppStore): AppStore {
-  const a2lineId = findA2LineCounterparty(store.counterparties.items)?.id
-  const warehouse = ensureLoadingSeeds(store.warehouse, a2lineId)
+  const warehouse = ensureLoadingSeeds(store.warehouse)
   if (warehouse === store.warehouse) return store
   return { ...store, warehouse }
 }
 
-/** Подставляет демо-документы погрузки (4 × A2LINE). Вызывать после любой загрузки store. */
+/**
+ * Снимает демо-погрузки A2LINE. Не трогает кадры/табель и живые остатки.
+ * Флаг warehouseBalancesZeroedAt только помечаем, если его ещё нет.
+ */
 export function applyAppStoreSeeds(store: AppStore): AppStore {
   let next = withLoadingSeeds(store)
 
   if (!next.settings.warehouseBalancesZeroedAt) {
-    const date = new Date().toISOString().slice(0, 10)
     next = {
       ...next,
-      warehouse: zeroAllWarehouseBalances(next.warehouse, date),
       settings: {
         ...next.settings,
         warehouseBalancesZeroedAt: new Date().toISOString(),
@@ -217,12 +290,16 @@ export function createDefaultStore(): AppStore {
     version: 6,
     brigades: [...DEFAULT_BRIGADES],
     brigadeNamesKa: {},
+    brigadeNamesEn: {},
     brigadiers: {},
+    brigadeHasBrigadier: {},
     brigadeUnits: {},
     archivedMonths: defaultArchivedMonths(),
     closedMonths: [],
     monthClosures: {},
-    employees: (seedEmployees as unknown as Employee[]).map(normalizeEmployee),
+    employees: ensureEmployeeNumbers(
+      (seedEmployees as unknown as Employee[]).map(normalizeEmployee),
+    ),
     candidates: [],
     months: {},
     auditLog: [],
@@ -238,7 +315,16 @@ export function createDefaultStore(): AppStore {
     packagingRecipes: createDefaultPackagingRecipes(),
     formulations: createDefaultFormulations(),
     technologistQc: createDefaultTechnologistQc(),
+    otc: createDefaultOtcStore(),
     wastewater: createDefaultWastewaterStore(),
+    engineerLog: createDefaultEngineerLog(),
+    tasks: createDefaultTasksStore(),
+    nightShifts: createDefaultNightShiftStore(),
+    timesheetEntries: createDefaultTimesheetEntryStore(),
+    attendance: createDefaultAttendanceStore(),
+    meals: createDefaultMealsStore(),
+    protocols: createDefaultProtocolsStore(),
+    orgChart: createDefaultOrgChartStore(),
     warehouse: createDefaultWarehouse(),
     workwear: createDefaultWorkwear(),
     itOffice: createDefaultItOfficeStore(),
@@ -259,7 +345,7 @@ export function createDefaultStore(): AppStore {
   return withLoadingSeeds(store)
 }
 
-/** Убирает секреты из экспорта / локальных бэкапов */
+/** Убирает секреты из экспорта / локальных бэкапов / облака */
 export function sanitizeStoreForExport(
   store: AppStore,
   options?: { includeSecrets?: boolean },
@@ -287,8 +373,43 @@ export function sanitizeStoreForExport(
   }
 }
 
+/** После загрузки из облака — вернуть локальные секреты (хеши паролей, AI key). */
+export function restoreLocalSecrets(local: AppStore, fromCloud: AppStore): AppStore {
+  const localUsers = new Map((local.access?.users ?? []).map((u) => [u.id, u]))
+  const access = fromCloud.access
+    ? {
+        ...fromCloud.access,
+        users: fromCloud.access.users.map((u) => {
+          const lv = localUsers.get(u.id)
+          if (!lv?.passwordHash && !lv?.passwordSalt) return u
+          return {
+            ...u,
+            passwordHash: lv.passwordHash || u.passwordHash,
+            passwordSalt: lv.passwordSalt || u.passwordSalt,
+          }
+        }),
+      }
+    : fromCloud.access
+  const localApiKey = local.settings.ai?.apiKey?.trim()
+  return {
+    ...fromCloud,
+    access,
+    settings: {
+      ...fromCloud.settings,
+      ai: fromCloud.settings.ai
+        ? {
+            ...fromCloud.settings.ai,
+            apiKey: localApiKey || fromCloud.settings.ai.apiKey || '',
+          }
+        : fromCloud.settings.ai,
+    },
+  }
+}
+
 function normalizeV6Store(raw: Record<string, unknown>): AppStore {
-  const oldEmployees = ((raw.employees as Employee[]) ?? []).map(normalizeEmployee)
+  const oldEmployees = ensureEmployeeNumbers(
+    ((raw.employees as Employee[]) ?? []).map(normalizeEmployee),
+  )
   const months = normalizeMonths((raw.months as AppStore['months']) ?? {})
   const org = normalizeOrgStructure(
     raw.hrStructuralUnits as HrStructuralUnit[] | undefined,
@@ -304,7 +425,12 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
       (raw.brigadeNamesKa as Record<string, string>) ??
       (raw as AppStore).brigadeNamesKa ??
       {},
+    brigadeNamesEn:
+      (raw.brigadeNamesEn as Record<string, string>) ??
+      (raw as AppStore).brigadeNamesEn ??
+      {},
     brigadiers: (raw.brigadiers as Record<string, string>) ?? {},
+    brigadeHasBrigadier: normalizeBrigadeHasBrigadier(raw.brigadeHasBrigadier),
     brigadeUnits: (raw.brigadeUnits as Record<string, string>) ?? {},
     archivedMonths: Array.isArray(raw.archivedMonths)
       ? (raw.archivedMonths as string[])
@@ -340,9 +466,20 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
     technologistQc: normalizeTechnologistQc(
       raw.technologistQc as AppStore['technologistQc'],
     ),
+    otc: normalizeOtcStore(raw.otc as AppStore['otc']),
     wastewater: normalizeWastewaterStore(
       raw.wastewater as AppStore['wastewater'],
     ),
+    engineerLog: normalizeEngineerLogStore(raw.engineerLog),
+    tasks: normalizeTasksStore(raw.tasks as AppStore['tasks']),
+    nightShifts: normalizeNightShiftStore(raw.nightShifts),
+    timesheetEntries: normalizeTimesheetEntryStore(
+      raw.timesheetEntries as AppStore['timesheetEntries'],
+    ),
+    attendance: normalizeAttendanceStore(raw.attendance),
+    meals: normalizeMealsStore(raw.meals),
+    protocols: normalizeProtocolsStore(raw.protocols),
+    orgChart: ensureOrgChartSeed(normalizeOrgChartStore(raw.orgChart as AppStore['orgChart'])),
     warehouse: normalizeWarehouse(raw.warehouse as AppStore['warehouse']),
     workwear: normalizeWorkwear(raw.workwear as AppStore['workwear']),
     itOffice: normalizeItOfficeStore(raw.itOffice as AppStore['itOffice']),
@@ -368,7 +505,9 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
 }
 
 function migrateToV6(raw: Record<string, unknown>): AppStore {
-  const oldEmployees = ((raw.employees as Employee[]) ?? []).map(normalizeEmployee)
+  const oldEmployees = ensureEmployeeNumbers(
+    ((raw.employees as Employee[]) ?? []).map(normalizeEmployee),
+  )
   const months = normalizeMonths((raw.months as AppStore['months']) ?? {})
   const org = normalizeOrgStructure(
     raw.hrStructuralUnits as HrStructuralUnit[] | undefined,
@@ -384,7 +523,12 @@ function migrateToV6(raw: Record<string, unknown>): AppStore {
       (raw.brigadeNamesKa as Record<string, string>) ??
       (raw as AppStore).brigadeNamesKa ??
       {},
+    brigadeNamesEn:
+      (raw.brigadeNamesEn as Record<string, string>) ??
+      (raw as AppStore).brigadeNamesEn ??
+      {},
     brigadiers: (raw.brigadiers as Record<string, string>) ?? {},
+    brigadeHasBrigadier: normalizeBrigadeHasBrigadier(raw.brigadeHasBrigadier),
     brigadeUnits: (raw.brigadeUnits as Record<string, string>) ?? {},
     archivedMonths: Array.isArray(raw.archivedMonths)
       ? (raw.archivedMonths as string[])
@@ -420,9 +564,20 @@ function migrateToV6(raw: Record<string, unknown>): AppStore {
     technologistQc: normalizeTechnologistQc(
       raw.technologistQc as AppStore['technologistQc'],
     ),
+    otc: normalizeOtcStore(raw.otc as AppStore['otc']),
     wastewater: normalizeWastewaterStore(
       raw.wastewater as AppStore['wastewater'],
     ),
+    engineerLog: normalizeEngineerLogStore(raw.engineerLog),
+    tasks: normalizeTasksStore(raw.tasks as AppStore['tasks']),
+    nightShifts: normalizeNightShiftStore(raw.nightShifts),
+    timesheetEntries: normalizeTimesheetEntryStore(
+      raw.timesheetEntries as AppStore['timesheetEntries'],
+    ),
+    attendance: normalizeAttendanceStore(raw.attendance),
+    meals: normalizeMealsStore(raw.meals),
+    protocols: normalizeProtocolsStore(raw.protocols),
+    orgChart: ensureOrgChartSeed(normalizeOrgChartStore(raw.orgChart as AppStore['orgChart'])),
     warehouse: normalizeWarehouse(raw.warehouse as AppStore['warehouse']),
     workwear: normalizeWorkwear(raw.workwear as AppStore['workwear']),
     itOffice: normalizeItOfficeStore(raw.itOffice as AppStore['itOffice']),

@@ -31,6 +31,7 @@ const vars = [
   'VITE_FIREBASE_MESSAGING_SENDER_ID',
   'VITE_FIREBASE_APP_ID',
   'VITE_FST_WEB',
+  'VITE_FST_PERSISTENCE',
 ]
 
 const content = readFileSync(envFile, 'utf8')

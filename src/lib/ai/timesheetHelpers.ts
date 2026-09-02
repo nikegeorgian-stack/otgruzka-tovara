@@ -23,8 +23,10 @@ const CODE_ALIASES: Record<string, TimesheetCode> = {
   больничный: 'Б',
   x: 'X',
   х: 'X',
+  прогул: 'X',
   пр: 'ПР',
-  прогул: 'ПР',
+  простой: 'ПР',
+  простаивает: 'ПР',
 }
 
 export function normalizeCode(raw: unknown): DayCode | null {

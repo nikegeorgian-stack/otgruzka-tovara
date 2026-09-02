@@ -6,11 +6,19 @@ import { OrderStatusBadge } from '@/components/procurement/OrderStatusBadge'
 import { ContainerTrackingPanel } from '@/components/procurement/ContainerTrackingPanel'
 import { PurchaseOrderDocumentsTab } from '@/components/procurement/PurchaseOrderDocumentsTab'
 import { PurchaseOrderStatusJournalTab } from '@/components/procurement/PurchaseOrderStatusJournalTab'
+import { RouteMonitorPanel } from '@/components/procurement/RouteMonitorPanel'
 import { TransportModeBadge } from '@/components/procurement/TransportModeIcon'
 import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
 import type { DirectorySection } from '@/lib/directories/types'
 import { useI18n } from '@/context/I18nContext'
 import { countriesSorted, countryLabel, countryLabelByCode } from '@/lib/counterparties/countries'
+import {
+  categoryLabel,
+  categoryOptionsFlat,
+  legacyFromCategoryId,
+  routePointLabel,
+  routePointsForMode,
+} from '@/lib/procurement/catalog'
 import { orderTotalAmount } from '@/lib/procurement/codes'
 import {
   syncOrderBeforeSave,
@@ -20,15 +28,17 @@ import {
 import { ORDER_STATUS_FLOW } from '@/lib/procurement/status'
 import { syncOrderFromCarrier } from '@/lib/procurement/tracking/syncOrder'
 import type {
-  OrderCategory,
+  ProcurementCategoryNode,
   ProcurementScope,
   PurchaseOrder,
   PurchaseOrderLine,
   PurchaseOrderStatus,
+  RoutePoint,
   ShipmentLeg,
   TransportMode,
 } from '@/lib/procurement/types'
 import type { Counterparty, CounterpartyStore } from '@/lib/counterparties/types'
+import { warehouseLocationLabel } from '@/lib/warehouse/locationCodes'
 import type { WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
 
 type ModalTab = 'main' | 'lines' | 'logistics' | 'documents' | 'tracking' | 'journal'
@@ -38,6 +48,8 @@ type Props = {
   isNew: boolean
   counterparties: CounterpartyStore
   warehouse: WarehouseStore
+  categories: ProcurementCategoryNode[]
+  routePoints: RoutePoint[]
   onClose: () => void
   onUpsertCounterparty: (c: Counterparty) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
@@ -45,15 +57,6 @@ type Props = {
   onSave: (order: PurchaseOrder, statusNote?: string) => void
   onSyncPersist?: (order: PurchaseOrder) => void
 }
-
-const CATEGORIES: OrderCategory[] = [
-  'raw_material',
-  'packaging',
-  'spare_parts',
-  'equipment',
-  'consumables',
-  'other',
-]
 
 const TRANSPORTS: TransportMode[] = ['truck', 'rail', 'sea', 'air', 'mixed']
 
@@ -82,6 +85,8 @@ export function PurchaseOrderModal({
   isNew,
   counterparties,
   warehouse,
+  categories,
+  routePoints,
   onClose,
   onUpsertCounterparty,
   onUpsertWarehouseItem,
@@ -127,6 +132,24 @@ export function PurchaseOrderModal({
   )
 
   const total = orderTotalAmount(draft)
+
+  const dirty = useMemo(() => {
+    if (JSON.stringify(draft) !== JSON.stringify(initial)) return true
+    if (supplierMode === 'new' && pendingSupplier.name.trim()) return true
+    if (showNewContract && pendingContract.number.trim()) return true
+    if (linesToNomenclature.size > 0) return true
+    if (statusChangeNote.trim()) return true
+    return false
+  }, [
+    draft,
+    initial,
+    supplierMode,
+    pendingSupplier,
+    showNewContract,
+    pendingContract,
+    linesToNomenclature,
+    statusChangeNote,
+  ])
 
   const selectedSupplier = useMemo(
     () => counterparties.items.find((c) => c.id === draft.counterpartyId),
@@ -239,7 +262,10 @@ export function PurchaseOrderModal({
     <ModalBackdrop
       open
       onClose={onClose}
-      className="fixed inset-0 flex items-center justify-center bg-black/45 p-4"
+      dirty={dirty}
+      onSaveDirty={() => {
+        save()
+      }}
       panelClassName="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-sm bg-white shadow-sm"
     >
         <div className="flex items-start justify-between gap-4 border-b border-grid px-6 py-4">
@@ -291,6 +317,7 @@ export function PurchaseOrderModal({
               <div className="sm:col-span-2 rounded-sm border border-grid bg-stone-50/60 p-4">
                 {supplierMode === 'select' ? (
                   <>
+                    <div data-coach="procurement:orderSupplier">
                     <DirectoryFieldPicker
                       label={`${t('procurement.col.supplier')} *`}
                       hint={t('procurement.supplier.pickHint')}
@@ -310,10 +337,12 @@ export function PurchaseOrderModal({
                     <button
                       type="button"
                       className="mt-2 text-sm font-semibold text-teal-700 hover:underline"
+                      data-coach="procurement:orderAddSupplier"
                       onClick={() => setSupplierMode('new')}
                     >
                       + {t('procurement.supplier.createNew')}
                     </button>
+                    </div>
                   </>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -476,14 +505,23 @@ export function PurchaseOrderModal({
                 {t('procurement.col.category')}
                 <select
                   className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                  value={draft.category}
-                  onChange={(e) =>
-                    setDraft({ ...draft, category: e.target.value as OrderCategory })
+                  value={
+                    draft.categoryId ??
+                    categories.find((c) => !c.parentId && c.legacyKey === draft.category)?.id ??
+                    ''
                   }
+                  onChange={(e) => {
+                    const categoryId = e.target.value || undefined
+                    setDraft({
+                      ...draft,
+                      categoryId,
+                      category: legacyFromCategoryId(categories, categoryId),
+                    })
+                  }}
                 >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {t(`procurement.category.${c}`)}
+                  {categoryOptionsFlat(categories).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.parentId ? `↳ ${categoryLabel(c)}` : categoryLabel(c)}
                     </option>
                   ))}
                 </select>
@@ -687,7 +725,7 @@ export function PurchaseOrderModal({
                   <option value="">—</option>
                   {warehouse.locations.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {l.name}
+                      {warehouseLocationLabel(l)}
                     </option>
                   ))}
                 </select>
@@ -927,6 +965,11 @@ export function PurchaseOrderModal({
 
           {tab === 'logistics' && (
             <div className="space-y-4">
+              <RouteMonitorPanel
+                order={draft}
+                routePoints={routePoints}
+                onChange={setDraft}
+              />
               {draft.scope === 'international' && (
                 <ContainerTrackingPanel
                   order={draft}
@@ -1043,6 +1086,67 @@ export function PurchaseOrderModal({
                         />
                       </label>
                       <label className="text-xs font-semibold text-stone-500">
+                        {t('procurement.col.originPoint')}
+                        <select
+                          className="mt-1 w-full rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+                          value={leg.originPointId ?? ''}
+                          onChange={(e) => {
+                            const originPointId = e.target.value || undefined
+                            const pt = routePoints.find((p) => p.id === originPointId)
+                            setDraft((d) => ({
+                              ...d,
+                              legs: d.legs.map((l) =>
+                                l.id === leg.id
+                                  ? {
+                                      ...l,
+                                      originPointId,
+                                      origin: pt ? routePointLabel(pt) : l.origin,
+                                    }
+                                  : l,
+                              ),
+                            }))
+                          }}
+                        >
+                          <option value="">{t('procurement.catalog.freeText')}</option>
+                          {routePointsForMode(routePoints, leg.transportMode).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {routePointLabel(p)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs font-semibold text-stone-500">
+                        {t('procurement.col.destPoint')}
+                        <select
+                          className="mt-1 w-full rounded-sm border border-grid bg-white px-3 py-2 text-sm"
+                          value={leg.destinationPointId ?? ''}
+                          onChange={(e) => {
+                            const destinationPointId = e.target.value || undefined
+                            const pt = routePoints.find((p) => p.id === destinationPointId)
+                            setDraft((d) => ({
+                              ...d,
+                              legs: d.legs.map((l) =>
+                                l.id === leg.id
+                                  ? {
+                                      ...l,
+                                      destinationPointId,
+                                      destination: pt ? routePointLabel(pt) : l.destination,
+                                    }
+                                  : l,
+                              ),
+                            }))
+                          }}
+                        >
+                          <option value="">{t('procurement.catalog.freeText')}</option>
+                          {routePointsForMode(routePoints, leg.transportMode).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {routePointLabel(p)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!leg.originPointId && (
+                      <label className="text-xs font-semibold text-stone-500">
                         {t('procurement.col.origin')}
                         <input
                           className="mt-1 w-full rounded-sm border border-grid bg-white px-3 py-2 text-sm"
@@ -1057,6 +1161,8 @@ export function PurchaseOrderModal({
                           }
                         />
                       </label>
+                      )}
+                      {!leg.destinationPointId && (
                       <label className="text-xs font-semibold text-stone-500">
                         {t('procurement.col.destination')}
                         <input
@@ -1072,6 +1178,7 @@ export function PurchaseOrderModal({
                           }
                         />
                       </label>
+                      )}
                       <label className="text-xs font-semibold text-stone-500">
                         {t('procurement.col.plannedShipment')}
                         <input
@@ -1237,6 +1344,7 @@ export function PurchaseOrderModal({
           <button
             type="button"
             className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
+            data-coach="procurement:orderSave"
             onClick={save}
           >
             {t('common.save')}

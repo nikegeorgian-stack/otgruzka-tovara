@@ -1,5 +1,4 @@
 import { useI18n } from '@/context/I18nContext'
-import { useAiAssistant } from '@/context/AiAssistantContext'
 
 type Props = {
   listening: boolean
@@ -19,14 +18,10 @@ export function VoiceControlBar({
   onHelp,
 }: Props) {
   const { t } = useI18n()
-  const { aiActive, open: aiOpen } = useAiAssistant()
 
-  // ИИ — справа внизу; голос не перекрывает кнопку ✦ и открытый чат
-  const dockClass = !aiActive
-    ? 'bottom-4 right-4 items-end'
-    : aiOpen
-      ? 'bottom-5 left-4 items-start'
-      : 'bottom-5 right-[5.25rem] items-end'
+  // Голос у левого дока FAB (над стеком), не в правом нижнем углу рабочей зоны
+  const dockClass =
+    'bottom-[calc(5.5rem+env(safe-area-inset-bottom,0px))] left-3 items-start lg:bottom-[calc(3.25rem+5.5rem)] lg:left-[calc(var(--app-sidebar-w,3.5rem)+0.75rem)]'
 
   return (
     <div

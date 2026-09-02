@@ -51,6 +51,7 @@ import {
   upsertLoadingShipment,
   type UpsertLoadingShipmentInput,
 } from '@/lib/warehouse/loadingShipments'
+import { markWarehouseDocsExported } from '@/lib/warehouse/rsQueue'
 import {
   createWarehouseItemRenameRequest,
   resolveWarehouseItemRenameRequest,
@@ -69,21 +70,36 @@ import type {
   WarehouseStore,
 } from '@/lib/warehouse/types'
 import { patchWarehouse, type StoreSliceDeps } from '../storeApi'
-import { syncSalesOrderLoadingInStore } from '@/lib/sales/loadingLink'
+import { syncSalesOrderLoadingInStore, markSalesOrderShippedIfFullyLoaded } from '@/lib/sales/loadingLink'
 
-export function createWarehouseSlice({ setStore, getStore }: StoreSliceDeps) {
+export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
+  function actorRoleId(): string | undefined {
+    const actor = getActor?.()
+    if (!actor?.id) return undefined
+    return getStore().access.users.find((u) => u.id === actor.id)?.roleId
+  }
+
   return {
     upsertWarehouseItem(item: WarehouseItem) {
+      const roleId = actorRoleId()
+      const actor = getActor?.()
       patchWarehouse(setStore, (w) => {
         const exists = w.items.some((i) => i.id === item.id)
-        let next = upsertWarehouseItemInStore(w, item)
+        const before = w.items.find((i) => i.id === item.id)
+        let next = upsertWarehouseItemInStore(w, item, roleId)
         const saved = next.items.find((i) => i.id === item.id)
+        const techChanged = (before?.technicalName ?? '') !== (saved?.technicalName ?? '')
+        const techDetail = techChanged
+          ? ` · тех.название: «${before?.technicalName?.trim() || '—'}» → «${saved?.technicalName?.trim() || '—'}»`
+          : ''
         next = appendWarehouseAudit(next, {
           action: 'item_change',
           detail: exists
-            ? `Изменено: ${saved?.name ?? item.name} (${saved?.internalCode ?? ''})`
-            : `Добавлено: ${saved?.name ?? item.name} (${saved?.internalCode ?? ''})`,
+            ? `Изменено: ${saved?.name ?? item.name} (${saved?.internalCode ?? ''})${techDetail}`
+            : `Добавлено: ${saved?.name ?? item.name} (${saved?.internalCode ?? ''})${techDetail}`,
           itemId: item.id,
+          actorId: actor?.id,
+          actorName: actor?.name,
         })
         return next
       })
@@ -522,16 +538,31 @@ export function createWarehouseSlice({ setStore, getStore }: StoreSliceDeps) {
         ok: false,
         error: 'warehouse.loading.errNotFound',
       }
-      patchWarehouse(setStore, (w) => {
-        const out = postLoadingShipment(w, shipmentId, args)
+      setStore((s) => {
+        const out = postLoadingShipment(s.warehouse, shipmentId, args)
         result = out.result
-        return out.store
+        if (!out.result.ok) return s
+        let next = { ...s, warehouse: out.store }
+        const shipment = out.store.loadingShipments?.find((x) => x.id === shipmentId)
+        if (shipment?.salesOrderId) {
+          next = syncSalesOrderLoadingInStore(next, shipment.salesOrderId)
+          next = markSalesOrderShippedIfFullyLoaded(next, shipment.salesOrderId)
+        }
+        return next
       })
       return result
     },
 
     removeLoadingShipment(shipmentId: string) {
       patchWarehouse(setStore, (w) => removeLoadingShipment(w, shipmentId))
+    },
+
+    markWarehouseDocsExported(
+      documentIds: string[],
+      actor?: { id?: string; name?: string },
+    ) {
+      if (!documentIds.length) return
+      patchWarehouse(setStore, (w) => markWarehouseDocsExported(w, documentIds, actor))
     },
   }
 }

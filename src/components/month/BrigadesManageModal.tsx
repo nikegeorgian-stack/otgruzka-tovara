@@ -10,7 +10,9 @@ type Props = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeNameEn?: (nameRu: string, nameEn: string) => void
   onSetBrigadeUnit?: (brigade: string, unitId: string | null) => void
+  onSetBrigadeHasBrigadier?: (brigade: string, hasBrigadier: boolean) => void
 }
 
 export function BrigadesManageModal({
@@ -20,7 +22,9 @@ export function BrigadesManageModal({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeNameEn,
   onSetBrigadeUnit,
+  onSetBrigadeHasBrigadier,
 }: Props) {
   const { t } = useI18n()
 
@@ -40,7 +44,9 @@ export function BrigadesManageModal({
           onRenameBrigade={onRenameBrigade}
           onRemoveBrigade={onRemoveBrigade}
           onSetBrigadeNameKa={onSetBrigadeNameKa}
+          onSetBrigadeNameEn={onSetBrigadeNameEn}
           onSetBrigadeUnit={onSetBrigadeUnit}
+          onSetBrigadeHasBrigadier={onSetBrigadeHasBrigadier}
         />
       </div>
     </AppDialog>

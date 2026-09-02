@@ -1,17 +1,20 @@
 import { FiberCellBrand } from '@/components/brand/FiberCellBrand'
 import { useI18n } from '@/context/I18nContext'
+import type { ReactNode } from 'react'
 
 type Props = {
   title: string
   subtitle?: string
   onOpenMenu: () => void
+  trailing?: ReactNode
+  brandOnDark?: boolean
 }
 
-export function WebMobileHeader({ title, subtitle, onOpenMenu }: Props) {
+export function WebMobileHeader({ title, subtitle, onOpenMenu, trailing, brandOnDark }: Props) {
   const { t } = useI18n()
 
   return (
-    <header className="web-mobile-header lg:hidden">
+    <header className="web-mobile-header flex lg:hidden">
       <button
         type="button"
         className="web-mobile-icon-btn shrink-0"
@@ -28,7 +31,8 @@ export function WebMobileHeader({ title, subtitle, onOpenMenu }: Props) {
           <p className="truncate text-[11px] text-stone-500">{subtitle}</p>
         )}
       </div>
-      <FiberCellBrand variant="page" className="shrink-0 scale-90" />
+      {trailing}
+      <FiberCellBrand variant={brandOnDark ? 'onDark' : 'page'} className="shrink-0 scale-90" />
     </header>
   )
 }

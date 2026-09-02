@@ -22,12 +22,14 @@ export default async function handler(req, res) {
 
   try {
     initFirebaseAdmin()
-    await getAuth().createUser({
+    const adminAuth = getAuth()
+    const created = await adminAuth.createUser({
       email: newEmail,
       password,
       displayName: typeof displayName === 'string' && displayName.trim() ? displayName.trim() : newEmail,
-      emailVerified: false,
+      emailVerified: true,
     })
+    await adminAuth.setCustomUserClaims(created.uid, { mustChangePassword: true })
     res.status(200).json({ ok: true })
   } catch (err) {
     const code = err?.code || err?.errorInfo?.code

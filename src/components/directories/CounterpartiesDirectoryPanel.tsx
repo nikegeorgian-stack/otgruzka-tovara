@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { consumeDirectoryOpenIntent } from '@/lib/directories/openIntent'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { useI18n } from '@/context/I18nContext'
@@ -58,6 +59,12 @@ export function CounterpartiesDirectoryPanel({ store, onUpsert, onRemove }: Prop
     setEditing(emptyCounterparty(store))
     setTab('main')
   }
+
+  useEffect(() => {
+    const intent = consumeDirectoryOpenIntent('counterparties')
+    if (intent?.create) openNew()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function openEdit(c: Counterparty) {
     setEditing({ ...c })
@@ -203,7 +210,6 @@ export function CounterpartiesDirectoryPanel({ store, onUpsert, onRemove }: Prop
         <ModalBackdrop
           open
           onClose={() => setEditing(null)}
-          className="fixed inset-0 flex items-center justify-center bg-black/40 p-4"
           panelClassName="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-sm border border-grid bg-white shadow-sm"
         >
             <div className="border-b border-grid px-5 py-4">

@@ -230,21 +230,24 @@ export const FORMULATION_COLOR_VARIANTS: {
   { id: 'other', labelRu: 'Другой', labelKa: 'სხვა' },
 ]
 
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
 export function formulationCategoryLabel(
   cat: FormulationCategory,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   const row = FORMULATION_CATEGORIES.find((c) => c.id === cat)
   if (!row) return cat
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }
 
 export function formulationColorLabel(
   color: FormulationColorVariant | undefined,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   if (!color) return '—'
   const row = FORMULATION_COLOR_VARIANTS.find((c) => c.id === color)
   if (!row) return color
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }

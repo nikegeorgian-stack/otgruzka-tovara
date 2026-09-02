@@ -3,8 +3,11 @@ import { BilingualText } from '@/components/employee/BilingualText'
 import { useI18n } from '@/context/I18nContext'
 import { EmployeePhoto } from '@/components/ui/EmployeePhoto'
 import { SecretValue } from '@/components/ui/SecretValue'
+import { StaffRateField } from '@/components/hr/StaffRateField'
 import { bankName, formatIban, normalizeIban } from '@/lib/hr/banks'
+import { computeLeaveBalance } from '@/lib/hr/leaveBalance'
 import { hrStatusLabel } from '@/lib/hr/labels'
+import { employeeStaffRate } from '@/lib/payroll'
 import type { Locale } from '@/i18n/types'
 import type { Employee } from '@/lib/types'
 
@@ -35,17 +38,34 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+function LeaveBalanceRow({ employee }: { employee: Employee }) {
+  const { t } = useI18n()
+  if (!employee.hireDate && !(employee.leaveLedger ?? []).length) return null
+  const bal = computeLeaveBalance(employee)
+  return (
+    <Row label={t('hr.leave.personalBalance')}>
+      <span className="tabular-nums">
+        {bal.balance.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}
+      </span>
+    </Row>
+  )
+}
+
 export function HrPersonalFile({
   employee,
   onOpenFull,
+  onSaveEmployee,
 }: {
   employee: Employee
   onOpenFull: () => void
+  /** Инспектор / HR может сразу выставить штатную ставку без полной карточки. */
+  onSaveEmployee?: (e: Employee) => void
 }) {
   const { t, locale, employeeNameLines, employeePositionLines } = useI18n()
   const loc = locale as Locale
   const [copied, setCopied] = useState<string | null>(null)
   const status = employee.hrStatus ?? 'active'
+  const staffRate = employeeStaffRate(employee)
   const primaryBank =
     (employee.bankAccounts ?? []).find((a) => a.isPrimary) ?? (employee.bankAccounts ?? [])[0]
 
@@ -89,7 +109,15 @@ export function HrPersonalFile({
             className="mt-1 text-sm font-medium leading-tight text-stone-500"
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-stone-500">№ {employee.tabNumber || '—'}</span>
+            <span className="font-mono text-xs text-stone-500">
+              {t('hr.employeeNumber.short')} {employee.employeeNumber || '—'}
+              {employee.tabNumber ? (
+                <span className="text-stone-400">
+                  {' '}
+                  · {t('hr.tabNumber')} {employee.tabNumber}
+                </span>
+              ) : null}
+            </span>
             <span
               className={`fc-badge ${
                 status === 'fired'
@@ -133,11 +161,35 @@ export function HrPersonalFile({
           {employee.terminationDate && (
             <Row label={t('hr.fireDate')} value={employee.terminationDate} />
           )}
+          <LeaveBalanceRow employee={employee} />
           {employee.monthlySalary ? (
-            <Row label="Оклад">
+            <Row label={t('finance.rates.monthly')}>
               <SecretValue
                 value={`${employee.monthlySalary} ${employee.currency ?? 'GEL'}`}
               />
+            </Row>
+          ) : null}
+          {onSaveEmployee ? (
+            <div className="py-2">
+              <StaffRateField
+                value={employee.staffRate}
+                label={t('hr.pay.staffRate')}
+                hint={t('hr.pay.staffRateHint')}
+                customOptionLabel={t('finance.rates.staffRateCustom')}
+                onChange={(staffRate) => onSaveEmployee({ ...employee, staffRate })}
+              />
+              {employee.monthlySalary != null && staffRate !== 1 ? (
+                <p className="mt-1 text-right text-xs font-semibold tabular-nums text-teal-800">
+                  {t('hrInspector.rates.effective')}:{' '}
+                  {Math.round(employee.monthlySalary * staffRate).toLocaleString('ru-RU')} ₾
+                </p>
+              ) : null}
+            </div>
+          ) : staffRate !== 1 ? (
+            <Row label={t('hr.pay.staffRate')}>
+              <span className="tabular-nums">
+                {staffRate} · {Math.round(staffRate * 100)}%
+              </span>
             </Row>
           ) : null}
         </Section>

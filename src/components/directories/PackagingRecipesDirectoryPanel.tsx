@@ -1,17 +1,26 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { WarehouseItemSelect } from '@/components/ui/WarehouseItemSelect'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { consumeDirectoryOpenIntent } from '@/lib/directories/openIntent'
 import { formatStackDescription, recipeLayerCounts } from '@/lib/packaging/calc'
 import { isBoxItem, isPalletItem } from '@/lib/packaging/filters'
 import {
+  emptyBoxRecipe,
   emptyPackagingRecipe,
+  nextBoxRecipeCode,
   nextPackagingRecipeCode,
+  normalizeBoxRecipe,
   normalizePackagingRecipe,
 } from '@/lib/packaging/init'
-import type { PackagingRecipe, PackagingRecipeStore, PackagingStackLayer } from '@/lib/packaging/types'
+import type {
+  BoxRecipe,
+  PackagingRecipe,
+  PackagingRecipeStore,
+  PackagingStackLayer,
+} from '@/lib/packaging/types'
 import type { WarehouseItem } from '@/lib/warehouse/types'
 
 type Props = {
@@ -20,6 +29,8 @@ type Props = {
   categoryNames: Map<string, string>
   onSave: (r: PackagingRecipe) => void
   onRemove: (id: string) => void
+  onSaveBox: (r: BoxRecipe) => void
+  onRemoveBox: (id: string) => void
   onOpenNomenclature: () => void
   onBranchNomenclature?: (from: {
     title: string
@@ -37,6 +48,8 @@ export function PackagingRecipesDirectoryPanel({
   categoryNames,
   onSave,
   onRemove,
+  onSaveBox,
+  onRemoveBox,
   onOpenNomenclature,
   onBranchNomenclature,
   onClearWorkspaceDraft,
@@ -46,6 +59,7 @@ export function PackagingRecipesDirectoryPanel({
   const { t, locale } = useI18n()
   const { confirm } = useConfirm()
   const DRAFT_KEY = 'packagingRecipe-edit'
+  const [kind, setKind] = useState<'boxes' | 'pallets'>('boxes')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<PackagingRecipe | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -101,6 +115,12 @@ export function PackagingRecipesDirectoryPanel({
     setEditing(recipe)
   }
 
+  useEffect(() => {
+    const intent = consumeDirectoryOpenIntent('packagingRecipes')
+    if (intent?.create) openNew()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function openEdit(r: PackagingRecipe) {
     setEditing({ ...r, stack: [...r.stack] })
   }
@@ -143,6 +163,38 @@ export function PackagingRecipesDirectoryPanel({
   return (
     <div className="space-y-4">
       {notice && <FormNotice type="info" message={notice} onDismiss={() => setNotice(null)} />}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PackagingKindCard
+          active={kind === 'boxes'}
+          coach="packaging:tabBoxes"
+          step="1"
+          title={t('packaging.menu.boxes.title')}
+          body={t('packaging.menu.boxes.body')}
+          onClick={() => setKind('boxes')}
+        />
+        <PackagingKindCard
+          active={kind === 'pallets'}
+          coach="packaging:tabPallets"
+          step="2"
+          title={t('packaging.menu.pallets.title')}
+          body={t('packaging.menu.pallets.body')}
+          onClick={() => setKind('pallets')}
+        />
+      </div>
+
+      {kind === 'boxes' ? (
+        <BoxRecipesSection
+          store={store}
+          boxItems={boxes}
+          onSave={onSaveBox}
+          onRemove={onRemoveBox}
+          onOpenNomenclature={goNomenclature}
+          onClearWorkspaceDraft={onClearWorkspaceDraft}
+          workspaceRestoreSeq={workspaceRestoreSeq}
+          workspaceDrafts={workspaceDrafts}
+        />
+      ) : (
+        <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <input
           className="min-w-[200px] flex-1 rounded-sm border border-grid px-3 py-2 text-sm"
@@ -221,6 +273,9 @@ export function PackagingRecipesDirectoryPanel({
                 value={editing.rollsPerBox}
                 onChange={(e) => patch({ rollsPerBox: Number(e.target.value) || 1 })}
               />
+              <span className="mt-1 block font-normal text-stone-400">
+                {t('packaging.palletRollsHint')}
+              </span>
             </label>
             <label className="text-xs font-medium text-stone-500">
               {t('packaging.topRolls')}
@@ -310,6 +365,241 @@ export function PackagingRecipesDirectoryPanel({
                 className="rounded-sm border border-red-200 px-4 py-2 text-sm text-red-700"
                 onClick={async () => {
                   if (await confirm({ message: t('packaging.deleteConfirm'), danger: true })) {
+                    onRemove(editing.id)
+                    closeEditing()
+                  }
+                }}
+              >
+                {t('common.delete')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function PackagingKindCard({
+  active,
+  coach,
+  step,
+  title,
+  body,
+  onClick,
+}: {
+  active: boolean
+  coach: string
+  step: string
+  title: string
+  body: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-coach={coach}
+      onClick={onClick}
+      className={`rounded-lg border px-4 py-3 text-left transition ${
+        active
+          ? 'border-teal-700 bg-teal-50 shadow-sm'
+          : 'border-stone-200 bg-white hover:border-teal-500 hover:bg-teal-50/40'
+      }`}
+    >
+      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">
+        {step}
+      </span>
+      <span className="mt-1 block text-base font-bold text-ink">{title}</span>
+      <span className="mt-1 block text-xs leading-snug text-stone-500">{body}</span>
+    </button>
+  )
+}
+
+type BoxSectionProps = {
+  store: PackagingRecipeStore
+  boxItems: WarehouseItem[]
+  onSave: (r: BoxRecipe) => void
+  onRemove: (id: string) => void
+  onOpenNomenclature: () => void
+  onClearWorkspaceDraft?: (draftKey: string) => void
+  workspaceRestoreSeq: number
+  workspaceDrafts: Record<string, unknown>
+}
+
+function BoxRecipesSection({
+  store,
+  boxItems,
+  onSave,
+  onRemove,
+  onOpenNomenclature,
+  onClearWorkspaceDraft,
+  workspaceRestoreSeq,
+  workspaceDrafts,
+}: BoxSectionProps) {
+  const { t } = useI18n()
+  const { confirm } = useConfirm()
+  const DRAFT_KEY = 'boxRecipe-edit'
+  const [editing, setEditing] = useState<BoxRecipe | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const list = store.boxes ?? []
+
+  useWorkspaceDraftRestore<BoxRecipe>(
+    DRAFT_KEY,
+    (draft) => setEditing(draft),
+    workspaceRestoreSeq,
+    workspaceDrafts,
+  )
+
+  function closeEditing() {
+    setEditing(null)
+    onClearWorkspaceDraft?.(DRAFT_KEY)
+  }
+
+  function openNew() {
+    const recipe = emptyBoxRecipe()
+    recipe.code = nextBoxRecipeCode(store)
+    setEditing(recipe)
+  }
+
+  function save() {
+    if (!editing?.name.trim()) {
+      setNotice(t('packaging.errName'))
+      return
+    }
+    onSave(
+      normalizeBoxRecipe({
+        ...editing,
+        code: editing.code || nextBoxRecipeCode(store),
+        updatedAt: new Date().toISOString(),
+      }),
+    )
+    closeEditing()
+    setNotice(t('packaging.boxSaved'))
+  }
+
+  return (
+    <div className="space-y-3">
+      {notice && <FormNotice type="info" message={notice} onDismiss={() => setNotice(null)} />}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          className="btn-add"
+          data-coach="packaging:addBox"
+          onClick={openNew}
+        >
+          {t('packaging.addBox')}
+        </button>
+      </div>
+      <div className="overflow-hidden rounded-sm border border-grid bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-stone-50 text-left text-xs uppercase text-stone-500">
+            <tr>
+              <th className="px-4 py-3">{t('packaging.col.code')}</th>
+              <th className="px-4 py-3">{t('packaging.col.name')}</th>
+              <th className="px-4 py-3">{t('packaging.col.boxRolls')}</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {list.filter((r) => r.active).length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-stone-500">
+                  {t('packaging.boxEmpty')}
+                </td>
+              </tr>
+            )}
+            {list
+              .filter((r) => r.active)
+              .map((r) => (
+                <tr key={r.id} className="border-t border-grid/60">
+                  <td className="px-4 py-3 font-mono text-xs">{r.code}</td>
+                  <td className="px-4 py-3 font-medium">{r.name}</td>
+                  <td className="px-4 py-3 tabular-nums">{r.rollsPerBox}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      className="text-xs text-accent hover:underline"
+                      onClick={() => setEditing({ ...r })}
+                    >
+                      {t('common.edit')}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      {editing && (
+        <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">
+          <h3 className="text-lg font-bold">
+            {list.some((i) => i.id === editing.id) ? t('packaging.editBox') : t('packaging.addBox')}
+          </h3>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-stone-500">
+              {t('packaging.name')}
+              <input
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                value={editing.name}
+                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              />
+            </label>
+            <label className="text-xs font-medium text-stone-500">
+              {t('packaging.rollsPerBox')}
+              <input
+                type="number"
+                min={1}
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                value={editing.rollsPerBox}
+                onChange={(e) =>
+                  setEditing({ ...editing, rollsPerBox: Number(e.target.value) || 1 })
+                }
+              />
+            </label>
+            <WarehouseItemSelect
+              label={t('packaging.boxItem')}
+              hint={t('packaging.fromWarehouse')}
+              value={editing.boxItemId ?? ''}
+              options={boxItems}
+              placeholder={t('packaging.pickBox')}
+              onChange={(id) => setEditing({ ...editing, boxItemId: id || undefined })}
+              onAdd={onOpenNomenclature}
+            />
+            <label className="text-xs font-medium text-stone-500">
+              {t('packaging.meshCell')}
+              <input
+                className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
+                value={editing.meshCellSize ?? ''}
+                placeholder="4x4"
+                onChange={(e) =>
+                  setEditing({ ...editing, meshCellSize: e.target.value || undefined })
+                }
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white"
+              onClick={save}
+            >
+              {t('common.save')}
+            </button>
+            <button
+              type="button"
+              className="rounded-sm border border-grid px-4 py-2 text-sm"
+              onClick={closeEditing}
+            >
+              {t('common.cancel')}
+            </button>
+            {list.some((i) => i.id === editing.id) && (
+              <button
+                type="button"
+                className="rounded-sm border border-red-200 px-4 py-2 text-sm text-red-700"
+                onClick={async () => {
+                  if (await confirm({ message: t('packaging.deleteBoxConfirm'), danger: true })) {
                     onRemove(editing.id)
                     closeEditing()
                   }

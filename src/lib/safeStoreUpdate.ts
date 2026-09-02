@@ -1,10 +1,11 @@
-import type { Dispatch, SetStateAction } from 'react'
 import type { AppStore } from '@/lib/types'
+import type { SetStore, StoreUpdateMeta } from '@/store/storeApi'
 
 /** Применяет изменение store; ошибки из updater пробрасываются наружу (для try/catch в UI). */
 export function applyStoreUpdate(
-  setStore: Dispatch<SetStateAction<AppStore>>,
+  setStore: SetStore,
   updater: (s: AppStore) => AppStore,
+  meta: StoreUpdateMeta = { origin: 'user' },
 ): void {
   let err: Error | null = null
   setStore((s) => {
@@ -14,6 +15,6 @@ export function applyStoreUpdate(
       err = e instanceof Error ? e : new Error(String(e))
       return s
     }
-  })
+  }, meta)
   if (err) throw err
 }

@@ -1,6 +1,7 @@
 import { exportLabels } from '@/lib/export/labels'
 import { loadXlsx } from '@/lib/lazy/xlsx'
 import { dayDateKey, daysInMonth, formatMonthTitle, parseMonthKey } from './dates'
+import { resolvePayrollAccrualRules } from './finance/payrollAccrualRules'
 import { calculateRowPay, isPayableInMonth } from './payroll'
 import { monthStatement, statementTotals } from './finance/calc'
 import { formatFactCellCode, getFactExtraHours } from './factExtra'
@@ -55,7 +56,7 @@ function buildTimesheetSheet(
       }
     }
 
-    const stats = rowStats(sheet, row.id, days, year, m)
+    const stats = rowStats(sheet, row.id, days, year, m, emp)
     line.push(mode === 'plan' ? stats.planHours : stats.factHours)
     rows.push(line)
   }
@@ -106,7 +107,9 @@ export async function exportPayrollExcel(
     if (!row.employeeId) continue
     const emp = store.employees.find((e) => e.id === row.employeeId)
     if (!emp || !isPayableInMonth(emp, month)) continue
-    const pay = calculateRowPay(emp, sheet, row.id, y, m)
+    const pay = calculateRowPay(emp, sheet, row.id, y, m, {
+      accrual: resolvePayrollAccrualRules(store.settings),
+    })
     rows.push([
       emp.fullName,
       emp.nameKa ?? '',
@@ -132,7 +135,11 @@ const STATEMENT_HEADERS: Record<Locale, string[]> = {
     'Факт ч',
     'База ₾',
     'Ночь ₾',
-    'Сверхуроч ₾',
+    'Ночь линия ₾',
+    'Сверхур. 110%',
+    'Сверхур. 115%',
+    'Сверхур. 120%',
+    'Простой ₾',
     'Отпускные ₾',
     'Больничные ₾',
     'Начислено ₾',
@@ -152,7 +159,11 @@ const STATEMENT_HEADERS: Record<Locale, string[]> = {
     'ფაქ.სთ',
     'ბაზა ₾',
     'ღამის ₾',
-    'ზეგანაკვ. ₾',
+    'ხაზის ღამე ₾',
+    'ზეგან. 110%',
+    'ზეგან. 115%',
+    'ზეგან. 120%',
+    'უპირომოდ ₾',
     'შვებულება ₾',
     'ბიულეტენი ₾',
     'დარიცხული ₾',
@@ -163,6 +174,30 @@ const STATEMENT_HEADERS: Record<Locale, string[]> = {
     'გასაცემი ₾',
     'გაცემული ₾',
     'ნაშთი ₾',
+  ],
+  en: [
+    'Name RU',
+    'Name GE',
+    'Brigade',
+    'Schedule',
+    'Fact h',
+    'Base ₾',
+    'Night ₾',
+    'Night line ₾',
+    'Overtime 110%',
+    'Overtime 115%',
+    'Overtime 120%',
+    'Idle ₾',
+    'Leave pay ₾',
+    'Sick pay ₾',
+    'Accrued ₾',
+    'Bonuses ₾',
+    'Foreman ₾',
+    'Fines ₾',
+    'Advance ₾',
+    'To pay ₾',
+    'Paid ₾',
+    'Balance ₾',
   ],
 }
 
@@ -187,7 +222,11 @@ export async function exportPayrollStatementExcel(
       r.factHours,
       r.breakdown.base,
       r.breakdown.night,
-      r.breakdown.overtime,
+      r.breakdown.nightLineBonus,
+      r.breakdown.ot110,
+      r.breakdown.ot115,
+      r.breakdown.ot120,
+      r.breakdown.idle,
       r.breakdown.vacation,
       r.breakdown.sick,
       r.accrued,
@@ -203,6 +242,10 @@ export async function exportPayrollStatementExcel(
   const totalLabel = locale === 'ka' ? 'სულ' : 'Итого'
   rows.push([
     totalLabel,
+    '',
+    '',
+    '',
+    '',
     '',
     '',
     '',
@@ -246,7 +289,9 @@ export async function exportBrigadeReportExcel(
     if (!row.employeeId) continue
     const emp = store.employees.find((e) => e.id === row.employeeId)
     if (!emp || !isPayableInMonth(emp, month)) continue
-    const pay = calculateRowPay(emp, sheet, row.id, y, m)
+    const pay = calculateRowPay(emp, sheet, row.id, y, m, {
+      accrual: resolvePayrollAccrualRules(store.settings),
+    })
     const b = emp.brigade || '—'
     const cur = byBrigade.get(b) ?? { hours: 0, amount: 0 }
     byBrigade.set(b, {

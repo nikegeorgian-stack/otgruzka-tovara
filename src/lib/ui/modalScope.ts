@@ -39,9 +39,16 @@ export function enterSubmitMode(target: EventTarget | null): EnterSubmitMode {
 
 // --- Стек вложенных модалок: Esc и z-index ---
 
-export const MODAL_Z_BASE = 130
+export const MODAL_Z_BASE = 420
 export const MODAL_Z_STEP = 20
 export const POPOVER_Z_OFFSET = 10
+
+/**
+ * База модалок ≥ сайдбар (410) и taskbar (400), иначе полноэкранные
+ * окна (печать, редактор плана) оказываются под боковой панелью.
+ * Документные диалоги с CHROME_BACKDROP_CLASS всё равно не затемняют
+ * сайдбар (отступ lg:left), но стек z-index единый.
+ */
 
 let modalStack: string[] = []
 const stackListeners = new Set<() => void>()
@@ -76,20 +83,11 @@ export function getPopoverZIndex(): number {
   return getModalZIndex(topId) + POPOVER_Z_OFFSET
 }
 
-/** Корневой контейнер для всех модалок — всегда последний в body. */
+import { ensureModalPortalRoot } from '@/lib/ui/portalRoots'
+
+/** Корневой контейнер для всех модалок — перед #coach-root (см. portalRoots). */
 export function getModalPortalRoot(): HTMLElement {
-  if (typeof document === 'undefined') {
-    return null as unknown as HTMLElement
-  }
-  let el = document.getElementById('modal-root')
-  if (!el) {
-    el = document.createElement('div')
-    el.id = 'modal-root'
-    document.body.appendChild(el)
-  } else if (el.parentElement?.lastElementChild !== el) {
-    document.body.appendChild(el)
-  }
-  return el
+  return ensureModalPortalRoot()
 }
 
 export function registerModal(id: string): void {

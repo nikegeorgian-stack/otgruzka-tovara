@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { CreateLinkedTaskButton } from '@/components/tasks/CreateLinkedTaskButton'
 import { useI18n } from '@/context/I18nContext'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import { draftFromProductionMaterialShortage } from '@/lib/tasks/linkRefs'
+import type { WorkTaskDraft } from '@/lib/tasks/types'
 import {
   materialRoleLabelKey,
   orderNeedsMaterialPlanning,
@@ -23,6 +27,9 @@ type Props = {
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
   onSelectOrder?: (orderId: string) => void
+  access?: AccessStore
+  currentUser?: AppUser | null
+  onCreateWorkTask?: (draft: WorkTaskDraft) => string
 }
 
 function StatusBadge({
@@ -77,6 +84,9 @@ export function PlannerMaterialsPanel({
   onReserveOrder,
   onUnreserveOrder,
   onSelectOrder,
+  access,
+  currentUser,
+  onCreateWorkTask,
 }: Props) {
   const { t, tf } = useI18n()
   const [filter, setFilter] = useState<'all' | 'shortage' | 'unreserved'>('all')
@@ -269,6 +279,21 @@ export function PlannerMaterialsPanel({
                   >
                     {t('planner.material.unreserveBtn')}
                   </Button>
+                  {status.shortage > 0 && access && currentUser && onCreateWorkTask ? (
+                    <CreateLinkedTaskButton
+                      draft={draftFromProductionMaterialShortage({
+                        orderId: order.id,
+                        orderNumber: order.orderNumber,
+                        productName: order.productName,
+                        createdBy: currentUser.id,
+                        createdByName: currentUser.displayName,
+                      })}
+                      access={access}
+                      currentUser={currentUser}
+                      onCreate={onCreateWorkTask}
+                      labelKey="tasks.link.materialShortage"
+                    />
+                  ) : null}
                 </div>
               </div>
               <table className="min-w-full text-sm">

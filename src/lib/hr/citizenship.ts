@@ -10,11 +10,14 @@ export const CITIZENSHIP_OPTIONS: { value: EmployeeCitizenship; labelRu: string;
     { value: 'OTHER', labelRu: 'Другое', labelKa: 'სხვა' },
   ]
 
-export function citizenshipLabel(code: EmployeeCitizenship | undefined, locale: 'ru' | 'ka'): string {
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
+export function citizenshipLabel(code: EmployeeCitizenship | undefined, locale: Locale): string {
   if (!code) return '—'
   const row = CITIZENSHIP_OPTIONS.find((o) => o.value === code)
   if (!row) return code
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }
 
 export function isGeorgianCitizen(code: EmployeeCitizenship | undefined): boolean {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { Button } from '@/components/ui/Button'
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop'
 import { useI18n } from '@/context/I18nContext'
@@ -88,13 +89,12 @@ export function ProductionKeeperModal({
     <ModalBackdrop
       open
       onClose={onClose}
-      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
       panelClassName="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-sm bg-white shadow-sm"
     >
         <div className="border-b border-grid px-5 py-4">
           <h2 className="text-lg font-bold">{t('warehouse.production.modalTitle')}</h2>
           <p className="mt-1 text-sm text-stone-500">
-            {form.date} · {locale === 'ka' ? line?.labelKa : line?.labelRu} ·{' '}
+            {form.date} · {labelRuKa(locale, line?.labelRu, line?.labelKa)} ·{' '}
             {brigadeLabel(form.brigadeName, brigadeNamesKa, locale)}
             {foreman ? ` · ${employeeName(foreman)}` : ''}
           </p>

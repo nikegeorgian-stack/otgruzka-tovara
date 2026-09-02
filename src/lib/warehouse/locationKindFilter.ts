@@ -43,8 +43,11 @@ export function filterItemsForDocumentPicker(
   warehouseId: string | undefined,
   location: WarehouseLocation | undefined,
 ): WarehouseItem[] {
+  // На общем складе (other / без kind) — все категории. Доп. склады с типом
+  // (химия, ГП…) по-прежнему можно сужать по kind, если задан.
   let list = items
   if (warehouseId) list = list.filter((i) => i.warehouseId === warehouseId)
+  if (!location?.kind || location.kind === 'other') return list
   return filterItemsByLocationKind(list, categories, location)
 }
 

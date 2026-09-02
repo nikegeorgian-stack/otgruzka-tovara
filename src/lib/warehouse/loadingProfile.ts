@@ -1,4 +1,5 @@
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import type { Locale } from '@/i18n/types'
 import { formatStackDescription, recipeLayerCounts } from '@/lib/packaging/calc'
 import type { PackagingRecipe as PackagingRecipeType } from '@/lib/packaging/types'
 import { categoryMatchesLocationKind } from './locationKindFilter'
@@ -211,7 +212,7 @@ export function resolvePackagingCounts(
     palletLayers: number
     boxLayers: number
   }>,
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
 ): PackagingCounts {
   const base = packagingLayersFromRecipe(recipe)
   const rollsPerBox = overrides?.rollsPerBox ?? base.rollsPerBox
@@ -270,7 +271,7 @@ export function resolveLoadingLineProfile(
     warehouseItemId?: string
     packagingRecipes: PackagingRecipeType[]
     packagingRecipeId?: string
-    locale: 'ru' | 'ka'
+    locale: Locale
     /** Переопределения с формы */
     rollLengthM?: number
     grammageGsm?: number

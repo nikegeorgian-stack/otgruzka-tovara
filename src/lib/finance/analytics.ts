@@ -1,9 +1,12 @@
 import { monthStatement, statementTotals, getFinance } from './calc'
+import { documentNumberForAdvance } from './advanceDocuments'
+import { documentNumberForPayout } from './payoutDocuments'
 import { monthStats } from '../stats'
 import { isMonthClosed } from '../monthManage'
 import { employeeActiveInMonth } from '../hr/employeeActive'
 import { isPayableInMonth } from '../payroll'
 import type { AppStore } from '@/lib/types'
+import { is52Schedule } from '@/lib/schedules'
 import type { FinanceAdvance, FinancePaymentMethod, FinancePayout } from './types'
 
 export type FinanceDebtRow = {
@@ -44,6 +47,7 @@ export type FinancePaymentJournalRow = {
   method: FinancePaymentMethod
   note?: string
   byName?: string
+  documentNumber?: string
 }
 
 export type FinanceDashboard = {
@@ -61,6 +65,7 @@ export type FinanceDashboard = {
   totalRemaining: number
   employeesWithDebt: number
   sickPending: number
+  vacationPending: number
   noRateCount: number
   planHours: number
   factHours: number
@@ -90,8 +95,27 @@ function sickDaysUnconfirmed(store: AppStore, month: string): number {
   return n
 }
 
+function vacationDaysUnconfirmed(store: AppStore, month: string): number {
+  const sheet = store.months[month]
+  if (!sheet) return 0
+  const fin = store.finance
+  let n = 0
+  for (const row of sheet.rows) {
+    if (!row.employeeId) continue
+    const emp = store.employees.find((e) => e.id === row.employeeId)
+    if (!emp || !isPayableInMonth(emp, month)) continue
+    const confirmed = fin?.vacationConfirmations?.some(
+      (c) => c.employeeId === emp.id && c.month === month,
+    )
+    if (confirmed) continue
+    const hasVacation = Object.values(sheet.fact[row.id] ?? {}).some((m) => m === 'ОТ')
+    if (hasVacation) n++
+  }
+  return n
+}
+
 function employeeHasRate(emp: AppStore['employees'][0]): boolean {
-  if (emp.schedule === '5/2 8ч') return (emp.monthlySalary ?? 0) > 0
+  if (is52Schedule(emp.schedule)) return (emp.monthlySalary ?? 0) > 0
   return (emp.hourlyRate ?? 0) > 0
 }
 
@@ -145,6 +169,7 @@ export function financePaymentJournal(store: AppStore, month: string, asOfDate?:
       method: a.method,
       note: a.note,
       byName: a.byName,
+      documentNumber: documentNumberForAdvance(fin, a),
     })
   }
   for (const p of fin.payouts) {
@@ -161,6 +186,7 @@ export function financePaymentJournal(store: AppStore, month: string, asOfDate?:
       method: p.method,
       note: p.note,
       byName: p.byName,
+      documentNumber: documentNumberForPayout(fin, p),
     })
   }
   return rows.sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at))
@@ -213,7 +239,8 @@ export function computeFinanceDashboard(
     !monthClosed &&
     rows.length > 0 &&
     totals.remaining < 0.01 &&
-    sickDaysUnconfirmed(store, month) === 0
+    sickDaysUnconfirmed(store, month) === 0 &&
+    vacationDaysUnconfirmed(store, month) === 0
 
   return {
     month,
@@ -230,6 +257,7 @@ export function computeFinanceDashboard(
     totalRemaining: totals.remaining,
     employeesWithDebt: debtRows.length,
     sickPending: sickDaysUnconfirmed(store, month),
+    vacationPending: vacationDaysUnconfirmed(store, month),
     noRateCount,
     planHours: mStats?.planHours ?? 0,
     factHours: mStats?.factHours ?? 0,

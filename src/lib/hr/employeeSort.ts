@@ -1,4 +1,5 @@
 import { employeeName, employeePosition } from '@/i18n'
+import { collatorLocale } from '@/i18n/localeFormat'
 import type { Locale } from '@/i18n/types'
 import { hrStatusLabel } from '@/lib/hr/labels'
 import { splitEmployeeName } from '@/lib/hr/displayName'
@@ -11,6 +12,7 @@ import { applyTableSort, type TableSortState } from '@/lib/ui/tableSort'
 export type EmployeeSortKey =
   | 'name'
   | 'tab'
+  | 'employeeNumber'
   | 'department'
   | 'status'
   | 'position'
@@ -28,7 +30,7 @@ const STATUS_ORDER: Record<HrStatus, number> = {
 }
 
 function localeTag(locale: Locale): string {
-  return locale === 'ka' ? 'ka' : 'ru'
+  return collatorLocale(locale)
 }
 
 function deptLabel(emp: Employee): string {
@@ -62,6 +64,11 @@ export function compareEmployees(
     }
     case 'tab':
       cmp = (a.tabNumber ?? '').localeCompare(b.tabNumber ?? '', tag, { numeric: true })
+      break
+    case 'employeeNumber':
+      cmp = (a.employeeNumber ?? '').localeCompare(b.employeeNumber ?? '', tag, {
+        numeric: true,
+      })
       break
     case 'department':
       cmp = deptLabel(a).localeCompare(deptLabel(b), tag)

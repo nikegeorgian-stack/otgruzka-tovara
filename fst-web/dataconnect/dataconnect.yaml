@@ -1,0 +1,13 @@
+specVersion: "v1"
+serviceId: otgruzka-tovara-service
+location: europe-west3
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: otgruzka-tovara-database
+      cloudSql:
+        instanceId: otgruzka-tovara-instance
+        schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./fst-connector

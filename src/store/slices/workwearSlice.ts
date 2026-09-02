@@ -6,7 +6,7 @@ import {
 import type { WorkwearCatalogItem } from '@/lib/workwear/types'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
-export function createWorkwearSlice({ setStore, getStore }: StoreSliceDeps) {
+export function createWorkwearSlice({ setStore, getStore, getActor: _getActor }: StoreSliceDeps) {
   return {
     upsertWorkwearCatalogItem(item: WorkwearCatalogItem) {
       patchStore(setStore, (s) => {

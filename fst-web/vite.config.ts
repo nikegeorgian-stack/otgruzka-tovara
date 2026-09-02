@@ -6,10 +6,14 @@ import { appBuildOptions } from '../vite.chunkConfig'
 
 const repoRoot = path.resolve(__dirname, '..')
 
+/** Capacitor/Android: относительные пути ассетов (file/https схема WebView). */
+const capacitorBuild = process.env.CAPACITOR_BUILD === '1'
+
 export default defineConfig({
   root: path.resolve(__dirname),
   envDir: path.resolve(__dirname),
   publicDir: path.resolve(__dirname, 'public'),
+  base: capacitorBuild ? './' : '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -18,6 +22,8 @@ export default defineConfig({
   },
   define: {
     'import.meta.env.VITE_FST_WEB': JSON.stringify('true'),
+    /** Прод Otgruzka: единый стор = SQL Connect (не Firestore blob). */
+    'import.meta.env.VITE_FST_PERSISTENCE': JSON.stringify('sqlconnect'),
   },
   server: {
     port: 5173,
@@ -25,6 +31,9 @@ export default defineConfig({
       // Общий src/ лежит на уровень выше — нужен для стилей и HMR
       allow: [repoRoot],
     },
+  },
+  optimizeDeps: {
+    include: ['@vladmandic/face-api'],
   },
   build: {
     ...appBuildOptions(),

@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useI18n } from '@/context/I18nContext'
 import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
 import { splitEmployeeName } from '@/lib/hr/displayName'
-import { employmentAgreementLabel, hrContractLabel } from '@/lib/hr/labels'
 import { employeeSearchHr } from '@/lib/hr/sync'
 import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
 import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
@@ -10,19 +9,19 @@ import type { Employee } from '@/lib/types'
 
 type Props = {
   employees: Employee[]
+  /** Подсказка над таблицей (мастер цеха / общий обзор). */
+  hintKey?: string
+  readOnlyKey?: string
 }
 
-function contractLabel(emp: Employee, locale: 'ru' | 'ka'): string {
-  if (emp.employmentAgreementKind) {
-    return employmentAgreementLabel(emp.employmentAgreementKind, locale)
-  }
-  if (emp.contractType) {
-    return hrContractLabel(emp.contractType, locale)
-  }
-  return '—'
-}
-
-export function WorkshopMasterRosterPanel({ employees }: Props) {
+/**
+ * Урезанный список кадров: только ФИО и должность (без паспорта, банка, ЗП, договоров).
+ */
+export function WorkshopMasterRosterPanel({
+  employees,
+  hintKey = 'hr.limited.hint',
+  readOnlyKey = 'hr.limited.readOnly',
+}: Props) {
   const { t, locale, employeePositionLines } = useI18n()
   const [q, setQ] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
@@ -51,14 +50,17 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
       .filter((e) => {
         if (deptFilter && (e.department ?? e.brigade) !== deptFilter) return false
         if (!s) return true
-        return employeeSearchHr(e).includes(s)
+        const { surname, firstName } = splitEmployeeName(e.fullName)
+        const pos = employeePositionLines(e)
+        const hay = `${surname} ${firstName} ${pos.primary} ${pos.secondary ?? ''} ${e.department ?? ''} ${e.brigade ?? ''}`.toLowerCase()
+        return hay.includes(s) || employeeSearchHr(e).includes(s)
       })
     return sortEmployees(list, employeeSort, locale)
-  }, [employees, q, deptFilter, employeeSort, locale])
+  }, [employees, q, deptFilter, employeeSort, locale, employeePositionLines])
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-stone-600">{t('workshopMaster.rosterHint')}</p>
+      <p className="text-sm text-stone-600">{t(hintKey)}</p>
 
       <div className="flex flex-wrap items-center gap-3">
         <input
@@ -109,7 +111,6 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
                 onSort={handleEmployeeSort}
                 className="px-3 py-2"
               />
-              <th className="px-3 py-2">{t('workshopMaster.col.contract')}</th>
             </tr>
           </thead>
           <tbody>
@@ -124,13 +125,12 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
                     <div>{pos.primary}</div>
                     {pos.secondary && <div className="text-stone-500">{pos.secondary}</div>}
                   </td>
-                  <td className="px-3 py-2 text-xs">{contractLabel(e, locale)}</td>
                 </tr>
               )
             })}
             {!filtered.length && (
               <tr>
-                <td colSpan={4} className="px-3 py-8 text-center text-stone-500">
+                <td colSpan={3} className="px-3 py-8 text-center text-stone-500">
                   {t('employees.noSearchResults')}
                 </td>
               </tr>
@@ -139,7 +139,7 @@ export function WorkshopMasterRosterPanel({ employees }: Props) {
         </table>
       </div>
 
-      <p className="text-xs text-stone-500">{t('workshopMaster.rosterReadOnly')}</p>
+      <p className="text-xs text-stone-500">{t(readOnlyKey)}</p>
     </div>
   )
 }

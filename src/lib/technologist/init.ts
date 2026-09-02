@@ -4,6 +4,10 @@ import type {
   ImpregnationQcRecord,
   IncomingControlRecord,
   RoomClimateRecord,
+  ShiftHandoffAck,
+  ShiftHandoffRecord,
+  ShiftHandoffStatus,
+  ShiftHandoffUrgency,
   TechnologistQcStore,
 } from './types'
 
@@ -14,6 +18,7 @@ export function createDefaultTechnologistQc(): TechnologistQcStore {
     incomingControls: [],
     impregnationQc: [],
     roomClimateLog: [],
+    shiftHandoffs: [],
     settings: { defaultNvTolerancePp: 5 },
   }
 }
@@ -60,6 +65,11 @@ export function normalizeTechnologistQc(
       : [],
     roomClimateLog: Array.isArray(raw.roomClimateLog)
       ? raw.roomClimateLog.map(normalizeRoomClimate)
+      : [],
+    shiftHandoffs: Array.isArray((raw as TechnologistQcStore).shiftHandoffs)
+      ? ((raw as TechnologistQcStore).shiftHandoffs ?? [])
+          .map(normalizeShiftHandoff)
+          .filter((h): h is ShiftHandoffRecord => h != null)
       : [],
     settings: {
       defaultNvTolerancePp:
@@ -119,5 +129,61 @@ function normalizeRoomClimate(r: RoomClimateRecord): RoomClimateRecord {
     roomLabel: r.roomLabel?.trim() || undefined,
     recordedByName: r.recordedByName?.trim() || undefined,
     createdAt: r.createdAt || new Date().toISOString(),
+  }
+}
+
+const URGENCIES = new Set<string>(['normal', 'urgent', 'critical'])
+const HANDOFF_STATUSES = new Set<string>(['open', 'closed'])
+
+function normalizeAck(raw: unknown): ShiftHandoffAck | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const userName = typeof o.userName === 'string' ? o.userName.trim() : ''
+  if (!userName) return null
+  return {
+    userId: typeof o.userId === 'string' && o.userId ? o.userId : undefined,
+    userName,
+    at: typeof o.at === 'string' && o.at ? o.at : new Date().toISOString(),
+  }
+}
+
+export function normalizeShiftHandoff(raw: unknown): ShiftHandoffRecord | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const shiftDate =
+    typeof o.shiftDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.shiftDate)
+      ? o.shiftDate
+      : typeof o.createdAt === 'string' && o.createdAt
+        ? o.createdAt.slice(0, 10)
+        : ''
+  if (!shiftDate) return null
+  const title = typeof o.title === 'string' ? o.title.trim() : ''
+  const body = typeof o.body === 'string' ? o.body : ''
+  if (!title && !body.trim()) return null
+  const now = new Date().toISOString()
+  const urgency: ShiftHandoffUrgency =
+    typeof o.urgency === 'string' && URGENCIES.has(o.urgency)
+      ? (o.urgency as ShiftHandoffUrgency)
+      : 'normal'
+  const status: ShiftHandoffStatus =
+    typeof o.status === 'string' && HANDOFF_STATUSES.has(o.status)
+      ? (o.status as ShiftHandoffStatus)
+      : 'open'
+  const acknowledgements = Array.isArray(o.acknowledgements)
+    ? o.acknowledgements.map(normalizeAck).filter((a): a is ShiftHandoffAck => a != null)
+    : []
+  return {
+    id: typeof o.id === 'string' && o.id ? o.id : crypto.randomUUID(),
+    shiftDate,
+    createdAt: typeof o.createdAt === 'string' && o.createdAt ? o.createdAt : now,
+    updatedAt: typeof o.updatedAt === 'string' && o.updatedAt ? o.updatedAt : now,
+    authorId: typeof o.authorId === 'string' ? o.authorId : undefined,
+    authorName: typeof o.authorName === 'string' ? o.authorName : undefined,
+    title: title || 'Пересменка',
+    body,
+    area: typeof o.area === 'string' && o.area.trim() ? o.area.trim() : undefined,
+    urgency,
+    status,
+    acknowledgements,
   }
 }

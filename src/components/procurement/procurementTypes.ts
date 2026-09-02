@@ -1,8 +1,21 @@
 import type { ProcurementPageProps } from '@/lib/app/procurementProps'
 
-export type ProcurementTab = 'orders' | 'tracking' | 'containers' | 'stock' | 'analytics'
+export type ProcurementTab =
+  | 'orders'
+  | 'tracking'
+  | 'containers'
+  | 'stock'
+  | 'analytics'
+  | 'catalog'
 
-export const PROCUREMENT_TABS: ProcurementTab[] = ['orders', 'tracking', 'analytics']
+export const PROCUREMENT_TABS: ProcurementTab[] = [
+  'orders',
+  'tracking',
+  'containers',
+  'stock',
+  'analytics',
+  'catalog',
+]
 
 /** Кабинет менеджера закупок (импорт, контейнеры). */
 export const PROCUREMENT_WEB_TABS: ProcurementTab[] = [
@@ -11,6 +24,6 @@ export const PROCUREMENT_WEB_TABS: ProcurementTab[] = [
   'orders',
   'stock',
   'analytics',
+  'catalog',
 ]
-
 export type { ProcurementPageProps }

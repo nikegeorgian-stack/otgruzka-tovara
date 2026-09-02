@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { planFormulationBatch, type PostBatchMixResult } from '@/lib/formulations/batch'
+import { analyzeBatchPlan, varianceLevel, varianceLevelClass, warehousePriceLookup } from '@/lib/formulations/batchAnalysis'
 import { recipeTotalBatchKg } from '@/lib/formulations/calc'
 import { formulationRecipeDisplayName } from '@/lib/formulations/warehouseSync'
 import type { FormulationBatchRun, FormulationStore } from '@/lib/formulations/types'
@@ -102,6 +103,16 @@ export function FormulationMixerPanel({
       allowNegativeStock,
     })
   }, [recipe, warehouse, volumeL, warehouseId, allowNegativeStock])
+
+  const analysis = useMemo(() => {
+    if (!recipe || volumeL <= 0) return null
+    return analyzeBatchPlan(
+      recipe,
+      volumeL,
+      plan?.lines,
+      warehousePriceLookup(warehouse),
+    )
+  }, [recipe, volumeL, plan, warehouse])
 
   async function handlePost() {
     if (!recipe || !operatorId || !operatorName || !plan?.mixAllowed) return
@@ -257,6 +268,14 @@ export function FormulationMixerPanel({
             <span className="ml-2">
               · {t('technologist.scale')}: ×{plan.scaleFactor.toFixed(3)}
             </span>
+            {analysis?.cost.totalCost != null ? (
+              <span className="ml-2">
+                · {t('technologist.mixCost')}: {analysis.cost.totalCost} {analysis.cost.currency}
+                {analysis.cost.costPerKg != null
+                  ? ` (${analysis.cost.costPerKg}/${t('technologist.perKg')})`
+                  : ''}
+              </span>
+            ) : null}
           </div>
 
           {!plan.stockOk && plan.blockingShortages.length > 0 && (
@@ -277,38 +296,69 @@ export function FormulationMixerPanel({
               <thead>
                 <tr>
                   <th>{t('technologist.col.component')}</th>
+                  <th className="text-right">{t('technologist.col.norm')}</th>
                   <th className="text-right">{t('technologist.col.consume')}</th>
+                  <th className="text-right">{t('technologist.col.variance')}</th>
                   <th className="text-right">{t('technologist.col.stock')}</th>
+                  <th className="text-right">{t('technologist.col.lineCost')}</th>
                 </tr>
               </thead>
               <tbody>
                 {plan.lines.map((line) => {
                   const avail = balances.get(line.warehouseItemId)?.available ?? 0
                   const ok = avail >= line.consumeKg
+                  const norm = analysis?.lines.find((l) => l.componentId === line.componentId)
+                  const costLine = analysis?.cost.lines.find((l) => l.componentId === line.componentId)
+                  const vLevel = varianceLevel(norm?.variancePct ?? null)
                   return (
                     <tr key={line.componentId}>
                       <td>{line.name}</td>
                       <td className="text-right tabular-nums">
+                        {norm ? `${formatQty(norm.normKg)} кг` : '—'}
+                      </td>
+                      <td className="text-right tabular-nums">
                         {formatQty(line.consumeKg)} кг
+                      </td>
+                      <td className={`text-right tabular-nums ${varianceLevelClass(vLevel)}`}>
+                        {norm?.variancePct != null ? `${norm.variancePct}%` : '—'}
                       </td>
                       <td
                         className={`text-right tabular-nums ${ok ? 'text-teal-800' : 'text-red-700 font-medium'}`}
                       >
                         {formatQty(avail)}
                       </td>
+                      <td className="text-right tabular-nums">
+                        {costLine?.cost != null ? costLine.cost : '—'}
+                      </td>
                     </tr>
                   )
                 })}
                 <tr className="bg-teal-50/50 font-medium">
                   <td>{t('technologist.output')}</td>
+                  <td />
                   <td className="text-right tabular-nums">
                     {formatQty(plan.outputKg)} кг ≈ {formatQty(plan.outputKg)} л
                   </td>
+                  <td
+                    className={`text-right tabular-nums ${varianceLevelClass(varianceLevel(analysis?.maxAbsVariancePct ?? null))}`}
+                  >
+                    {analysis?.maxAbsVariancePct != null
+                      ? `${analysis.maxAbsVariancePct}%`
+                      : '—'}
+                  </td>
                   <td />
+                  <td className="text-right tabular-nums">
+                    {analysis?.cost.totalCost != null ? analysis.cost.totalCost : '—'}
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
+
+          {analysis?.cost.missingPrices ? (
+            <p className="mt-2 text-xs text-amber-700">{t('technologist.mixCostMissingPrices')}</p>
+          ) : null}
+          <p className="mt-1 text-[11px] text-stone-400">{t('technologist.varHint')}</p>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
@@ -316,6 +366,7 @@ export function FormulationMixerPanel({
               className="min-h-11 px-6"
               disabled={!plan.mixAllowed || !operatorId}
               onClick={handlePost}
+              data-coach="mixer:postMix"
             >
               {t('technologist.postMix')}
             </Button>

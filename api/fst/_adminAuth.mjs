@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth'
 
 export const FST_ADMIN_EMAILS = new Set([
   'admin@fibercell.net',
+  'nikegeorgian@gmail.com',
   'admin-dm@fibercell.net',
   'levan-admin@fibercell.net',
 ])
@@ -29,11 +30,13 @@ export async function verifySysAdminRequest(req) {
 
   try {
     const decoded = await getAuth().verifyIdToken(token)
-    const email = decoded.email?.trim().toLowerCase()
-    if (!email || !FST_ADMIN_EMAILS.has(email)) {
+    const email = decoded.email?.trim().toLowerCase() || ''
+    const bootstrapAdmin = email && FST_ADMIN_EMAILS.has(email)
+    const claimAdmin = decoded.fstSysadmin === true
+    if (!bootstrapAdmin && !claimAdmin) {
       return { ok: false, status: 403, error: 'forbidden' }
     }
-    return { ok: true, email }
+    return { ok: true, email: email || decoded.uid }
   } catch {
     return { ok: false, status: 401, error: 'unauthorized' }
   }

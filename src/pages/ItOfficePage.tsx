@@ -447,13 +447,18 @@ export function ItOfficePage({
         <FormNotice type={notice.type} message={notice.message} onDismiss={() => setNotice(null)} />
       )}
 
-      <TabBar tabs={IT_OFFICE_TABS.map((id) => ({ id, label: tabLabels[id] }))} value={tab} onChange={setTab} />
+      <TabBar
+        coachPrefix="it"
+        tabs={IT_OFFICE_TABS.map((id) => ({ id, label: tabLabels[id] }))}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === 'registry' && (
         <Card
           title={t('itOffice.registry.title')}
           actions={
-            <Button variant="primary" size="sm" onClick={() => openNewAsset()}>
+            <Button variant="primary" size="sm" onClick={() => openNewAsset()} data-coach="it:addAsset">
               {t('itOffice.addAsset')}
             </Button>
           }

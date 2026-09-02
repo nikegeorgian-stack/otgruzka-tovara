@@ -1,5 +1,8 @@
 import { appendWarehouseAudit } from './audit'
+import { postWarehouseDocument } from './documents'
 import { computeLoadingTotals, LOADING_CONTAINERS, type LoadingLine } from './loading'
+import { suggestDocNumber } from './nomenclatureSearch'
+import { computeAllBalances, formatIssueShortages, validateIssueLines } from './stock'
 import type { LoadingShipment, LoadingShipmentLine, WarehouseStore } from './types'
 
 export type UpsertLoadingShipmentInput = {
@@ -28,7 +31,7 @@ export type UpsertLoadingShipmentInput = {
 
 export type PostLoadingShipmentResult =
   | { ok: true; number: string }
-  | { ok: false; error: string }
+  | { ok: false; error: string; detail?: string }
 
 function suggestNumber(shipments: LoadingShipment[], date: string): string {
   const day = date.replace(/-/g, '')
@@ -169,6 +172,10 @@ export function postLoadingShipment(
   args?: { keeperId?: string; keeperName?: string },
 ): { store: WarehouseStore; result: PostLoadingShipmentResult } {
   const shipments = store.loadingShipments ?? []
+  const existing = shipments.find((s) => s.id === shipmentId)
+  if (existing?.status === 'posted') {
+    return { store, result: { ok: true, number: existing.number } }
+  }
   const idx = shipments.findIndex((s) => s.id === shipmentId && s.status === 'draft')
   if (idx < 0) {
     return { store, result: { ok: false, error: 'warehouse.loading.errNotFound' } }
@@ -180,6 +187,36 @@ export function postLoadingShipment(
   }
   if (!prev.counterpartyName.trim()) {
     return { store, result: { ok: false, error: 'warehouse.loading.errCustomer' } }
+  }
+
+  /** Авто-расход ГП по строкам с номенклатурой склада (кг нетто). */
+  const issueLines = prev.lines
+    .filter((l) => l.itemId && l.rolls > 0)
+    .map((l) => {
+      const netKg =
+        (l.weightPerRollKg || 0) * (l.rolls || 0) ||
+        (l.areaPerRollM2 || 0) * (l.rolls || 0) * ((l.grammageGsm || 0) / 1000)
+      return { itemId: l.itemId!, quantity: Math.max(netKg, l.rolls) }
+    })
+    .filter((l) => l.quantity > 0)
+
+  if (issueLines.length > 0) {
+    if (!prev.warehouseId) {
+      return { store, result: { ok: false, error: 'warehouse.doc.errWarehouse' } }
+    }
+    const balances = computeAllBalances(store, prev.warehouseId)
+    const activeItems = store.items.filter((i) => i.active)
+    const stockCheck = validateIssueLines(activeItems, balances, issueLines)
+    if (!stockCheck.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: 'warehouse.loading.errStock',
+          detail: formatIssueShortages(stockCheck.shortages),
+        },
+      }
+    }
   }
 
   const now = new Date().toISOString()
@@ -197,9 +234,47 @@ export function postLoadingShipment(
   const nextShipments = [...shipments]
   nextShipments[idx] = posted
   let next: WarehouseStore = { ...store, loadingShipments: nextShipments }
+
+  if (issueLines.length > 0) {
+    const docNumber = suggestDocNumber(next.documents, 'issue', posted.date)
+    const out = postWarehouseDocument(next, {
+      type: 'issue',
+      number: docNumber || `${posted.number}-Р`,
+      date: posted.actualShipDate || posted.date,
+      warehouseId: posted.warehouseId,
+      purpose: 'loading',
+      counterparty: posted.counterpartyName,
+      counterpartyId: posted.counterpartyId,
+      comment: `Отгрузка ${posted.number} · ${posted.counterpartyName}`,
+      lines: issueLines,
+      keeperId: posted.keeperId,
+      keeperName: posted.keeperName,
+      loadingShipmentId: posted.id,
+      docRole: 'loading_issue',
+    })
+    if (!out.result.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: out.result.error ?? 'warehouse.loading.errGeneric',
+        },
+      }
+    }
+    next = out.store
+    const withDoc: LoadingShipment = {
+      ...posted,
+      postedDocumentId: out.result.documentId,
+    }
+    nextShipments[idx] = withDoc
+    next = { ...next, loadingShipments: [...nextShipments] }
+  }
+
   next = appendWarehouseAudit(next, {
     action: 'loading_shipment',
-    detail: `Погрузка ${posted.number} · ${posted.counterpartyName} · ${posted.lines.length} поз. · ${(posted.totalsGrossKg / 1000).toFixed(3)} т`,
+    detail: `Погрузка ${posted.number} · ${posted.counterpartyName} · ${posted.lines.length} поз. · ${(posted.totalsGrossKg / 1000).toFixed(3)} т${
+      issueLines.length ? ` · расход ${issueLines.length} поз.` : ''
+    }`,
     actorId: posted.keeperId,
     actorName: posted.keeperName,
   })

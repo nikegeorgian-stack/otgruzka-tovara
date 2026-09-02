@@ -1,4 +1,5 @@
 import type { AccessRoleId, AccessStore, AppUser } from '@/lib/access/types'
+import { MANAGED_VIEWS } from '@/lib/access/types'
 import { viewsForRole } from '@/lib/access/permissions'
 import type { ViewId } from '@/lib/types'
 import { isFstAdminEmail, FST_ADMIN_DISPLAY_NAMES } from './fstAdmin'
@@ -39,27 +40,38 @@ export function isKnownWebFirebaseEmail(email: string | null | undefined): boole
 
 /** Разделы в облаке — уже чем на desktop. */
 export const FST_WEB_ROLE_VIEWS: Partial<Record<AccessRoleId, ViewId[]>> = {
-  hr: ['hr'],
-  hr_inspector: ['hr_inspector'],
-  finance: ['finance'],
-  warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals'],
-  procurement_manager: ['procurement', 'directories'],
-  technologist: ['technologist', 'mixer'],
-  mixer: ['mixer'],
-  workshop_master: ['month', 'production', 'hr'],
-  sysadmin: [
-    'month',
+  hr: ['hr', 'meals'],
+  hr_inspector: ['hr_inspector', 'meals'],
+  warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals', 'meals'],
+  procurement_manager: ['procurement', 'directories', 'meals'],
+  technologist: ['technologist', 'otc', 'mixer', 'warehouse', 'directories', 'meals'],
+  otc: ['otc', 'directories', 'journals', 'meals'],
+  mixer: ['mixer', 'meals'],
+  workshop_master: ['month', 'production', 'hr', 'directories', 'meals'],
+  employee: ['my', 'meals'],
+  timeclock: ['timeclock'],
+  it_specialist: ['it', 'journals', 'meals'],
+  sales_dispatcher: ['director', 'warehouse', 'summary', 'directories', 'journals', 'meals'],
+  office_manager: ['office', 'my', 'meals'],
+  cook: ['meals', 'my'],
+  secretary: ['protocols', 'org_tree', 'my', 'journals', 'directories'],
+  finance: ['finance', 'directories', 'meals'],
+  operations_director: [
+    'director',
     'summary',
+    'month',
     'production',
     'planner',
-    'warehouse',
     'procurement',
-    'hr',
-    'finance',
-    'directories',
+    'warehouse',
     'technologist',
-    'settings',
+    'otc',
+    'hr',
+    'directories',
+    'journals',
+    'meals',
   ],
+  sysadmin: [...MANAGED_VIEWS],
 }
 
 export function resolveFstWebProfile(
@@ -149,4 +161,8 @@ export function isWebProcurementRole(roleId: AccessRoleId | undefined): boolean 
 
 export function isWebWorkshopMasterRole(roleId: AccessRoleId | undefined): boolean {
   return roleId === 'workshop_master'
+}
+
+export function isWebSysAdminRole(roleId: AccessRoleId | undefined): boolean {
+  return roleId === 'sysadmin'
 }

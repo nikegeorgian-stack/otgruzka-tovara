@@ -210,7 +210,9 @@ export function computeImpregnationQc(args: {
   return { nvPct, absDeviationPp, relDeviation, status }
 }
 
-export function qcStatusLabel(status: QcPassStatus, locale: 'ru' | 'ka'): string {
+import type { Locale } from '@/i18n/types'
+
+export function qcStatusLabel(status: QcPassStatus, locale: Locale): string {
   if (status === 'pass') return locale === 'ka' ? 'შესაბამისი' : 'Соответствует'
   if (status === 'fail') return locale === 'ka' ? 'არასაკმარისი' : 'Не соответствует'
   return locale === 'ka' ? 'მოლოდინში' : 'Ожидает'

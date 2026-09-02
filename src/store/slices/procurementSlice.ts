@@ -2,7 +2,13 @@ import { allocateOrderNumber } from '@/lib/procurement/codes'
 import { normalizeProcurementStore } from '@/lib/procurement/init'
 import { receivePurchaseOrderInStore, type ReceiveOrderResult } from '@/lib/procurement/receive'
 import { applyStatusHistory, createStatusChange } from '@/lib/procurement/statusHistory'
-import type { PurchaseOrder, ProcurementStore, ShipmentMilestone } from '@/lib/procurement/types'
+import type {
+  ProcurementCategoryNode,
+  PurchaseOrder,
+  ProcurementStore,
+  RoutePoint,
+  ShipmentMilestone,
+} from '@/lib/procurement/types'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
 function patchProcurement(
@@ -64,6 +70,7 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
           statusHistory: [
             createStatusChange(undefined, partial.status ?? 'draft'),
           ],
+          attachments: partial.attachments ?? [],
           warehouseDocumentIds: partial.warehouseDocumentIds ?? [],
           createdAt: now,
           updatedAt: now,
@@ -101,10 +108,13 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
       }))
     },
 
-    receivePurchaseOrder(orderId: string): ReceiveOrderResult {
+    receivePurchaseOrder(
+      orderId: string,
+      opts?: import('@/lib/procurement/receive').ReceiveOrderOpts,
+    ): ReceiveOrderResult {
       let result: ReceiveOrderResult = { ok: false, error: 'procurement.receive.errNotFound' }
       patchStore(setStore, (s) => {
-        const out = receivePurchaseOrderInStore(s, orderId)
+        const out = receivePurchaseOrderInStore(s, orderId, opts)
         result = out.result
         return out.result.ok ? out.store : s
       })
@@ -129,6 +139,55 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
           }
         }),
       }))
+    },
+
+    upsertProcurementCategory(cat: ProcurementCategoryNode) {
+      patchProcurement(setStore, (p) => {
+        const exists = p.categories.some((c) => c.id === cat.id)
+        return {
+          ...p,
+          categories: exists
+            ? p.categories.map((c) => (c.id === cat.id ? cat : c))
+            : [...p.categories, cat],
+        }
+      })
+    },
+
+    removeProcurementCategory(id: string): boolean {
+      let ok = false
+      patchProcurement(setStore, (p) => {
+        const hasKids = p.categories.some((c) => c.parentId === id)
+        const inUse = p.orders.some((o) => o.categoryId === id)
+        if (hasKids || inUse) return p
+        ok = true
+        return { ...p, categories: p.categories.filter((c) => c.id !== id) }
+      })
+      return ok
+    },
+
+    upsertRoutePoint(point: RoutePoint) {
+      patchProcurement(setStore, (p) => {
+        const exists = p.routePoints.some((r) => r.id === point.id)
+        return {
+          ...p,
+          routePoints: exists
+            ? p.routePoints.map((r) => (r.id === point.id ? point : r))
+            : [...p.routePoints, point],
+        }
+      })
+    },
+
+    removeRoutePoint(id: string): boolean {
+      let ok = false
+      patchProcurement(setStore, (p) => {
+        const inUse = p.orders.some((o) =>
+          o.legs.some((l) => l.originPointId === id || l.destinationPointId === id),
+        )
+        if (inUse) return p
+        ok = true
+        return { ...p, routePoints: p.routePoints.filter((r) => r.id !== id) }
+      })
+      return ok
     },
   }
 }

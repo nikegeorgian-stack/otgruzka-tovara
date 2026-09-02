@@ -10,6 +10,20 @@ export function warehouseDocumentKindLabel(type: WarehouseDocument['type']): str
   return 'Ревизия'
 }
 
+function inventoryLinePreview(
+  store: Pick<WarehouseStore, 'items'>,
+  doc: Pick<WarehouseDocument, 'type' | 'lines'>,
+): string {
+  if (doc.type !== 'inventory' || doc.lines.length === 0) return ''
+  const itemById = new Map(store.items.map((item) => [item.id, item]))
+  const preview = doc.lines.slice(0, 3).map((line) => {
+    const item = itemById.get(line.itemId)
+    return `${item?.name ?? line.itemId}: ${line.quantity}${item?.unit ? ` ${item.unit}` : ''}`
+  })
+  const more = doc.lines.length > preview.length ? `; +${doc.lines.length - preview.length}` : ''
+  return ` · ${preview.join('; ')}${more}`
+}
+
 export type PostDocumentResult =
   | { ok: true; documentId: string }
   | { ok: false; error: string; fieldErrors?: Record<string, string> }
@@ -140,7 +154,7 @@ export function postWarehouseDocument(
       action: full.reversesDocumentId ? 'document_cancel' : 'document_post',
       detail: full.reversesDocumentId
         ? `Сторно ${full.reversesDocumentId.slice(0, 8)} · ${warehouseDocumentKindLabel(full.type)} №${full.number}`
-        : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.`,
+        : `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз.${inventoryLinePreview(store, full)}`,
       actorId: full.keeperId,
       actorName: full.keeperName,
     })
@@ -197,7 +211,7 @@ export function saveWarehouseDocumentDraft(
   if (!existing) {
     next = appendWarehouseAudit(next, {
       action: 'document_draft',
-      detail: `Черновик ${warehouseDocumentKindLabel(full.type).toLowerCase()} №${full.number || '—'} · ${full.lines.length} поз.`,
+      detail: `Черновик ${warehouseDocumentKindLabel(full.type).toLowerCase()} №${full.number || '—'} · ${full.lines.length} поз.${inventoryLinePreview(store, full)}`,
       actorId: actor?.actorId,
       actorName: actor?.actorName,
     })
@@ -254,7 +268,7 @@ export function postExistingWarehouseDocument(
   }
   next = appendWarehouseAudit(next, {
     action: 'document_post',
-    detail: `${warehouseDocumentKindLabel(doc.type)} №${doc.number} · ${doc.lines.length} поз. проведён`,
+    detail: `${warehouseDocumentKindLabel(doc.type)} №${doc.number} · ${doc.lines.length} поз. проведён${inventoryLinePreview(store, doc)}`,
     actorId: actor?.actorId,
     actorName: actor?.actorName,
   })

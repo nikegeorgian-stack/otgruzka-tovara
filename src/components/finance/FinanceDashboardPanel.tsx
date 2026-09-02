@@ -18,6 +18,7 @@ type Props = {
   onOpenSick?: () => void
   onOpenRates?: () => void
   onOpenPayments?: () => void
+  onOpenDocuments?: () => void
   asOfDate?: string
 }
 
@@ -38,6 +39,7 @@ export function FinanceDashboardPanel({
   onOpenSick,
   onOpenRates,
   onOpenPayments,
+  onOpenDocuments,
   asOfDate,
 }: Props) {
   const { t, tf, locale } = useI18n()
@@ -75,6 +77,19 @@ export function FinanceDashboardPanel({
             onClick={() => void runExport('payroll', store, { month, locale })}
           >
             {t('finance.dashboard.exportPayroll')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            title={t('fin.salary1c.hint')}
+            data-coach="finance:export1c"
+            onClick={() => {
+              void runExport('salary_calculation_1c', store, { month, locale }).catch(() => {
+                window.alert(t('fin.salary1c.empty'))
+              })
+            }}
+          >
+            {t('fin.salary1c.export')}
           </Button>
         </div>
       </div>
@@ -173,15 +188,26 @@ export function FinanceDashboardPanel({
               </div>
             ))}
           </div>
-          {onOpenStatement ? (
-            <button
-              type="button"
-              className="mt-4 text-sm font-medium text-accent hover:underline"
-              onClick={onOpenStatement}
-            >
-              {t('finance.dashboard.openStatement')}
-            </button>
-          ) : null}
+          <div className="mt-4 flex flex-wrap gap-4">
+            {onOpenDocuments ? (
+              <button
+                type="button"
+                className="text-sm font-medium text-accent hover:underline"
+                onClick={onOpenDocuments}
+              >
+                {t('finance.dashboard.openDocuments')}
+              </button>
+            ) : null}
+            {onOpenStatement ? (
+              <button
+                type="button"
+                className="text-sm font-medium text-accent hover:underline"
+                onClick={onOpenStatement}
+              >
+                {t('finance.dashboard.openStatement')}
+              </button>
+            ) : null}
+          </div>
         </Card>
 
         <Card title={t('finance.dashboard.brigades')} description={t('finance.dashboard.brigadesHint')}>

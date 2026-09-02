@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
@@ -27,6 +28,7 @@ import {
 } from '@/lib/production/init'
 import { ProductionPrintPreview } from '@/components/production/ProductionPrintPreview'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
+import { ProductionDayOutputReport } from '@/components/production/ProductionDayOutputReport'
 import { ProductionBrigadeRoster } from '@/components/production/ProductionBrigadeRoster'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
@@ -60,6 +62,8 @@ import {
 import { useDirectoryBranch } from '@/hooks/useDirectoryBranch'
 import type { WorkspaceBranchFrom, WorkspaceBranchTarget } from '@/lib/workspace/types'
 import type { ProductionOrder } from '@/lib/planner/types'
+import type { FormulationStore } from '@/lib/formulations/types'
+import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { Employee, MonthSheet } from '@/lib/types'
 
 type Tab = 'request' | 'journal' | 'summary'
@@ -67,6 +71,8 @@ type Tab = 'request' | 'journal' | 'summary'
 type Props = {
   requests: ProductionRequest[]
   orders: ProductionOrder[]
+  formulations: FormulationStore
+  warehouse: WarehouseStore
   employees: Employee[]
   brigades: string[]
   brigadeNamesKa: Record<string, string>
@@ -95,6 +101,8 @@ type ProductionWorkspaceDraft = {
 export function ProductionPage({
   requests,
   orders,
+  formulations,
+  warehouse,
   employees,
   brigades,
   brigadeNamesKa,
@@ -526,7 +534,7 @@ export function ProductionPage({
 
   const lineTitle = (id: ProductionLineId) => {
     const line = PRODUCTION_LINES.find((l) => l.id === id)!
-    return locale === 'ka' ? line.labelKa : line.labelRu
+    return labelRuKa(locale, line.labelRu, line.labelKa)
   }
 
   const planStatus =
@@ -557,6 +565,7 @@ export function ProductionPage({
           <MonthNavigator month={activeMonth} onChange={onMonthChange} variant="input" />
         </label>
         <TabBar
+          coachPrefix="production"
           tabs={(
             [
               ['request', 'production.tab.request'],
@@ -696,7 +705,7 @@ export function ProductionPage({
                 >
                   {PRODUCTION_LINES.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {locale === 'ka' ? l.labelKa : l.labelRu}
+                      {labelRuKa(locale, l.labelRu, l.labelKa)}
                     </option>
                   ))}
                 </select>
@@ -1444,6 +1453,16 @@ export function ProductionPage({
               />
             </div>
           ) : null}
+          <div className="mb-4">
+            <ProductionDayOutputReport
+              date={daySnapshotDate}
+              requests={requests}
+              formulations={formulations}
+              warehouse={warehouse}
+              orders={orders}
+              asOfIso={daySnapshotAsOf ?? undefined}
+            />
+          </div>
           <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-stone-50 text-xs uppercase text-stone-500">
@@ -1545,6 +1564,15 @@ export function ProductionPage({
               asOfIso={daySnapshotAsOf ?? undefined}
             />
           ) : null}
+
+          <ProductionDayOutputReport
+            date={daySnapshotDate}
+            requests={requests}
+            formulations={formulations}
+            warehouse={warehouse}
+            orders={orders}
+            asOfIso={daySnapshotAsOf ?? undefined}
+          />
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">

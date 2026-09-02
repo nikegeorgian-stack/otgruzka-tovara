@@ -1,4 +1,4 @@
-import type { AppStore, Candidate, MonthSheet, TrashCandidate, TrashEmployee, TrashMonth } from './types'
+import type { AppStore, Candidate, MonthSheet, TimesheetRow, TrashCandidate, TrashEmployee, TrashMonth } from './types'
 import { TRASH_RETENTION_DAYS } from './types'
 
 export function purgeExpiredTrash(store: AppStore): AppStore {
@@ -143,13 +143,27 @@ export function permanentlyDeleteTrashCandidate(store: AppStore, deletedAt: stri
 }
 
 export function normalizeMonthSheet(sheet: MonthSheet): MonthSheet {
+  const raw = sheet as unknown as Record<string, unknown>
+  const inner =
+    raw.sheet && typeof raw.sheet === 'object' && !Array.isArray(raw.sheet)
+      ? (raw.sheet as MonthSheet)
+      : sheet
+
+  let rows = inner.rows as unknown
+  if (rows && !Array.isArray(rows) && typeof rows === 'object') {
+    rows = Object.values(rows as Record<string, TimesheetRow>)
+  }
+
   return {
-    ...sheet,
-    comments: sheet.comments ?? {},
-    substitutions: sheet.substitutions ?? {},
-    factExtraHours: sheet.factExtraHours ?? {},
-    brigadierDays: sheet.brigadierDays ?? {},
-    dayTransfers: sheet.dayTransfers ?? {},
-    factHoursOverride: sheet.factHoursOverride ?? {},
+    ...inner,
+    rows: Array.isArray(rows) ? rows : [],
+    comments: inner.comments ?? {},
+    substitutions: inner.substitutions ?? {},
+    factExtraHours: inner.factExtraHours ?? {},
+    brigadierDays: inner.brigadierDays ?? {},
+    dayTransfers: inner.dayTransfers ?? {},
+    factHoursOverride: inner.factHoursOverride ?? {},
+    brigadeSignoffs: inner.brigadeSignoffs ?? {},
+    rowBounds: inner.rowBounds ?? {},
   }
 }

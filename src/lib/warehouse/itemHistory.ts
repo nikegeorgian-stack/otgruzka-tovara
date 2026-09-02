@@ -1,3 +1,5 @@
+import { withSuggestedLocalizedNames } from '@/lib/i18n/localizedNames'
+import { applyTechnicalNameOnUpsert } from './technicalName'
 import type {
   WarehouseCategory,
   WarehouseItem,
@@ -5,6 +7,7 @@ import type {
   WarehouseLocation,
   WarehouseStore,
 } from './types'
+import type { AccessRoleId } from '@/lib/access/types'
 
 const CODE_PREFIX = 'FC'
 
@@ -85,13 +88,14 @@ export function diffItemHistory(
     { field: 'price', label: 'Цена', fmt: (v) => (v == null ? '—' : String(v)) },
     { field: 'minStock', label: 'Мин. остаток', fmt: (v) => (v == null ? '—' : String(v)) },
     { field: 'note', label: 'Примечание' },
+    { field: 'technicalName', label: 'Техническое название' },
   ]
 
   for (const { field, label, fmt } of scalarChanges) {
     const oldV = before[field]
     const newV = after[field]
     if (oldV === newV) continue
-    if (field === 'sku' || field === 'barcode' || field === 'note') {
+    if (field === 'sku' || field === 'barcode' || field === 'note' || field === 'technicalName') {
       if ((oldV ?? '') === (newV ?? '')) continue
     }
     const oldS = fmt ? fmt(oldV) : String(oldV ?? '—')
@@ -159,19 +163,21 @@ export function getItemHistory(
 export function upsertWarehouseItemInStore(
   store: WarehouseStore,
   incoming: WarehouseItem,
+  actorRole?: AccessRoleId | string | null,
 ): WarehouseStore {
   const existing = store.items.find((i) => i.id === incoming.id)
+  incoming = applyTechnicalNameOnUpsert(existing, incoming, store.locations, actorRole)
   let itemHistories = store.itemHistories ?? {}
 
   if (!existing) {
     const num = nextInternalCodeNumber(store)
     const internalCode = incoming.internalCode?.trim() || formatInternalCode(num)
     const now = new Date().toISOString()
-    const item: WarehouseItem = {
+    const item: WarehouseItem = withSuggestedLocalizedNames({
       ...incoming,
       internalCode,
       createdAt: now,
-    }
+    })
     itemHistories = appendItemHistory(itemHistories, item.id, [
       entry({
         kind: 'created',

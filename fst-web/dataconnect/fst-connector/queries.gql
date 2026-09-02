@@ -1,0 +1,40 @@
+query GetFstStore($id: String!) @auth(level: USER, insecureReason: "Shared FST store for all authenticated team members") {
+  fstStore(id: $id) {
+    id
+    revision
+    payloadJson
+    fingerprint
+    updatedByUid
+    updatedAt
+  }
+}
+
+query GetFstStoreMeta($id: String!)
+  @auth(level: USER, insecureReason: "Shared FST store for all authenticated team members")
+  @refresh(onMutationExecuted: { operation: "UpdateFstStore" })
+  @refresh(onMutationExecuted: { operation: "CreateFstStore" })
+  @refresh(every: { seconds: 10 }) {
+  fstStore(id: $id) {
+    id
+    revision
+    fingerprint
+    updatedAt
+  }
+}
+
+query ListJournalEvents($limit: Int!) @auth(level: USER, insecureReason: "Journal events for authenticated users") {
+  journalEvents(orderBy: [{ at: DESC }], limit: $limit) {
+    id
+    at
+    category
+    title
+    detail
+    actor
+    docDate
+    docNumber
+    docStatus
+    linkKind
+    linkRef
+    storeRevision
+  }
+}

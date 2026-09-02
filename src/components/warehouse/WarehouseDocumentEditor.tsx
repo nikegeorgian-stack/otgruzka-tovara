@@ -88,6 +88,9 @@ type Props = {
   brigades: string[]
   warehouseId: string
   variant?: 'page' | 'modal'
+  /** Тип зафиксирован снаружи (окно прихода/расхода). */
+  lockType?: boolean
+  onDirtyChange?: (dirty: boolean) => void
   printMeta?: WarehousePrintMeta
   initialType?: 'receipt' | 'issue'
   initialPickSearch?: string
@@ -167,6 +170,8 @@ export const WarehouseDocumentEditor = forwardRef<WarehouseDocumentEditorHandle,
   brigades,
   warehouseId,
   variant = 'page',
+  lockType = false,
+  onDirtyChange,
   printMeta,
   initialType = 'receipt',
   initialPickSearch,
@@ -713,6 +718,11 @@ ref,
     [isDirty, saveDraft],
   )
 
+  const dirtyFlag = isDirty()
+  useEffect(() => {
+    onDirtyChange?.(dirtyFlag)
+  }, [dirtyFlag, onDirtyChange])
+
   function printDraft() {
     if (!printMeta) return
     const parsed = lines
@@ -761,31 +771,42 @@ ref,
     }
   }
 
-  const shell = variant === 'modal' ? 'space-y-4' : 'rounded-sm border border-grid bg-white shadow-sm'
+  const shell = variant === 'modal' ? 'space-y-3' : 'rounded-sm border border-grid bg-white shadow-sm'
+  const showTypeToggle = !lockType && !existingDocument
 
   return (
     <div className={shell}>
       <div className={`${variant === 'page' ? 'border-b border-grid px-4 py-3' : ''}`}>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex rounded-sm border border-grid p-0.5">
-            {(['receipt', 'issue'] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                disabled={readOnly}
-                className={`rounded-sm px-4 py-1.5 text-sm font-semibold ${
-                  type === id
-                    ? id === 'receipt'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-red-600 text-white'
-                    : 'text-stone-600 hover:bg-stone-50'
-                }`}
-                onClick={() => handleTypeChange(id)}
-              >
-                {id === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {showTypeToggle ? (
+            <div className="flex rounded-sm border border-grid p-0.5">
+              {(['receipt', 'issue'] as const).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={readOnly}
+                  className={`rounded-sm px-4 py-1.5 text-sm font-semibold ${
+                    type === id
+                      ? id === 'receipt'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-red-600 text-white'
+                      : 'text-stone-600 hover:bg-stone-50'
+                  }`}
+                  onClick={() => handleTypeChange(id)}
+                >
+                  {id === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span
+              className={`rounded-sm px-3 py-1.5 text-sm font-bold ${
+                type === 'receipt' ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
+              }`}
+            >
+              {type === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
+            </span>
+          )}
           <button
             type="button"
             disabled={readOnly}
@@ -794,7 +815,9 @@ ref,
           >
             {t('warehouse.pick.button')}
           </button>
-          <span className="text-xs text-stone-400">{t('warehouse.picker.hint')}</span>
+          {variant === 'page' ? (
+            <span className="text-xs text-stone-400">{t('warehouse.picker.hint')}</span>
+          ) : null}
         </div>
       </div>
 
@@ -829,7 +852,13 @@ ref,
         </div>
       )}
 
-      <div className={`grid gap-3 ${variant === 'page' ? 'border-b border-grid px-4 py-3 sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-2'}`}>
+      <div
+        className={
+          variant === 'page'
+            ? 'grid gap-3 border-b border-grid px-4 py-3 sm:grid-cols-2 lg:grid-cols-4'
+            : 'grid gap-2 rounded-sm border border-grid bg-stone-50/60 p-2 sm:grid-cols-2 lg:grid-cols-3'
+        }
+      >
         <label className="block text-xs font-semibold text-stone-500">
           {t('warehouse.doc.number')}
           <input
@@ -1090,7 +1119,7 @@ ref,
                       balances={balances}
                       warehouseId={docWarehouseId}
                       value={line.itemId}
-                      autoFocus={idx === lines.length - 1 && !line.itemId}
+                      autoFocus={variant === 'page' && idx === lines.length - 1 && !line.itemId}
                       onChange={(id) => pickItem(line.key, id)}
                       onConfirmQty={() => focusQty(line.key)}
                     />

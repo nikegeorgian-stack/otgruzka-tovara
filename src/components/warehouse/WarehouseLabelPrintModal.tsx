@@ -148,7 +148,7 @@ export function WarehouseLabelPrintModal({
   }
 
   const setup = (
-    <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/45 p-4">
+    <div className="fixed inset-0 z-[420] flex items-center justify-center bg-black/45 p-4">
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-sm bg-white shadow-sm">
         <div className="border-b border-grid px-6 py-4">
           <h2 className="text-lg font-bold text-ink">{t('warehouse.labels.title')}</h2>
@@ -289,7 +289,7 @@ export function WarehouseLabelPrintModal({
   )
 
   const preview = (
-    <div className="print-modal-root fixed inset-0 z-[110] flex flex-col bg-stone-900/60">
+    <div className="print-modal-root fixed inset-0 z-[430] flex flex-col bg-stone-900/60">
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <div>
           <h2 className="text-lg font-bold">{t('warehouse.labels.previewTitle')}</h2>

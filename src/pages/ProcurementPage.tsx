@@ -4,13 +4,16 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { TabBar } from '@/components/ui/TabBar'
 import { ProcurementAnalyticsTab } from '@/components/procurement/ProcurementAnalyticsTab'
+import { ProcurementCatalogTab } from '@/components/procurement/ProcurementCatalogTab'
 import { ProcurementOrdersTab } from '@/components/procurement/ProcurementOrdersTab'
+import { ProcurementOrdersKanban } from '@/components/procurement/ProcurementOrdersKanban'
 import { ProcurementTrackingTab } from '@/components/procurement/ProcurementTrackingTab'
 import { ProcurementTrackingSync } from '@/components/procurement/ProcurementTrackingSync'
 import { PurchaseOrderModal } from '@/components/procurement/PurchaseOrderModal'
 import { ProcurementContainersTab } from '@/components/procurement/ProcurementContainersTab'
 import { ProcurementStockTab } from '@/components/procurement/ProcurementStockTab'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { KanbanViewToggle, type KanbanViewMode } from '@/components/kanban'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import {
   PROCUREMENT_TABS,
@@ -22,8 +25,8 @@ import { useI18n } from '@/context/I18nContext'
 import { filterOrders, computeProcurementKpis } from '@/lib/procurement/analytics'
 import { countTrackedContainers } from '@/lib/procurement/stockOutlook'
 import { allocateOrderNumber } from '@/lib/procurement/codes'
+import { categoryLabel, categoryOptionsFlat } from '@/lib/procurement/catalog'
 import type {
-  OrderCategory,
   ProcurementScope,
   PurchaseOrder,
   PurchaseOrderStatus,
@@ -44,6 +47,11 @@ export function ProcurementPage(
     onUpsertOrder,
     onRemoveOrder,
     onReceiveOrder,
+    onSetStatus,
+    onUpsertProcurementCategory,
+    onRemoveProcurementCategory,
+    onUpsertRoutePoint,
+    onRemoveRoutePoint,
     onUpsertCounterparty,
     onUpsertWarehouseItem,
     onNavigateToDirectory,
@@ -72,11 +80,12 @@ export function ProcurementPage(
   const [scopeFilter, setScopeFilter] = useState<ProcurementScope | ''>(
     webProcurementMode ? 'international' : '',
   )
-  const [categoryFilter, setCategoryFilter] = useState<OrderCategory | ''>('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [transportFilter, setTransportFilter] = useState<TransportMode | ''>('')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [editOrder, setEditOrder] = useState<PurchaseOrder | null>(null)
   const [isNew, setIsNew] = useState(false)
+  const [ordersView, setOrdersView] = useState<KanbanViewMode>('list')
 
   useEffect(() => {
     if (!focusOrderId) return
@@ -103,7 +112,7 @@ export function ProcurementPage(
       filterOrders(procurement.orders, {
         status: statusFilter,
         scope: scopeFilter,
-        category: categoryFilter,
+        categoryId: categoryFilter || undefined,
         counterpartyId: supplierFilter || undefined,
         transportMode: transportFilter,
         search,
@@ -143,6 +152,9 @@ export function ProcurementPage(
       counterpartyId: '',
       scope: 'international',
       category: 'raw_material',
+      categoryId: procurement.categories.find(
+        (c) => !c.parentId && c.legacyKey === 'raw_material',
+      )?.id,
       status: 'draft',
       orderDate: today,
       currency: 'CNY',
@@ -205,19 +217,32 @@ export function ProcurementPage(
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <TabBar
+          coachPrefix="procurement"
           tabs={tabIds.map((id) => ({ id, label: tabLabels[id] }))}
           value={tab}
           onChange={setTab}
         />
         {(tab === 'orders' || tab === 'containers' || tab === 'tracking') && (
-          <button type="button" className="btn-add ml-auto" onClick={openNew}>
+          <button
+            type="button"
+            className="btn-add ml-auto"
+            onClick={openNew}
+            data-coach="procurement:newOrder"
+          >
             {t('procurement.newOrder')}
           </button>
         )}
       </div>
 
       {(tab === 'orders' || tab === 'tracking') && (
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {tab === 'orders' ? (
+            <KanbanViewToggle
+              mode={ordersView}
+              onChange={setOrdersView}
+              dataCoachKanban="procurement:ordersViewKanban"
+            />
+          ) : null}
           <input
             className="min-w-[12rem] flex-1 rounded-sm border border-grid px-3 py-2 text-sm"
             placeholder={t('procurement.search')}
@@ -234,8 +259,15 @@ export function ProcurementPage(
             <option value="active">{t('procurement.filter.active')}</option>
             <option value="all">{t('procurement.filter.all')}</option>
             <option value="draft">{t('procurement.status.draft')}</option>
+            <option value="ordered">{t('procurement.status.ordered')}</option>
+            <option value="production">{t('procurement.status.production')}</option>
+            <option value="shipped">{t('procurement.status.shipped')}</option>
             <option value="in_transit">{t('procurement.status.in_transit')}</option>
+            <option value="customs">{t('procurement.status.customs')}</option>
+            <option value="arrived">{t('procurement.status.arrived')}</option>
+            <option value="partial">{t('procurement.status.partial')}</option>
             <option value="received">{t('procurement.status.received')}</option>
+            <option value="cancelled">{t('procurement.status.cancelled')}</option>
           </select>
           <select
             className="rounded-sm border border-grid px-3 py-2 text-sm"
@@ -276,17 +308,30 @@ export function ProcurementPage(
           <select
             className="rounded-sm border border-grid px-3 py-2 text-sm"
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value as OrderCategory | '')}
+            onChange={(e) => setCategoryFilter(e.target.value)}
           >
             <option value="">{t('procurement.filter.allCategories')}</option>
-            <option value="raw_material">{t('procurement.category.raw_material')}</option>
-            <option value="packaging">{t('procurement.category.packaging')}</option>
-            <option value="spare_parts">{t('procurement.category.spare_parts')}</option>
+            {categoryOptionsFlat(procurement.categories).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.parentId ? `↳ ${categoryLabel(c)}` : categoryLabel(c)}
+              </option>
+            ))}
           </select>
         </div>
       )}
 
-      {tab === 'orders' && (
+      {tab === 'orders' && ordersView === 'kanban' ? (
+        <ProcurementOrdersKanban
+          orders={filtered}
+          counterparties={counterparties}
+          onEdit={(o) => {
+            setEditOrder(o)
+            setIsNew(false)
+          }}
+          onSetStatus={onSetStatus}
+        />
+      ) : null}
+      {tab === 'orders' && ordersView === 'list' ? (
         <ProcurementOrdersTab
           orders={filtered}
           counterparties={counterparties}
@@ -297,7 +342,7 @@ export function ProcurementPage(
           onRemove={onRemoveOrder}
           onReceive={onReceiveOrder}
         />
-      )}
+      ) : null}
       {tab === 'tracking' && (
         <ProcurementTrackingTab
           orders={
@@ -344,6 +389,15 @@ export function ProcurementPage(
       {tab === 'analytics' && (
         <ProcurementAnalyticsTab orders={procurement.orders} counterparties={counterparties} />
       )}
+      {tab === 'catalog' && (
+        <ProcurementCatalogTab
+          procurement={procurement}
+          onUpsertCategory={onUpsertProcurementCategory}
+          onRemoveCategory={onRemoveProcurementCategory}
+          onUpsertRoutePoint={onUpsertRoutePoint}
+          onRemoveRoutePoint={onRemoveRoutePoint}
+        />
+      )}
 
       {editOrder && (
         <PurchaseOrderModal
@@ -351,6 +405,8 @@ export function ProcurementPage(
           isNew={isNew}
           counterparties={counterparties}
           warehouse={warehouse}
+          categories={procurement.categories}
+          routePoints={procurement.routePoints}
           onClose={() => {
             setEditOrder(null)
             setIsNew(false)

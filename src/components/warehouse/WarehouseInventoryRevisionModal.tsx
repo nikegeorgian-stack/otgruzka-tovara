@@ -48,6 +48,7 @@ export function WarehouseInventoryRevisionModal({
       title={title}
       size="preview"
       zIndex={zIndex}
+      // Enter в ячейке факта игнорируется (data-modal-ignore-enter); Ctrl+Enter сохраняет черновик.
       onPrimaryAction={() => {
         editorRef.current?.saveDraft()
       }}

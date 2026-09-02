@@ -19,7 +19,9 @@ export function inferLocationKind(name: string): WarehouseLocationKind {
   if (n.includes('выработ')) return 'wip'
   if (n.includes('упаков') && !n.includes('готов')) return 'packaging'
   if (n.includes('готов')) return 'finished'
-  if (n.includes('сырь') || n === 'основной') return 'raw'
+  if (n.includes('сырь')) return 'raw'
+  // «Основной» — общий склад по категориям, без жёсткого kind-фильтра.
+  if (n === 'основной' || n.includes('основн')) return 'other'
   return 'other'
 }
 

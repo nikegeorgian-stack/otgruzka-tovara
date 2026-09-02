@@ -1,3 +1,4 @@
+import type { Locale } from '@/i18n/types'
 import {
   confirmBatchMix,
   createPendingBatchMix,
@@ -13,7 +14,7 @@ export function createFormulationBatchSlice({ setStore }: StoreSliceDeps) {
     /** Замес куба → создаёт заявку на подтверждение кладовщиком (склад не трогается). */
     postFormulationBatchMix(
       input: PostBatchMixInput,
-      locale: 'ru' | 'ka' = 'ru',
+      locale: Locale = 'ru',
       options?: PostBatchMixOptions,
     ): PostBatchMixResult {
       let result: PostBatchMixResult = { ok: false, error: 'unknown' }

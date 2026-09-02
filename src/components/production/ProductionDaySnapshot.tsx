@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { useI18n } from '@/context/I18nContext'
 import { formatNum, summarizeProductionDay } from '@/lib/production/stats'
@@ -21,7 +22,7 @@ export function ProductionDaySnapshot({ requests, date, asOfIso }: Props) {
 
   const lineLabel = (lineId: ProductionRequest['lineId']) => {
     const line = PRODUCTION_LINES.find((l) => l.id === lineId)
-    return line ? (locale === 'ka' ? line.labelKa : line.labelRu) : lineId
+    return line ? (labelRuKa(locale, line.labelRu, line.labelKa)) : lineId
   }
 
   const topCategories = PRODUCTION_CATEGORIES.filter(

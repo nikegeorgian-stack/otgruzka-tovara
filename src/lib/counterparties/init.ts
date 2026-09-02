@@ -95,17 +95,11 @@ export function seedA2LineCounterparty(existing: Counterparty[]): Counterparty {
 }
 
 export function createDefaultCounterparties(): CounterpartyStore {
-  return {
-    items: [seedA2LineCounterparty([])],
-    nextCode: 2,
-  }
+  return { items: [], nextCode: 1 }
 }
 
 export function normalizeCounterpartyStore(raw: CounterpartyStore | undefined): CounterpartyStore {
-  let items = (raw?.items ?? []).map(normalizeCounterparty)
-  if (!findA2LineCounterparty(items)) {
-    items = [...items, seedA2LineCounterparty(items)]
-  }
+  const items = (raw?.items ?? []).map(normalizeCounterparty)
   const maxFromCodes = items.reduce((max, i) => {
     const m = i.code.match(/(\d+)\s*$/)
     return m ? Math.max(max, Number(m[1])) : max

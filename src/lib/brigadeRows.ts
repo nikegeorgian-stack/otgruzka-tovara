@@ -66,6 +66,38 @@ export function removeEmptyBrigadeRow(sheet: MonthSheet, brigade: string): Month
   return removeBrigadeRow(sheet, emptyRows[emptyRows.length - 1]!.id)
 }
 
+/** Переставить строку внутри бригады (beforeRowId = null → в конец). */
+export function reorderBrigadeRow(
+  sheet: MonthSheet,
+  brigade: string,
+  rowId: string,
+  beforeRowId: string | null,
+): MonthSheet {
+  const inBrigade = sheet.rows
+    .filter((r) => r.brigade === brigade)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+  const fromIdx = inBrigade.findIndex((r) => r.id === rowId)
+  if (fromIdx < 0) return sheet
+  const moved = inBrigade[fromIdx]!
+  const rest = inBrigade.filter((r) => r.id !== rowId)
+  let insertAt = rest.length
+  if (beforeRowId) {
+    const idx = rest.findIndex((r) => r.id === beforeRowId)
+    if (idx >= 0) insertAt = idx
+  }
+  rest.splice(insertAt, 0, moved)
+  const sortSlots = inBrigade.map((r) => r.sortOrder).sort((a, b) => a - b)
+  const orderById = new Map(rest.map((r, i) => [r.id, sortSlots[i]!]))
+  return {
+    ...sheet,
+    rows: sheet.rows.map((r) =>
+      r.brigade === brigade && orderById.has(r.id)
+        ? { ...r, sortOrder: orderById.get(r.id)! }
+        : r,
+    ),
+  }
+}
+
 /** Убрать строку (минимум одна строка на бригаду). */
 export function removeBrigadeRow(sheet: MonthSheet, rowId: string): MonthSheet {
   const row = sheet.rows.find((r) => r.id === rowId)

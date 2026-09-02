@@ -5,53 +5,97 @@ import { StorageAlert } from '@/components/system/StorageAlert'
 import { I18nProvider } from '@/context/I18nContext'
 import { ConfirmProvider } from '@/context/ConfirmContext'
 import { ModalMinimizeProvider } from '@/context/ModalMinimizeContext'
+import { EmployeeEditorProvider } from '@/context/EmployeeEditorContext'
 import { AppShell } from '@/components/layout/AppShell'
 import { WorkspaceTaskbar } from '@/components/layout/WorkspaceTaskbar'
+import { ShiftUrgentBar } from '@/components/ops/ShiftUrgentBar'
+import {
+  computeShiftUrgentInbox,
+  type ShiftUrgentTarget,
+} from '@/lib/ops/shiftUrgentInbox'
 import { CoachProvider } from '@/context/CoachContext'
+import { SupportChromeProvider } from '@/context/SupportChromeContext'
 import { CoachWidget } from '@/components/ai/CoachWidget'
 import { CoachHighlightOverlay } from '@/components/ai/CoachHighlightOverlay'
+import { FeedbackWidget } from '@/components/ai/FeedbackWidget'
+import { FeedbackAdminBell } from '@/components/ai/FeedbackAdminBell'
+import {
+  MaintenanceBanner,
+  buildFiveMinuteMaintenance,
+} from '@/components/layout/MaintenanceBanner'
 import type { ViewId } from '@/lib/types'
 import { useAppStore } from '@/hooks/useAppStore'
 import { restoreDailyBackup } from '@/lib/backup'
 import { buildProcurementPageProps } from '@/lib/app/procurementProps'
 import { buildWarehousePageProps } from '@/lib/app/warehouseProps'
+import { isSqlConnectPersistence } from '@/lib/sqlconnect/config'
 import type { SaveDraftInput } from '@/lib/warehouse/documents'
 import { runExport } from '@/lib/export'
+import {
+  employeeIdForRow,
+  employeeIdsInMonth,
+  notifyAbsenceDecisionPush,
+  notifyBrigadierPush,
+  notifyFeedbackReplyPush,
+  notifyForTimesheetCode,
+  notifyPersonalDayPush,
+  notifySchedulePush,
+} from '@/lib/cloud/fstPushNotify'
+import { nextCode } from '@/lib/codes'
+import { isMonthClosed } from '@/lib/monthManage'
+import { getFactMark } from '@/lib/stats'
 import { importFromJson, exportToJson } from '@/lib/storage'
+import { isFstAdminEmail } from '@/lib/cloud/fstAdmin'
 import { t as translate } from '@/i18n'
 import type { DirectorySection } from '@/lib/directories/types'
 import {
   DirectoriesPage,
   FinancePage,
   FstCloudSync,
+  FstSqlConnectSync,
   HrPage,
   HrInspectorPage,
   LocalDbSync,
   MonthPage,
+  MyCabinetPage,
+  TimeclockPage,
   PlannerPage,
   ProductionPage,
   ProcurementPage,
   SettingsPage,
   SummaryPage,
   TechnologistPage,
+  OtcPage,
   MixerPage,
   DirectorPage,
   JournalsPage,
+  EngineerLogPage,
+  TasksPage,
   ItOfficePage,
+  OfficePage,
+  MealsPage,
+  ProtocolsPage,
+  OrgTreePage,
   WarehousePage,
   MonthLayoutLabPage,
   prefetchView,
 } from '@/app/lazyPages'
 import { LoginScreen } from '@/components/auth/LoginScreen'
-import { WelcomeGreeting } from '@/components/auth/WelcomeGreeting'
 import { AdminSetupScreen } from '@/components/auth/AdminSetupScreen'
 import { USE_LOCAL_DB } from '@/lib/localDb/config'
 import { useFstWebSession } from '@/context/FstWebSessionContext'
-import { isWebFinanceRole, isWebHrInspectorRole, isWebHrRole, isWebProcurementRole, isWebTechnologistRole, isWebWarehouseRole, isWebWorkshopMasterRole } from '@/lib/cloud/fstWebUsers'
-import { canAccessView, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel, roleAllowsDocumentUnpost } from '@/lib/access/permissions'
+import { useFstAuthOptional } from '@/context/FstAuthContext'
+import { FstChangePasswordScreen } from '@/components/web/FstChangePasswordScreen'
+import {
+  isPasswordChangeComplete,
+  markPasswordChangeComplete,
+} from '@/lib/cloud/passwordChangeSession'
+import { isWebFinanceRole, isWebHrInspectorRole, isWebHrRole, isWebProcurementRole, isWebSysAdminRole, isWebTechnologistRole, isWebWarehouseRole, isWebWorkshopMasterRole } from '@/lib/cloud/fstWebUsers'
+import { accessPersona } from '@/lib/access/accessPersona'
+import { canAccessView, canEditEmployeeSalary, isSysAdmin, roleAllowsNegativeStock, roleAllowsDocumentCancel, roleAllowsDocumentUnpost } from '@/lib/access/permissions'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { ACCESS_ROLES } from '@/lib/access/roles'
 import { COACH_TARGETS } from '@/lib/ai/coachTargets'
-import { webModesFromAdminCabinet } from '@/lib/access/adminCabinet'
 import {
   resolveFinanceViewDefaults,
   resolveHrViewDefaults,
@@ -60,8 +104,10 @@ import {
   type UserViewDefaults,
 } from '@/lib/viewDefaults/types'
 import { resolveJournalLink, type JournalNavTarget } from '@/lib/journals/navigate'
+import { terminationSegments } from '@/lib/hr/timesheetRange'
 
 const isFstWeb = import.meta.env.VITE_FST_WEB === 'true'
+const useSqlConnect = isSqlConnectPersistence()
 
 function isMonthLayoutLabHash(): boolean {
   if (typeof window === 'undefined') return false
@@ -72,50 +118,113 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const app = useAppStore()
   const webSession = useFstWebSession()
+  const fstAuth = useFstAuthOptional()
+  const webEmail = fstAuth?.user?.email?.trim().toLowerCase()
+  const [passwordGateDismissed, setPasswordGateDismissed] = useState(false)
+  useEffect(() => {
+    setPasswordGateDismissed(false)
+  }, [webEmail])
+  const passwordCheckPending =
+    isFstWeb &&
+    Boolean(webEmail) &&
+    !passwordGateDismissed &&
+    !isPasswordChangeComplete(webEmail) &&
+    fstAuth?.claimsLoading === true
+  const needsPasswordChange = useMemo(() => {
+    if (!isFstWeb || !webEmail || passwordGateDismissed || isPasswordChangeComplete(webEmail)) {
+      return false
+    }
+    if (fstAuth?.claimsLoading) return false
+    if (fstAuth?.mustChangePasswordClaim === true) return true
+    // Claim снят — Firebase главнее устаревшего флага в store после sync.
+    if (fstAuth?.mustChangePasswordClaim === false) return false
+    return app.currentUser?.mustChangePassword === true
+  }, [
+    webEmail,
+    passwordGateDismissed,
+    fstAuth?.claimsLoading,
+    fstAuth?.mustChangePasswordClaim,
+    app.currentUser?.mustChangePassword,
+  ])
   const isAdmin = isSysAdmin(app.currentUser)
+  const accessUser = useMemo(
+    () => accessPersona(app.currentUser, app.adminCabinet) ?? null,
+    [app.currentUser, app.adminCabinet],
+  )
   const financeActor = { id: app.currentUser?.id, name: app.currentUser?.displayName }
-  const adminCabinetModes =
-    isAdmin && isFstWeb ? webModesFromAdminCabinet(app.adminCabinet) : null
-  const webHrMode =
-    isFstWeb &&
-    (isWebHrRole(app.currentUser?.roleId) || adminCabinetModes?.webHrMode === true)
-  const webHrInspectorMode =
-    isFstWeb &&
-    (isWebHrInspectorRole(app.currentUser?.roleId) ||
-      adminCabinetModes?.webHrInspectorMode === true)
-  const webFinanceMode =
-    isFstWeb &&
-    (isWebFinanceRole(app.currentUser?.roleId) || adminCabinetModes?.webFinanceMode === true)
-  const webWarehouseMode =
-    isFstWeb &&
-    (isWebWarehouseRole(app.currentUser?.roleId) ||
-      adminCabinetModes?.webWarehouseMode === true)
-  const webTechnologistMode =
-    isFstWeb &&
-    (isWebTechnologistRole(app.currentUser?.roleId) ||
-      adminCabinetModes?.webTechnologistMode === true)
-  const webProcurementMode =
-    isFstWeb &&
-    (isWebProcurementRole(app.currentUser?.roleId) ||
-      adminCabinetModes?.webProcurementMode === true)
-  const webWorkshopMasterMode =
-    isFstWeb &&
-    (isWebWorkshopMasterRole(app.currentUser?.roleId) ||
-      adminCabinetModes?.webWorkshopMasterMode === true)
+  const pushAccess = app.store.access
+  const financeActions = {
+    onGiveAdvance: (input: Parameters<typeof app.giveAdvance>[0]) =>
+      app.giveAdvance(input, financeActor),
+    onRemoveAdvance: (id: string) => app.removeAdvance(id, financeActor),
+    onAddAdjustment: (input: Parameters<typeof app.addAdjustment>[0]) =>
+      app.addAdjustment(input, financeActor),
+    onRemoveAdjustment: (id: string) => app.removeAdjustment(id, financeActor),
+    onAddPayout: (input: Parameters<typeof app.addPayout>[0]) =>
+      app.addPayout(input, financeActor),
+    onRemovePayout: (id: string) => app.removePayout(id, financeActor),
+    onConfirmSick: (input: Parameters<typeof app.confirmSick>[0]) => {
+      app.confirmSick(input, financeActor)
+      notifyAbsenceDecisionPush(pushAccess, input.employeeId, 'sick', true, input.month)
+    },
+    onUnconfirmSick: (employeeId: string, month: string) => {
+      app.unconfirmSick(employeeId, month, financeActor)
+      notifyAbsenceDecisionPush(pushAccess, employeeId, 'sick', false, month)
+    },
+    onConfirmVacation: (input: Parameters<typeof app.confirmVacation>[0]) => {
+      app.confirmVacation(input, financeActor)
+      notifyAbsenceDecisionPush(pushAccess, input.employeeId, 'vacation', true, input.month)
+    },
+    onUnconfirmVacation: (employeeId: string, month: string) => {
+      app.unconfirmVacation(employeeId, month, financeActor)
+      notifyAbsenceDecisionPush(pushAccess, employeeId, 'vacation', false, month)
+    },
+    onSetBrigadierBonus: (amount: number) => app.updateSettings({ brigadierBonus: amount }),
+  }
+  // Веб-режимы и ACL — по эффективной персоне (превью кабинета админа = как у роли).
+  const previewRoleId = accessUser?.roleId
+  const webHrMode = isFstWeb && isWebHrRole(previewRoleId)
+  const webHrInspectorMode = isFstWeb && isWebHrInspectorRole(previewRoleId)
+  const webFinanceMode = isFstWeb && isWebFinanceRole(previewRoleId)
+  const webWarehouseMode = isFstWeb && isWebWarehouseRole(previewRoleId)
+  const webTechnologistMode = isFstWeb && isWebTechnologistRole(previewRoleId)
+  const webProcurementMode = isFstWeb && isWebProcurementRole(previewRoleId)
+  const webWorkshopMasterMode = isFstWeb && isWebWorkshopMasterRole(previewRoleId)
+  const webAdminMode = isFstWeb && isWebSysAdminRole(previewRoleId)
   const workshopMasterMode =
-    webWorkshopMasterMode || app.currentUser?.roleId === 'workshop_master'
+    webWorkshopMasterMode || previewRoleId === 'workshop_master'
   const webUserName = webSession.profile?.displayName
-  const allowNegativeStock = app.currentUser
-    ? roleAllowsNegativeStock(app.store.access, app.currentUser.roleId)
+  const allowNegativeStock = accessUser
+    ? roleAllowsNegativeStock(app.store.access, accessUser.roleId)
     : false
-  const canCancelDocuments = app.currentUser
-    ? roleAllowsDocumentCancel(app.store.access, app.currentUser.roleId)
+  const canCancelDocuments = accessUser
+    ? roleAllowsDocumentCancel(app.store.access, accessUser.roleId)
     : false
-  const canUnpostDocuments = roleAllowsDocumentUnpost(app.currentUser)
+  const canUnpostDocuments = roleAllowsDocumentUnpost(accessUser)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [plannerFocusOrderId, setPlannerFocusOrderId] = useState<string | null>(null)
   const [journalNav, setJournalNav] = useState<JournalNavTarget | null>(null)
+  const [opsFocus, setOpsFocus] = useState<ShiftUrgentTarget | null>(null)
   const [monthLayoutLab, setMonthLayoutLab] = useState(isMonthLayoutLabHash)
+
+  const shiftUrgent = useMemo(
+    () =>
+      computeShiftUrgentInbox({
+        store: app.store,
+        access: app.access,
+        user: app.currentUser,
+        adminCabinet: isAdmin ? app.adminCabinet : undefined,
+      }),
+    [app.store, app.access, app.currentUser, isAdmin, app.adminCabinet],
+  )
+
+  const handleOpsUrgentGo = useCallback(
+    (target: ShiftUrgentTarget) => {
+      setOpsFocus(target)
+      app.setView(target.view)
+    },
+    [app.setView],
+  )
 
   useEffect(() => {
     const onHash = () => setMonthLayoutLab(isMonthLayoutLabHash())
@@ -156,15 +265,16 @@ export default function App() {
     app.ensureMonthsReady(app.activeMonth)
   }, [app.ensureMonthsReady, app.activeMonth])
 
-  const coachAllowedViews = app.currentUser
+  const coachAllowedViews = accessUser
     ? COACH_TARGETS.map((target) => target.view).filter((v) =>
-        canAccessView(app.access, app.currentUser!, v as ViewId),
+        canAccessView(app.access, accessUser, v as ViewId, app.adminCabinet),
       )
     : []
-  const coachRoleLabel = app.currentUser
-    ? ACCESS_ROLES.find((r) => r.id === app.currentUser!.roleId)?.[
-        app.store.settings.locale === 'ka' ? 'labelKa' : 'labelRu'
-      ]
+  const coachRoleRow = accessUser
+    ? ACCESS_ROLES.find((r) => r.id === accessUser.roleId)
+    : undefined
+  const coachRoleLabel = coachRoleRow
+    ? labelRuKa(app.uiLocale, coachRoleRow.labelRu, coachRoleRow.labelKa)
     : undefined
 
   const procurementActions = {
@@ -174,6 +284,10 @@ export default function App() {
     onAddMilestone: app.addPurchaseOrderMilestone,
     onSetStatus: app.setPurchaseOrderStatus,
     onReceiveOrder: app.receivePurchaseOrder,
+    onUpsertProcurementCategory: app.upsertProcurementCategory,
+    onRemoveProcurementCategory: app.removeProcurementCategory,
+    onUpsertRoutePoint: app.upsertRoutePoint,
+    onRemoveRoutePoint: app.removeRoutePoint,
     onUpsertCounterparty: app.upsertCounterparty,
     onUpsertWarehouseItem: app.upsertWarehouseItem,
     onNavigateToDirectory: app.navigateToDirectory,
@@ -208,7 +322,7 @@ export default function App() {
         actorName: app.currentUser?.displayName,
       }),
     onUnpostDocument: (documentId: string) => {
-      if (!roleAllowsDocumentUnpost(app.currentUser)) {
+      if (!roleAllowsDocumentUnpost(accessUser)) {
         return { ok: false as const, error: 'warehouse.doc.errUnpostForbidden' }
       }
       return app.unpostWarehouseDoc(documentId, {
@@ -250,6 +364,14 @@ export default function App() {
     onUpsertLoadingShipment: app.upsertLoadingShipment,
     onPostLoadingShipment: app.postLoadingShipment,
     onRemoveLoadingShipment: app.removeLoadingShipment,
+    onMarkWarehouseDocsExported: (
+      ids: string[],
+      actor?: { id?: string; name?: string },
+    ) =>
+      app.markWarehouseDocsExported(
+        ids,
+        actor ?? { id: app.currentUser?.id, name: app.currentUser?.displayName },
+      ),
     onUpsertCounterparty: app.upsertCounterparty,
     onOpenCounterparties: () => app.navigateToDirectory('counterparties'),
     onUpsertWorkwearCatalogItem: app.upsertWorkwearCatalogItem,
@@ -262,19 +384,19 @@ export default function App() {
   }, [])
 
   async function handleImport(file: File) {
-    if (!confirm(translate(app.store.settings.locale, 'app.importConfirm'))) {
+    if (!confirm(translate(app.uiLocale, 'app.importConfirm'))) {
       return
     }
     try {
       app.replaceStore(await importFromJson(file))
       setImportNotice(null)
     } catch {
-      setImportNotice(translate(app.store.settings.locale, 'app.importError'))
+      setImportNotice(translate(app.uiLocale, 'app.importError'))
     }
   }
 
   function handleRestoreBackup(date: string) {
-    if (!confirm(translate(app.store.settings.locale, 'storage.restoreConfirm'))) {
+    if (!confirm(translate(app.uiLocale, 'storage.restoreConfirm'))) {
       return
     }
     const restored = restoreDailyBackup(date)
@@ -285,7 +407,7 @@ export default function App() {
   }
 
   return (
-    <I18nProvider locale={app.store.settings.locale} setLocale={app.setLocale}>
+    <I18nProvider locale={app.uiLocale} setLocale={app.setLocale}>
       <ConfirmProvider>
         <ModalMinimizeProvider>
         {!app.skipLocalAuth && app.adminSetupRequired ? (
@@ -297,21 +419,84 @@ export default function App() {
           />
         ) : !app.skipLocalAuth && !app.currentUser ? (
           <LoginScreen onLogin={app.login} />
+        ) : passwordCheckPending ? (
+          <PageLoader />
+        ) : needsPasswordChange && fstAuth?.user?.email ? (
+          <FstChangePasswordScreen
+            email={fstAuth.user.email}
+            onComplete={async (password) => {
+              const email = fstAuth.user?.email
+              if (!email) return
+              await app.completeWebPasswordChange(password)
+              markPasswordChangeComplete(email)
+              setPasswordGateDismissed(true)
+              fstAuth.dismissMustChangePassword()
+              await fstAuth.refreshClaims()
+            }}
+            onClearLock={async () => {
+              const email = fstAuth.user?.email
+              if (!email) return
+              await app.clearWebMustChangePasswordFlag()
+              markPasswordChangeComplete(email)
+              setPasswordGateDismissed(true)
+              fstAuth.dismissMustChangePassword()
+              await fstAuth.refreshClaims()
+            }}
+          />
         ) : monthLayoutLab ? (
           <Suspense fallback={<PageLoader />}>
             <MonthLayoutLabPage />
           </Suspense>
         ) : (
+          <EmployeeEditorProvider
+            employees={app.store.employees}
+            brigades={app.store.brigades}
+            hrStructuralUnits={app.store.hrStructuralUnits}
+            hrPositions={app.store.hrPositions}
+            onUpsertPosition={app.upsertHrPosition}
+            store={app.store}
+            lockHolderUid={fstAuth?.user?.uid ?? app.currentUser?.id ?? 'local'}
+            lockHolderName={
+              fstAuth?.profile?.displayName ??
+              app.currentUser?.displayName ??
+              fstAuth?.user?.email ??
+              'User'
+            }
+            canForceTakeOver={
+              app.currentUser?.roleId === 'sysadmin' || isFstAdminEmail(fstAuth?.user?.email)
+            }
+            canEditSalary={canEditEmployeeSalary(accessUser)}
+            onSave={(updated) => {
+              const prev = app.store.employees.find((e) => e.id === updated.id)
+              app.upsertEmployee(updated)
+              if (updated.hrStatus === 'fired' && updated.terminationDate) {
+                const changed =
+                  !prev ||
+                  prev.hrStatus !== 'fired' ||
+                  prev.terminationDate !== updated.terminationDate
+                if (changed) {
+                  const segs = terminationSegments(
+                    Object.keys(app.store.months),
+                    updated.terminationDate,
+                  )
+                  for (const seg of segs) {
+                    app.setEmployeeFactRange(seg.monthKey, updated.id, seg.fromDay, seg.toDay, '')
+                  }
+                }
+              }
+            }}
+          >
           <CoachProvider
             aiSettings={app.store.settings.ai}
-            locale={app.store.settings.locale}
+            locale={app.uiLocale}
             view={app.view}
             currentUser={
-              app.currentUser
+              accessUser
                 ? {
-                    id: app.currentUser.id,
-                    displayName: app.currentUser.displayName,
-                    roleId: app.currentUser.roleId,
+                    id: accessUser.id,
+                    displayName: accessUser.displayName,
+                    roleId: accessUser.roleId,
+                    login: accessUser.login,
                   }
                 : null
             }
@@ -321,6 +506,7 @@ export default function App() {
             appendAiChatEntries={app.appendAiChatEntries}
             addSuggestion={app.addSuggestion}
           >
+          <SupportChromeProvider>
         <StorageAlert
           loadWarning={app.loadWarning}
         saveError={app.saveError}
@@ -361,9 +547,21 @@ export default function App() {
           webTechnologistMode={webTechnologistMode}
           webProcurementMode={webProcurementMode}
           webWorkshopMasterMode={webWorkshopMasterMode}
+          webAdminMode={webAdminMode}
           adminCabinet={isAdmin ? app.adminCabinet : undefined}
           onAdminCabinetChange={isAdmin ? app.setAdminCabinet : undefined}
           isFstWeb={isFstWeb}
+          onAnnounceMaintenance={
+            app.currentUser?.roleId === 'sysadmin'
+              ? () => {
+                  app.updateSettings({
+                    maintenanceWindow: buildFiveMinuteMaintenance(
+                      app.currentUser?.displayName,
+                    ),
+                  })
+                }
+              : undefined
+          }
           webAccount={
             isFstWeb && webSession.profile
               ? {
@@ -386,18 +584,88 @@ export default function App() {
           />
 
           <Suspense fallback={<PageLoader />}>
+          <ShiftUrgentBar
+            items={shiftUrgent.items}
+            hidden={app.view === 'director' || app.view === 'timeclock'}
+            onGo={handleOpsUrgentGo}
+          />
+          {app.view === 'my' && (
+            <MyCabinetPage store={app.store} currentUser={app.currentUser} />
+          )}
+          {app.view === 'timeclock' && (
+            <TimeclockPage
+              store={app.store}
+              deviceLabel={app.currentUser?.displayName ?? 'timeclock'}
+              onPunch={app.recordAttendancePunch}
+            />
+          )}
           {app.view === 'month' && (
             <MonthPage
               store={app.store}
               month={app.activeMonth}
               onMonthChange={app.setActiveMonth}
               onPatch={app.patch}
-              onCycle={(rowId, dateKey, mode) =>
+              onCycle={(rowId, dateKey, mode) => {
+                const sheet = app.store.months[app.activeMonth]
+                const current =
+                  mode === 'plan'
+                    ? (sheet?.plan[rowId]?.[dateKey] ?? '')
+                    : (sheet ? (getFactMark(sheet, rowId, dateKey) ?? '') : '')
+                const next = nextCode(current)
                 app.cycleMark(app.activeMonth, rowId, dateKey, mode)
-              }
-              onSetCode={(rowId, dateKey, code, mode) =>
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                if (empId && !isMonthClosed(app.store, app.activeMonth)) {
+                  notifyForTimesheetCode(pushAccess, empId, app.activeMonth, next)
+                }
+              }}
+              onSetCode={(rowId, dateKey, code, mode) => {
                 app.setMark(app.activeMonth, rowId, dateKey, mode, code)
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                if (empId) {
+                  notifyForTimesheetCode(pushAccess, empId, app.activeMonth, code)
+                }
+              }}
+              onSetCodesBatch={(cells, code, mode) => {
+                app.setMarksBatch(app.activeMonth, mode, cells, code)
+                const seen = new Set<string>()
+                for (const { rowId } of cells) {
+                  const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                  if (!empId || seen.has(empId)) continue
+                  seen.add(empId)
+                  notifyForTimesheetCode(pushAccess, empId, app.activeMonth, code)
+                }
+              }}
+              onSavePlanDraft={(draftPlan) =>
+                app.commitPlanDraft(app.activeMonth, draftPlan)
               }
+              onCommitTimesheetDraft={(changes) => {
+                const result = app.commitTimesheetDraft(app.activeMonth, changes)
+                const seen = new Set<string>()
+                for (const ch of result.appliedChanges) {
+                  const empId =
+                    ch.employeeId ??
+                    employeeIdForRow(app.store, app.activeMonth, ch.rowId)
+                  if (!empId) continue
+                  const key = `${empId}|${ch.after}`
+                  if (seen.has(key)) continue
+                  seen.add(key)
+                  notifyForTimesheetCode(pushAccess, empId, app.activeMonth, ch.after)
+                }
+                return result
+              }}
+              onVoidTimesheetEntry={(documentId) => app.voidTimesheetEntry(documentId)}
+              journalTimesheetEntryId={
+                journalNav?.view === 'month' ? journalNav.timesheetEntryDocumentId ?? null : null
+              }
+              onJournalTimesheetEntryConsumed={() => {
+                if (journalNav?.view === 'month' && journalNav.timesheetEntryDocumentId) {
+                  setJournalNav({
+                    view: 'month',
+                    month: journalNav.month,
+                    mode: journalNav.mode,
+                  })
+                }
+              }}
               onSetFactExtra={(rowId, dateKey, hours) =>
                 app.setFactExtraHours(
                   app.activeMonth,
@@ -406,53 +674,139 @@ export default function App() {
                   Math.max(0, Math.min(6, hours)) as import('@/lib/factExtra').FactExtraHours,
                 )
               }
-              onAssign={(rowId, empId) =>
+              onAssign={(rowId, empId) => {
                 app.assignRowEmployee(app.activeMonth, rowId, empId)
-              }
-              onRegenerateRow={(rowId) => app.regenerateRowPlan(app.activeMonth, rowId)}
+                if (empId) {
+                  notifySchedulePush(pushAccess, [empId], app.activeMonth, 'assigned')
+                }
+              }}
+              onRegenerateRow={(rowId) => {
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                app.regenerateRowPlan(app.activeMonth, rowId)
+                if (empId) {
+                  notifySchedulePush(pushAccess, [empId], app.activeMonth, 'plan_changed')
+                }
+              }}
               onAddRow={(brigade) => app.addBrigadeRowToMonth(app.activeMonth, brigade)}
               onRemoveRow={(rowId) => app.removeBrigadeRowFromMonth(app.activeMonth, rowId)}
               onRemoveEmptyRow={(brigade) =>
                 app.removeEmptyBrigadeRowFromMonth(app.activeMonth, brigade)
               }
-              onRegenerateMonth={() => app.regenerateMonthPlan(app.activeMonth)}
-              onBulkHolidayV={() => app.bulkHolidayV(app.activeMonth)}
-              onBulkCopyPlanToFact={(scope, brigade) =>
-                app.bulkCopyPlanToFact(app.activeMonth, scope, brigade)
+              onRegenerateMonth={() => {
+                const ids = employeeIdsInMonth(app.store, app.activeMonth)
+                app.regenerateMonthPlan(app.activeMonth)
+                notifySchedulePush(pushAccess, ids, app.activeMonth, 'plan_changed')
+              }}
+              onBulkHolidayV={(brigades) => {
+                const rows = app.store.months[app.activeMonth]?.rows ?? []
+                const ids = [
+                  ...new Set(
+                    rows
+                      .filter((r) => r.employeeId && (!brigades?.length || brigades.includes(r.brigade)))
+                      .map((r) => r.employeeId as string),
+                  ),
+                ]
+                app.bulkHolidayV(app.activeMonth, brigades)
+                for (const id of ids) {
+                  notifyPersonalDayPush(pushAccess, id, 'rest', app.activeMonth)
+                }
+              }}
+              onBulkCopyPlanToFact={(scope, brigade, opts) =>
+                app.bulkCopyPlanToFact(app.activeMonth, scope, brigade, opts)
               }
-              onApplyShiftTemplate={(templateId, brigade) =>
+              onApplyShiftTemplate={(templateId, brigade) => {
+                const ids = (app.store.months[app.activeMonth]?.rows ?? [])
+                  .filter((r) => r.brigade === brigade && r.employeeId)
+                  .map((r) => r.employeeId as string)
                 app.applyShiftTemplateBrigadeAndRegenerate(
                   app.activeMonth,
                   templateId,
                   brigade,
                 )
-              }
+                notifySchedulePush(pushAccess, ids, app.activeMonth, 'plan_changed')
+              }}
               onExportExcel={() =>
                 void runExport('timesheet', app.store, {
                   month: app.activeMonth,
-                  locale: app.store.settings.locale,
+                  locale: app.uiLocale,
                 })
               }
               onAddBrigade={app.addBrigade}
               onRenameBrigade={app.renameBrigade}
               onRemoveBrigade={app.removeBrigade}
               onSetBrigadeNameKa={app.setBrigadeNameKa}
+              onSetBrigadeNameEn={app.setBrigadeNameEn}
               onSetBrigadeUnit={app.setBrigadeUnit}
-              onMarkBrigadier={(rowId, dateKey, on) =>
+              onSetBrigadeHasBrigadier={
+                app.currentUser?.roleId === 'sysadmin'
+                  ? app.setBrigadeHasBrigadier
+                  : undefined
+              }
+              onMarkBrigadier={(rowId, dateKey, on) => {
                 app.setBrigadierDay(app.activeMonth, rowId, dateKey, on)
-              }
-              onMarkBrigadierMonth={(rowId, on) =>
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                if (empId) notifyBrigadierPush(pushAccess, empId, on, app.activeMonth)
+              }}
+              onMarkBrigadierMonth={(rowId, on) => {
                 app.setBrigadierMonth(app.activeMonth, rowId, on)
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                if (empId) notifyBrigadierPush(pushAccess, empId, on, app.activeMonth)
+              }}
+              onMarkBrigadierFromDay={(rowId, dateKey, on) => {
+                app.setBrigadierFromDay(app.activeMonth, rowId, dateKey, on)
+                const empId = employeeIdForRow(app.store, app.activeMonth, rowId)
+                if (empId) notifyBrigadierPush(pushAccess, empId, on, app.activeMonth)
+              }}
+              onRowInactiveFrom={(rowId, dateKey) =>
+                app.setRowInactiveFrom(app.activeMonth, rowId, dateKey)
               }
+              onRowActiveFrom={(rowId, dateKey) =>
+                app.setRowActiveFrom(app.activeMonth, rowId, dateKey)
+              }
+              onClearRowPeriod={(rowId) => app.clearRowPeriod(app.activeMonth, rowId)}
               onSetFactHours={(rowId, dateKey, hours) =>
                 app.setFactHours(app.activeMonth, rowId, dateKey, hours)
               }
-              onAddDayWorker={(brigade, employeeId, dateKey, code) =>
-                app.addBrigadeDayWorker(app.activeMonth, brigade, employeeId, dateKey, code)
+              onSetBrigadeSignoff={(brigade, verified) =>
+                app.setBrigadeSignoff(app.activeMonth, brigade, verified)
               }
-              onAssignPermanent={(employeeId, brigade) =>
-                app.assignPermanentToBrigade(app.activeMonth, employeeId, brigade)
+              onAddDayWorker={(brigade, employeeId, dateKey, code) => {
+                const ok = app.addBrigadeDayWorker(app.activeMonth, brigade, employeeId, dateKey, code)
+                if (ok) notifySchedulePush(pushAccess, [employeeId], app.activeMonth, 'day_added')
+                return ok
+              }}
+              onAssignPermanent={(employeeId, brigade) => {
+                const ok = app.assignPermanentToBrigade(app.activeMonth, employeeId, brigade)
+                if (ok) notifySchedulePush(pushAccess, [employeeId], app.activeMonth, 'assigned')
+                return ok
+              }}
+              onTransferFromDate={(employeeId, toBrigade, fromDateKey, opts) => {
+                const ok = app.transferEmployeeFromDate(
+                  app.activeMonth,
+                  employeeId,
+                  toBrigade,
+                  fromDateKey,
+                  opts,
+                )
+                if (ok) notifySchedulePush(pushAccess, [employeeId], app.activeMonth, 'assigned')
+                return ok
+              }}
+              onReorderBrigadeRow={(brigade, rowId, beforeRowId) =>
+                app.reorderBrigadeRowInMonth(app.activeMonth, brigade, rowId, beforeRowId)
               }
+              onClearDayTransfer={(employeeId, dateKey) =>
+                app.clearBrigadeDayTransfer(app.activeMonth, employeeId, dateKey)
+              }
+              onSaveAndPostNightShift={(input) => {
+                const ok = app.saveAndPostNightShift(input)
+                if (ok) {
+                  for (const id of input.employeeIds) {
+                    notifyPersonalDayPush(pushAccess, id, 'night', app.activeMonth)
+                  }
+                }
+                return ok
+              }}
+              onVoidNightShift={(id) => app.voidNightShift(id)}
               onSetComment={(rowId, dateKey, text) =>
                 app.setCellComment(app.activeMonth, rowId, dateKey, text)
               }
@@ -462,26 +816,48 @@ export default function App() {
               onClearSubstitution={(rowId, dateKey) =>
                 app.clearSubstitution(app.activeMonth, rowId, dateKey)
               }
-              onSetBrigadeRoster={(brigade, ids, syncHr) =>
+              onSetBrigadeRoster={(brigade, ids, syncHr) => {
+                const prev = new Set(
+                  (app.store.months[app.activeMonth]?.rows ?? [])
+                    .filter((r) => r.brigade === brigade && r.employeeId)
+                    .map((r) => r.employeeId as string),
+                )
                 app.setBrigadeRoster(app.activeMonth, brigade, ids, syncHr)
-              }
+                const added = ids.filter((id) => !prev.has(id))
+                if (added.length) {
+                  notifySchedulePush(pushAccess, added, app.activeMonth, 'roster')
+                }
+              }}
               onChangeGroup2x2={(_rowId, employeeId, group) => {
                 app.changeEmployeeAttributesFromDay(app.activeMonth, employeeId, 1, {
                   group2x2: group,
                 })
+                notifySchedulePush(pushAccess, [employeeId], app.activeMonth, 'plan_changed')
               }}
-              onSetCycleFromDay={(_rowId, employeeId, day, variant) =>
+              onSetCycleFromDay={(_rowId, employeeId, day, variant) => {
                 app.setEmployeeCycleFromDay(app.activeMonth, employeeId, day, variant)
-              }
-              onSetBrigadier={app.setBrigadier}
+                notifySchedulePush(pushAccess, [employeeId], app.activeMonth, 'plan_changed')
+              }}
+              onSetBrigadier={(brigade, employeeId) => {
+                const prev = app.store.brigadiers[brigade] ?? null
+                app.setBrigadier(brigade, employeeId)
+                if (employeeId && employeeId !== prev) {
+                  notifyBrigadierPush(pushAccess, employeeId, true, app.activeMonth)
+                }
+                if (prev && prev !== employeeId) {
+                  notifyBrigadierPush(pushAccess, prev, false, app.activeMonth)
+                }
+              }}
               onUpsertEmployee={app.upsertEmployee}
               onTourComplete={() => app.updateSettings({ tourCompleted: true })}
-              onCloseMonth={() =>
+              onCloseMonth={() => {
+                const ids = employeeIdsInMonth(app.store, app.activeMonth)
                 app.setMonthClosed(app.activeMonth, true, {
                   id: app.currentUser?.id,
                   name: app.currentUser?.displayName,
                 })
-              }
+                notifySchedulePush(pushAccess, ids, app.activeMonth, 'month_closed')
+              }}
               onReopenMonth={() =>
                 app.setMonthClosed(app.activeMonth, false, {
                   id: app.currentUser?.id,
@@ -489,12 +865,16 @@ export default function App() {
                 })
               }
               canReopen={
-                app.currentUser?.roleId === 'sysadmin' ||
-                app.currentUser?.roleId === 'operations_director'
+                accessUser?.roleId === 'sysadmin' ||
+                accessUser?.roleId === 'operations_director'
               }
+              canClearMonth={accessUser?.roleId === 'sysadmin'}
+              onClearMonth={() => app.clearMonthTimesheet(app.activeMonth)}
+              onClearMonthsBefore={(before) => app.clearMonthsBefore(before)}
               workshopMasterMode={workshopMasterMode}
               workshopMasterLogin={app.currentUser?.login}
               workshopMasterEmployeeId={app.currentUser?.employeeId}
+              accessUser={accessUser}
               userDefaultBrigades={app.currentUser?.defaultBrigades}
               userMonthDefaults={userMonthDefaults}
               currentUserId={app.currentUser?.id}
@@ -514,14 +894,27 @@ export default function App() {
               hrStructuralUnits={app.store.hrStructuralUnits}
               hrPositions={app.store.hrPositions}
               brigades={app.store.brigades}
-              currentUser={app.currentUser}
+              currentUser={accessUser}
               candidates={app.store.candidates}
               onSaveEmployee={app.upsertEmployee}
               onRemoveEmployee={app.removeEmployee}
               onUpsertCandidate={app.upsertCandidate}
               onRemoveCandidate={app.removeCandidate}
               onHireCandidate={app.hireCandidate}
-              onSetEmployeeFactRange={app.setEmployeeFactRange}
+              onCreateEmployeeCabinet={async ({ employeeId, displayName, login, password }) => {
+                await app.upsertAppUser({
+                  login,
+                  displayName,
+                  roleId: 'employee',
+                  password,
+                  active: true,
+                  employeeId,
+                })
+              }}
+              onSetEmployeeFactRange={(month, employeeId, fromDay, toDay, code) => {
+                app.setEmployeeFactRange(month, employeeId, fromDay, toDay, code)
+                notifyForTimesheetCode(pushAccess, employeeId, month, code)
+              }}
               onRestoreTrashEmployee={app.restoreTrashEmployee}
               onPurgeTrashEmployee={app.purgeTrashEmployee}
               onRestoreTrashCandidate={app.restoreTrashCandidate}
@@ -531,11 +924,22 @@ export default function App() {
               onClearAllPersonnel={app.clearAllPersonnel}
               onSectionChange={app.setHrSection}
               webHrMode={webHrMode}
+              realSysAdmin={isSysAdmin(app.currentUser)}
               workshopMasterMode={workshopMasterMode}
               webUserName={app.currentUser?.displayName}
               userHrDefaults={resolveHrViewDefaults(app.currentUser?.viewDefaults)}
               currentUserId={app.currentUser?.id}
               onSaveViewDefaults={saveViewDefaults}
+              financeActions={financeActions}
+              onNavigateToDirectory={(section) => app.navigateToDirectory(section)}
+              onOpenFinance={
+                canAccessView(app.access, accessUser, 'finance')
+                  ? () => app.setView('finance')
+                  : undefined
+              }
+              onUpsertWorkshopMasterCoverage={app.upsertWorkshopMasterCoverage}
+              onPostWorkshopMasterCoverage={app.postWorkshopMasterCoverage}
+              onEndWorkshopMasterCoverage={app.endWorkshopMasterCoverage}
             />
           )}
           {app.view === 'hr_inspector' && (
@@ -549,8 +953,14 @@ export default function App() {
               responsible={app.store.settings.responsible}
               webInspectorMode={webHrInspectorMode}
               webUserName={webUserName}
+              compactWithHr={
+                !webHrInspectorMode && canAccessView(app.access, accessUser, 'hr')
+              }
               onSaveEmployee={app.upsertEmployee}
-              onSetEmployeeFactRange={app.setEmployeeFactRange}
+              onSetEmployeeFactRange={(month, employeeId, fromDay, toDay, code) => {
+                app.setEmployeeFactRange(month, employeeId, fromDay, toDay, code)
+                notifyForTimesheetCode(pushAccess, employeeId, month, code)
+              }}
             />
           )}
           {app.view === 'finance' && (
@@ -568,30 +978,73 @@ export default function App() {
               onUpsertStructuralUnit={app.upsertHrStructuralUnit}
               onRemoveStructuralUnit={app.removeHrStructuralUnit}
               onImportOrgStructureFromSeed={app.importOrgStructureFromSeed}
-              actions={{
-                onGiveAdvance: (input) => app.giveAdvance(input, financeActor),
-                onRemoveAdvance: (id) => app.removeAdvance(id, financeActor),
-                onAddAdjustment: (input) => app.addAdjustment(input, financeActor),
-                onRemoveAdjustment: (id) => app.removeAdjustment(id, financeActor),
-                onAddPayout: (input) => app.addPayout(input, financeActor),
-                onRemovePayout: (id) => app.removePayout(id, financeActor),
-                onConfirmSick: (input) => app.confirmSick(input, financeActor),
-                onUnconfirmSick: (employeeId, month) =>
-                  app.unconfirmSick(employeeId, month, financeActor),
-                onSetBrigadierBonus: (amount) =>
-                  app.updateSettings({ brigadierBonus: amount }),
+              actions={financeActions}
+              onOpenHr={
+                canAccessView(app.access, accessUser, 'hr')
+                  ? () => app.setView('hr')
+                  : undefined
+              }
+              documentActions={{
+                onSaveAdvanceDocument: (input) =>
+                  app.saveAdvanceDocumentDraft(input, financeActor),
+                onPrepareAdvanceDocument: (id) =>
+                  app.prepareAdvanceDocument(id, financeActor),
+                onUnprepareAdvanceDocument: (id) =>
+                  app.unprepareAdvanceDocument(id, financeActor),
+                onPostAdvanceDocument: (id) => app.postAdvanceDocument(id, financeActor),
+                onVoidAdvanceDocument: (id, reason) =>
+                  app.voidAdvanceDocument(id, reason, financeActor),
+                onDeleteAdvanceDocumentDraft: (id) =>
+                  app.deleteAdvanceDocumentDraft(id, financeActor),
+                onSaveAdvanceAccrual: (input) =>
+                  app.saveAdvanceAccrualDraft(input, financeActor),
+                onPostAdvanceAccrual: (id) => app.postAdvanceAccrual(id, financeActor),
+                onVoidAdvanceAccrual: (id, reason) =>
+                  app.voidAdvanceAccrual(id, reason, financeActor),
+                onDeleteAdvanceAccrualDraft: (id) =>
+                  app.deleteAdvanceAccrualDraft(id, financeActor),
+                onCreateDisbursementFromAccrual: (accrualId, opts) =>
+                  app.createDisbursementFromAccrual(accrualId, opts, financeActor),
+                onSavePayoutDocument: (input) =>
+                  app.savePayoutDocumentDraft(input, financeActor),
+                onPreparePayoutDocument: (id) =>
+                  app.preparePayoutDocument(id, financeActor),
+                onUnpreparePayoutDocument: (id) =>
+                  app.unpreparePayoutDocument(id, financeActor),
+                onPostPayoutDocument: (id) => app.postPayoutDocument(id, financeActor),
+                onVoidPayoutDocument: (id, reason) =>
+                  app.voidPayoutDocument(id, reason, financeActor),
+                onDeletePayoutDocumentDraft: (id) =>
+                  app.deletePayoutDocumentDraft(id, financeActor),
+                onMarkFinanceDocExported: (kind, id) =>
+                  app.markFinanceDocExported(kind, id, financeActor),
               }}
+              focusAdvanceDocumentId={
+                journalNav?.view === 'finance' ? journalNav.advanceDocumentId : null
+              }
+              focusPayoutDocumentId={
+                journalNav?.view === 'finance' ? journalNav.payoutDocumentId : null
+              }
+              focusAccrualDocumentId={
+                journalNav?.view === 'finance' ? journalNav.accrualDocumentId : null
+              }
+              onJournalFocusConsumed={() => setJournalNav(null)}
               webFinanceMode={webFinanceMode}
               webUserName={app.currentUser?.displayName}
               userFinanceDefaults={resolveFinanceViewDefaults(app.currentUser?.viewDefaults)}
               currentUserId={app.currentUser?.id}
               onSaveViewDefaults={saveViewDefaults}
+              onSetDefaultAdvancePercent={(percent) =>
+                app.updateSettings({ defaultAdvancePercent: percent })
+              }
             />
           )}
           {app.view === 'production' && (
             <ProductionPage
               requests={app.store.production.requests}
               orders={app.store.production.planner.orders}
+              formulations={app.store.formulations}
+              warehouse={app.store.warehouse}
               employees={app.store.employees}
               brigades={app.store.brigades}
               brigadeNamesKa={app.store.brigadeNamesKa}
@@ -618,6 +1071,7 @@ export default function App() {
               counterparties={app.store.counterparties.items}
               finishedProducts={app.store.finishedProducts.items}
               packagingRecipes={app.store.packagingRecipes.items}
+              boxRecipes={app.store.packagingRecipes.boxes ?? []}
               formulationRecipes={app.store.formulations.recipes}
               warehouseItems={app.store.warehouse.items}
               warehouseCategories={app.store.warehouse.categories}
@@ -640,6 +1094,9 @@ export default function App() {
               onOpenSalesOrder={() => app.setView('director')}
               focusOrderId={plannerFocusOrderId}
               onFocusOrderConsumed={() => setPlannerFocusOrderId(null)}
+              access={app.store.access}
+              currentUser={app.currentUser}
+              onCreateWorkTask={app.createWorkTask}
             />
           )}
           {app.view === 'summary' && (
@@ -649,6 +1106,9 @@ export default function App() {
             <DirectoriesPage
               store={app.store}
               initialSection={app.directorySection as DirectorySection}
+              accessRoleId={accessUser?.roleId ?? app.currentUser?.roleId ?? null}
+              accessStore={app.access}
+              userDirectorySections={accessUser?.directorySections}
               employees={app.store.employees}
               brigades={app.store.brigades}
               hrStructuralUnits={app.store.hrStructuralUnits}
@@ -664,26 +1124,40 @@ export default function App() {
               onRenameBrigade={app.renameBrigade}
               onRemoveBrigade={app.removeBrigade}
               onSetBrigadeNameKa={app.setBrigadeNameKa}
+              onSetBrigadeNameEn={app.setBrigadeNameEn}
               onSetBrigadeUnit={app.setBrigadeUnit}
+              onSetBrigadeHasBrigadier={
+                app.currentUser?.roleId === 'sysadmin'
+                  ? app.setBrigadeHasBrigadier
+                  : undefined
+              }
               onRemoveCounterparty={app.removeCounterparty}
               onUpsertFinishedProduct={app.upsertFinishedProduct}
+              onPatchFinishedProductCatalog={app.patchFinishedProductCatalog}
               onRemoveFinishedProduct={app.removeFinishedProduct}
               onUpsertPackagingRecipe={app.upsertPackagingRecipe}
               onRemovePackagingRecipe={app.removePackagingRecipe}
+              onUpsertBoxRecipe={app.upsertBoxRecipe}
+              onRemoveBoxRecipe={app.removeBoxRecipe}
               onUpsertFormulationRecipe={app.upsertFormulationRecipe}
               onRemoveFormulationRecipe={app.removeFormulationRecipe}
+              onSavePayrollAccrual={(rules) => app.updateSettings({ payrollAccrual: rules })}
               branchWorkspace={app.branchWorkspace}
               clearWorkspaceDraft={app.clearWorkspaceDraft}
               workspaceRestoreSeq={app.workspaceRestoreSeq}
               workspaceDrafts={app.workspaceDrafts}
               webWarehouseMode={webWarehouseMode}
               webProcurementMode={webProcurementMode}
+              canAccessHr={canAccessView(app.access, accessUser, 'hr')}
+              onOpenHr={() => app.setView('hr')}
+              canAccessWarehouse={canAccessView(app.access, accessUser, 'warehouse')}
+              onOpenWarehouse={() => app.setView('warehouse')}
               warehouse={app.store.warehouse}
               printMeta={{
                 site: app.store.settings.site,
                 responsible: app.store.settings.responsible,
                 signatures: app.store.settings.signatures,
-                locale: app.store.settings.locale,
+                locale: app.uiLocale,
               }}
               {...warehouseActions}
             />
@@ -713,6 +1187,7 @@ export default function App() {
               pendingBatchRuns={app.store.formulations.batchRuns.filter(
                 (r) => (r.status ?? 'confirmed') === 'pending',
               )}
+              mixTasks={app.store.formulations.mixTasks ?? []}
               finishedProducts={app.store.finishedProducts.items.filter((p) => p.active)}
               packagingRecipes={app.store.packagingRecipes.items.filter((r) => r.active)}
               onUpsertFinishedProduct={app.upsertFinishedProduct}
@@ -729,6 +1204,9 @@ export default function App() {
               userWarehouseDefaults={resolveWarehouseViewDefaults(app.currentUser?.viewDefaults)}
               currentUserId={app.currentUser?.id}
               onSaveViewDefaults={saveViewDefaults}
+              access={app.store.access}
+              currentUser={app.currentUser}
+              onCreateWorkTask={app.createWorkTask}
             />
           )}
           {app.view === 'procurement' && (
@@ -762,12 +1240,14 @@ export default function App() {
               onUpsertRecipe={app.upsertFormulationRecipe}
               onUpsertWarehouseItem={app.upsertWarehouseItem}
               onPostBatch={(input) =>
-                app.postFormulationBatchMix(input, app.store.settings.locale, {
+                app.postFormulationBatchMix(input, app.uiLocale, {
                   allowNegativeStock,
                 })
               }
               onCreateMixTask={app.createMixTask}
               onCancelMixTask={app.cancelMixTask}
+              onReserveMixTask={app.reserveMixTaskMaterials}
+              onUnreserveMixTask={app.unreserveMixTaskMaterials}
               onAssignProductionOrderRecipe={(orderId, recipeId) =>
                 app.assignProductionOrderFormulationRecipe(
                   orderId,
@@ -789,10 +1269,40 @@ export default function App() {
               onRemoveImpregnationQc={app.removeImpregnationQc}
               onAddRoomClimateReading={app.addRoomClimateReading}
               onRemoveRoomClimateReading={app.removeRoomClimateReading}
+              onUpsertShiftHandoff={app.upsertShiftHandoff}
+              onAcknowledgeShiftHandoff={app.acknowledgeShiftHandoff}
+              onSetShiftHandoffStatus={app.setShiftHandoffStatus}
+              onRemoveShiftHandoff={app.removeShiftHandoff}
+              focusTab={
+                opsFocus?.view === 'technologist' ? opsFocus.tab : null
+              }
+              onFocusTabConsumed={() => setOpsFocus(null)}
               onCreateWastewaterCube={app.createWastewaterCube}
               onUpsertWastewaterCube={app.upsertWastewaterCube}
               onApplyWastewaterCubeTransition={app.applyWastewaterCubeTransition}
               onRemoveWastewaterCube={app.removeWastewaterCube}
+            />
+          )}
+          {app.view === 'otc' && (
+            <OtcPage
+              store={app.store.otc}
+              operatorName={
+                app.currentUser?.displayName ??
+                app.store.settings.responsible ??
+                'ОТК'
+              }
+              onUpsertNorm={app.upsertOtcNorm}
+              onRemoveNorm={app.removeOtcNorm}
+              onUpsertLabTest={app.upsertOtcLabTest}
+              onRemoveLabTest={app.removeOtcLabTest}
+              onUpsertAlkali={app.upsertOtcAlkaliSeries}
+              onRemoveAlkali={app.removeOtcAlkaliSeries}
+              onUpsertSorting={app.upsertOtcSorting}
+              onRemoveSorting={app.removeOtcSorting}
+              onUpsertDefect={app.upsertOtcDefect}
+              onRemoveDefect={app.removeOtcDefect}
+              focusTab={opsFocus?.view === 'otc' ? opsFocus.tab : null}
+              onFocusTabConsumed={() => setOpsFocus(null)}
             />
           )}
           {app.view === 'mixer' && (
@@ -809,11 +1319,13 @@ export default function App() {
               site={app.store.settings.site}
               webUserName={webUserName}
               onPostBatch={(input) =>
-                app.postFormulationBatchMix(input, app.store.settings.locale, {
+                app.postFormulationBatchMix(input, app.uiLocale, {
                   allowNegativeStock,
                 })
               }
               onCompleteMixTask={app.completeMixTask}
+              onReserveMixTask={app.reserveMixTaskMaterials}
+              onUnreserveMixTask={app.unreserveMixTaskMaterials}
               onAddRoomClimateReading={app.addRoomClimateReading}
               onRemoveRoomClimateReading={app.removeRoomClimateReading}
             />
@@ -825,8 +1337,11 @@ export default function App() {
               requests={app.store.production.requests}
               counterparties={app.store.counterparties.items}
               finishedProducts={app.store.finishedProducts.items}
+              warehouse={app.store.warehouse}
               webUserName={webUserName}
               onUpsertSalesOrder={app.upsertSalesOrder}
+              onUpsertCounterparty={app.upsertCounterparty}
+              onOpenCounterpartiesJournal={() => app.navigateToDirectory('counterparties')}
               onRemoveSalesOrder={app.removeSalesOrder}
               onSetSalesOrderStatus={app.setSalesOrderStatus}
               onPlanSalesLine={app.planSalesLine}
@@ -839,6 +1354,8 @@ export default function App() {
                 setPlannerFocusOrderId(productionOrderId)
                 app.setView('planner')
               }}
+              onOpenProduction={() => app.setView('production')}
+              onOpenTechnologist={() => app.setView('technologist')}
               focusSalesOrderId={
                 journalNav?.view === 'director' ? journalNav.salesOrderId : null
               }
@@ -849,13 +1366,85 @@ export default function App() {
                 months: app.store.months,
                 employees: app.store.employees,
               }}
+              otc={app.store.otc}
               onErpNavigate={app.setView}
+              reportOnly={accessUser?.roleId === 'operations_director'}
             />
           )}
           {app.view === 'journals' && (
             <JournalsPage
               store={app.store}
               currentUser={app.currentUser}
+              activeMonth={app.activeMonth}
+              brigades={app.store.brigades}
+              printMeta={{
+                site: app.store.settings.site,
+                responsible: app.store.settings.responsible,
+                signatures: app.store.settings.signatures,
+                locale: app.uiLocale,
+              }}
+              allowNegativeStock={allowNegativeStock}
+              warehouseDocActions={{
+                onPostDocument: warehouseActions.onPostDocument,
+                onPostTransfer: warehouseActions.onPostTransfer,
+                onSaveDocumentDraft: warehouseActions.onSaveDocumentDraft,
+                onPostExistingDocument: warehouseActions.onPostExistingDocument,
+                onUnpostDocument: canUnpostDocuments
+                  ? warehouseActions.onUnpostDocument
+                  : undefined,
+                onAcquireDocumentLock: warehouseActions.onAcquireDocumentLock,
+                onReleaseDocumentLock: warehouseActions.onReleaseDocumentLock,
+                onMergeInvoiceRegistry: warehouseActions.onMergeInvoiceRegistry,
+                onUpsertCounterparty: app.upsertCounterparty,
+              }}
+              loadingDocActions={{
+                onUpsertLoadingShipment: warehouseActions.onUpsertLoadingShipment!,
+                onPostLoadingShipment: warehouseActions.onPostLoadingShipment!,
+                onRemoveLoadingShipment: warehouseActions.onRemoveLoadingShipment!,
+                onUpsertItem: warehouseActions.onUpsertItem,
+                onUpsertFinishedProduct: app.upsertFinishedProduct,
+                onUpsertCounterparty: app.upsertCounterparty,
+              }}
+              onUpsertSalesOrder={app.upsertSalesOrder}
+              onReceivePurchaseOrder={app.receivePurchaseOrder}
+              onCreateDisbursementFromAccrual={(accrualId, opts) =>
+                app.createDisbursementFromAccrual(accrualId, opts, financeActor)
+              }
+              financeDocumentActions={{
+                onSaveAdvanceDocument: (input) =>
+                  app.saveAdvanceDocumentDraft(input, financeActor),
+                onPrepareAdvanceDocument: (id) =>
+                  app.prepareAdvanceDocument(id, financeActor),
+                onUnprepareAdvanceDocument: (id) =>
+                  app.unprepareAdvanceDocument(id, financeActor),
+                onPostAdvanceDocument: (id) => app.postAdvanceDocument(id, financeActor),
+                onVoidAdvanceDocument: (id, reason) =>
+                  app.voidAdvanceDocument(id, reason, financeActor),
+                onDeleteAdvanceDocumentDraft: (id) =>
+                  app.deleteAdvanceDocumentDraft(id, financeActor),
+                onSaveAdvanceAccrual: (input) =>
+                  app.saveAdvanceAccrualDraft(input, financeActor),
+                onPostAdvanceAccrual: (id) => app.postAdvanceAccrual(id, financeActor),
+                onVoidAdvanceAccrual: (id, reason) =>
+                  app.voidAdvanceAccrual(id, reason, financeActor),
+                onDeleteAdvanceAccrualDraft: (id) =>
+                  app.deleteAdvanceAccrualDraft(id, financeActor),
+                onCreateDisbursementFromAccrual: (accrualId, opts) =>
+                  app.createDisbursementFromAccrual(accrualId, opts, financeActor),
+                onSavePayoutDocument: (input) =>
+                  app.savePayoutDocumentDraft(input, financeActor),
+                onPreparePayoutDocument: (id) =>
+                  app.preparePayoutDocument(id, financeActor),
+                onUnpreparePayoutDocument: (id) =>
+                  app.unpreparePayoutDocument(id, financeActor),
+                onPostPayoutDocument: (id) => app.postPayoutDocument(id, financeActor),
+                onVoidPayoutDocument: (id, reason) =>
+                  app.voidPayoutDocument(id, reason, financeActor),
+                onDeletePayoutDocumentDraft: (id) =>
+                  app.deletePayoutDocumentDraft(id, financeActor),
+                onMarkFinanceDocExported: (kind, id) =>
+                  app.markFinanceDocExported(kind, id, financeActor),
+              }}
               scope={{
                 webHrMode,
                 webHrInspectorMode,
@@ -873,7 +1462,39 @@ export default function App() {
                 if (nav.view === 'month' && 'month' in nav) {
                   app.setActiveMonth(nav.month)
                 }
+                if (nav.view === 'finance' && 'month' in nav && nav.month) {
+                  app.setActiveMonth(nav.month)
+                }
               }}
+            />
+          )}
+          {app.view === 'engineer_log' && (
+            <EngineerLogPage
+              engineerLog={app.store.engineerLog}
+              authorId={app.currentUser?.id}
+              authorName={app.currentUser?.displayName}
+              onUpsert={app.upsertEngineerLogEntry}
+              onRemove={app.removeEngineerLogEntry}
+              onTogglePin={app.toggleEngineerLogPin}
+              onToggleChecklistItem={app.toggleEngineerLogChecklistItem}
+              onSetStatus={app.setEngineerLogEntryStatus}
+            />
+          )}
+          {app.view === 'tasks' && (
+            <TasksPage
+              store={app.store}
+              currentUser={app.currentUser}
+              onCreateWorkTask={app.createWorkTask}
+              onUpdateWorkTask={app.updateWorkTask}
+              onMoveWorkTask={app.moveWorkTask}
+              onCompleteWorkTask={app.completeWorkTask}
+              onCancelWorkTask={app.cancelWorkTask}
+              onAddTaskComment={app.addTaskComment}
+              onToggleTaskChecklistItem={app.toggleTaskChecklistItem}
+              onToggleTaskAssigneeDone={app.toggleTaskAssigneeDone}
+              onAddTaskAttachmentMeta={app.addTaskAttachmentMeta}
+              onBeginTaskAttachmentDelete={app.beginTaskAttachmentDelete}
+              onRemoveTaskAttachmentMeta={app.removeTaskAttachmentMeta}
             />
           )}
           {app.view === 'it' && (
@@ -895,15 +1516,91 @@ export default function App() {
               onPostItConsumableIssue={app.postItConsumableIssue}
             />
           )}
+          {app.view === 'office' && (
+            <OfficePage
+              employees={app.store.employees}
+              hrStructuralUnits={app.store.hrStructuralUnits}
+              hrPositions={app.store.hrPositions}
+              brigades={app.store.brigades}
+              site={app.store.settings.site}
+            />
+          )}
+          {app.view === 'meals' && (
+            <MealsPage
+              store={app.store}
+              currentUser={app.currentUser}
+              onUpsertMealOrder={app.upsertMealOrder}
+              onAcceptMealDay={app.acceptMealDay}
+              onUnacceptMealDay={app.unacceptMealDay}
+              onUpdateMealSettings={app.updateMealSettings}
+              onUpsertMealCatalogItem={app.upsertMealCatalogItem}
+              onSetMealWeekBase={app.setMealWeekBase}
+              onSetMealDayExtras={app.setMealDayExtras}
+              onCopyPreviousMealWeek={app.copyPreviousMealWeek}
+              onPublishMealWeek={app.publishMealWeek}
+              onAddMealAdvanceReceipt={app.addMealAdvanceReceipt}
+            />
+          )}
+          {app.view === 'protocols' && (
+            <ProtocolsPage
+              store={app.store}
+              currentUser={app.currentUser}
+              canEdit={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.currentUser?.roleId === 'secretary' ||
+                app.currentUser?.roleId === 'operations_director'
+              }
+              onUpsertProtocol={app.upsertMeetingProtocol}
+              onArchiveProtocol={app.archiveMeetingProtocol}
+              onUpsertItem={app.upsertProtocolItem}
+              onArchiveItem={app.archiveProtocolItem}
+              onSetItemStatus={app.setProtocolItemStatus}
+              onSendForAck={app.sendProtocolItemForAck}
+              onConfirmAck={app.confirmProtocolItemAck}
+              onRefuseAck={app.refuseProtocolItemAck}
+              onAdminFixAck={app.adminFixProtocolItemAck}
+              onRegisterAttachment={app.registerProtocolAttachment}
+            />
+          )}
+          {app.view === 'org_tree' && (
+            <OrgTreePage
+              store={app.store}
+              currentUser={app.currentUser}
+              canEdit={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.currentUser?.roleId === 'hr' ||
+                app.currentUser?.roleId === 'secretary'
+              }
+              onSetDisplayMode={app.setOrgChartDisplayMode}
+              onUpsertNode={app.upsertOrgChartNode}
+              onMoveNode={app.moveOrgChartNode}
+              onReparentNode={app.reparentOrgChartNode}
+              onArchiveNode={app.archiveOrgChartNode}
+              onRemoveNode={app.removeOrgChartNode}
+              onAssignEmployee={app.assignOrgChartEmployee}
+              onUnassignEmployee={app.unassignOrgChartEmployee}
+              onSetHrLink={app.setOrgChartHrLink}
+              onAutoLayout={app.autoLayoutOrgChart}
+              onAutoLayoutBranch={app.autoLayoutOrgChartBranch}
+            />
+          )}
           {app.view === 'settings' && (
             <SettingsPage
               store={app.store}
               currentUser={app.currentUser}
               onUpsertAppUser={app.upsertAppUser}
-              onRemoveAppUser={app.removeAppUser}
+              onRemoveWebUser={app.removeWebUser}
               onSetRoleViews={app.setRoleViews}
+              onSetRoleDirectorySections={app.setRoleDirectorySections}
               onSetRoleAllowNegativeStock={app.setRoleAllowNegativeStock}
               onSetRoleAllowDocumentCancel={app.setRoleAllowDocumentCancel}
+              onSetRoleTimesheetAccess={app.setRoleTimesheetAccess}
+              onSetRoleTaskAccess={app.setRoleTaskAccess}
+              onUpsertUserGroup={app.upsertUserGroup}
+              onRemoveUserGroup={app.removeUserGroup}
+              onUpsertWorkshopMasterCoverage={app.upsertWorkshopMasterCoverage}
+              onPostWorkshopMasterCoverage={app.postWorkshopMasterCoverage}
+              onEndWorkshopMasterCoverage={app.endWorkshopMasterCoverage}
               onSetWarehouseMonthClosed={app.setWarehouseMonthClosed}
               onAddMonth={app.addMonth}
               onRemoveMonth={app.removeMonth}
@@ -916,10 +1613,11 @@ export default function App() {
                 })
               }
               canReopenMonth={
-                app.currentUser?.roleId === 'sysadmin' ||
-                app.currentUser?.roleId === 'operations_director'
+                accessUser?.roleId === 'sysadmin' ||
+                accessUser?.roleId === 'operations_director'
               }
               onUpdateSettings={app.updateSettings}
+              onSetSuggestionStatus={app.setSuggestionStatus}
               onRestoreTrashEmployee={app.restoreTrashEmployee}
               onRestoreTrashMonth={app.restoreTrashMonth}
               onPurgeTrashEmployee={app.purgeTrashEmployee}
@@ -929,10 +1627,6 @@ export default function App() {
           )}
           </Suspense>
         </AppShell>
-
-        {app.currentUser?.active && (
-          <WelcomeGreeting user={app.currentUser} employees={app.store.employees} />
-        )}
 
         <WorkspaceTaskbar
           panes={app.workspacePanes}
@@ -945,19 +1639,72 @@ export default function App() {
           <Suspense fallback={null}>
             <LocalDbSync
               store={app.store}
-              replaceStore={app.replaceStore}
+              replaceStore={app.applyCloudStore}
               onSaveError={app.reportSaveError}
             />
           </Suspense>
         )}
-        {isFstWeb && (
-          <Suspense fallback={null}>
-            <FstCloudSync store={app.store} replaceStore={app.replaceStore} />
-          </Suspense>
-        )}
         <CoachWidget />
         <CoachHighlightOverlay />
+        <FeedbackWidget
+          view={app.view}
+          aiChat={app.store.aiChat}
+          currentUser={
+            app.currentUser
+              ? {
+                  id: app.currentUser.id,
+                  displayName: app.currentUser.displayName,
+                  roleId: app.currentUser.roleId,
+                  login: app.currentUser.login,
+                }
+              : null
+          }
+          onSubmit={app.addSuggestion}
+        />
+        {app.currentUser?.roleId === 'sysadmin' ? (
+          <FeedbackAdminBell
+            aiChat={app.store.aiChat}
+            locale={app.uiLocale as import('@/lib/ai/coachTargets').Locale}
+            adminName={app.currentUser.displayName}
+            onSetStatus={app.setSuggestionStatus}
+            onReply={async (id, reply, byName, close) => {
+              const item = app.store.aiChat?.suggestions?.find((s) => s.id === id)
+              app.replyToSuggestion(id, reply, byName, close)
+              const result = await notifyFeedbackReplyPush(
+                app.store.access,
+                {
+                  userId: item?.userId,
+                  userLogin: item?.userLogin,
+                  userName: item?.userName,
+                },
+                reply,
+              )
+              return result
+            }}
+            onOpenSettings={() => app.setView('settings')}
+          />
+        ) : null}
+        <MaintenanceBanner
+          window={app.store.settings.maintenanceWindow}
+          canAnnounce={app.currentUser?.roleId === 'sysadmin'}
+          onClear={
+            app.currentUser?.roleId === 'sysadmin'
+              ? () => app.updateSettings({ maintenanceWindow: undefined })
+              : undefined
+          }
+        />
+          </SupportChromeProvider>
           </CoachProvider>
+          </EmployeeEditorProvider>
+        )}
+        {isFstWeb && (
+          <Suspense fallback={null}>
+            {useSqlConnect ? (
+              <FstSqlConnectSync store={app.store} replaceStore={app.replaceStore} />
+            ) : (
+              <FstCloudSync store={app.store} replaceStore={app.replaceStore} />
+            )}
+          </Suspense>
         )}
         </ModalMinimizeProvider>
       </ConfirmProvider>

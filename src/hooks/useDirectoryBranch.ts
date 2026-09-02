@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import type { DirectorySection } from '@/lib/directories/types'
+import { writeDirectoryOpenIntent } from '@/lib/directories/openIntent'
 import { directorySectionTitle } from '@/lib/workspace/labels'
 import type { ViewId } from '@/lib/types'
 import type { WorkspaceBranchFrom, WorkspaceBranchTarget } from '@/lib/workspace/types'
@@ -8,6 +9,11 @@ type BranchWorkspace = (
   target: WorkspaceBranchTarget,
   from?: WorkspaceBranchFrom,
 ) => void
+
+export type DirectoryBranchOpts = {
+  /** Сразу открыть карточку создания в справочнике */
+  create?: boolean
+}
 
 type Options = {
   t: (key: string) => string
@@ -32,7 +38,10 @@ export function useDirectoryBranch({
   draft,
 }: Options) {
   return useCallback(
-    (section: DirectorySection) => {
+    (section: DirectorySection, opts?: DirectoryBranchOpts) => {
+      if (opts?.create) {
+        writeDirectoryOpenIntent({ section, create: true })
+      }
       if (stackDraft) {
         branchWorkspace(
           {

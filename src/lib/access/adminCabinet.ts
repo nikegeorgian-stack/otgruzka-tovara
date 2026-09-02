@@ -1,14 +1,13 @@
 import type { ViewId } from '@/lib/types'
-import { canAccessView, isSysAdmin, resolveView, viewsForUser } from './permissions'
 import { defaultHomeViewForRole } from './homeView'
-import type { AccessRoleId, AccessStore, AppUser } from './types'
+import type { AccessRoleId, AccessStore } from './types'
 
-/** Какой кабинет/интерфейс смотрит admin (роль остаётся sysadmin). */
+/** Какой кабинет/интерфейс смотрит admin (роль в сторе остаётся sysadmin). */
 export type AdminCabinetId = 'full' | AccessRoleId
 
 export const ADMIN_CABINET_STORAGE_KEY = 'fibercell-admin-cabinet'
 
-/** Кабинеты с отдельным web-UI (и типичные для предпросмотра). */
+/** Кабинеты с отдельным web-UI / предпросмотр для sysadmin. */
 export const ADMIN_CABINET_OPTIONS: AdminCabinetId[] = [
   'full',
   'hr',
@@ -17,7 +16,18 @@ export const ADMIN_CABINET_OPTIONS: AdminCabinetId[] = [
   'warehouse_keeper',
   'procurement_manager',
   'technologist',
+  'otc',
+  'mixer',
+  'chief_engineer',
   'workshop_master',
+  'operations_director',
+  'employee',
+  'timeclock',
+  'it_specialist',
+  'sales_dispatcher',
+  'office_manager',
+  'cook',
+  'secretary',
 ]
 
 const VALID = new Set<string>(ADMIN_CABINET_OPTIONS)
@@ -40,11 +50,28 @@ export function writeAdminCabinet(cabinet: AdminCabinetId): void {
   }
 }
 
-export function firstViewForAdminCabinet(cabinet: AdminCabinetId): ViewId {
+/**
+ * Стартовый раздел при смене кабинета (без импорта permissions — нет цикла модулей).
+ * Полная проверка — canAccessView + accessPersona в useAppStore.
+ */
+export function firstViewForAdminCabinet(
+  cabinet: AdminCabinetId,
+  access?: AccessStore | null,
+): ViewId {
   if (cabinet === 'full') return defaultHomeViewForRole('sysadmin')
-  return defaultHomeViewForRole(cabinet)
+  if (cabinet === 'employee') return 'my'
+  const home = defaultHomeViewForRole(cabinet)
+  if (!access) return home
+  const views = [...(access.roleViews?.[cabinet] ?? [])]
+  const ts = access.roleTimesheetAccess?.[cabinet]
+  if (ts && ts !== 'none' && !views.includes('month')) {
+    views.push('month')
+  }
+  if (views.includes(home)) return home
+  return (views[0] as ViewId | undefined) ?? home
 }
 
+/** Веб-режимы (урезанный UI) по выбранному кабинету — для превью админа. */
 export function webModesFromAdminCabinet(cabinet: AdminCabinetId): {
   webHrMode: boolean
   webFinanceMode: boolean
@@ -63,33 +90,4 @@ export function webModesFromAdminCabinet(cabinet: AdminCabinetId): {
     webTechnologistMode: cabinet === 'technologist',
     webWorkshopMasterMode: cabinet === 'workshop_master',
   }
-}
-
-export function canShowNavItemForAdminPreview(
-  access: AccessStore,
-  user: AppUser | null | undefined,
-  itemId: ViewId,
-  adminCabinet: AdminCabinetId,
-  isFstWeb: boolean,
-): boolean {
-  if (!user?.active) return false
-  if (!isSysAdmin(user) || adminCabinet === 'full') {
-    return canAccessView(access, user, itemId)
-  }
-  if (isFstWeb) {
-    const previewUser: AppUser = {
-      id: user.id,
-      login: user.login,
-      displayName: user.displayName,
-      roleId: adminCabinet,
-      passwordHash: '',
-      passwordSalt: '',
-      active: true,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    }
-    return viewsForUser(access, previewUser).includes(resolveView(itemId))
-  }
-  const views = access.roleViews[adminCabinet] ?? []
-  return views.includes(resolveView(itemId))
 }

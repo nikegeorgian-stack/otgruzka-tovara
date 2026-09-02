@@ -57,3 +57,22 @@ graphify-out/
 
 # Cursor chain-agent brief (regenerated via: npm run agent:chain-brief)
 .cursor/context/CHAIN_BRIEF.md
+
+# Android / Capacitor build outputs (project sources under fst-web/android are tracked)
+fst-web/android/app/build/
+fst-web/android/.gradle/
+fst-web/android/build/
+fst-web/android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+# Публичный APK для скачивания с сайта
+!fst-web/public/downloads/*.apk
+
+# Firebase Android (нужен для сборки APK с пушами; ключ клиентский)
+# fst-web/android/app/google-services.json — в репозитории для CI/сборки
+
+.vercel
+.env*.local
+.env*

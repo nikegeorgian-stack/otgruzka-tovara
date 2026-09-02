@@ -4,6 +4,7 @@ import {
   parseIsoDate,
   weekdayShort,
 } from '@/lib/dates'
+import type { Locale } from '@/i18n/types'
 import type { Employee } from '@/lib/types'
 
 export type AttendanceLogDay = {
@@ -222,7 +223,7 @@ export function saveAttendanceLogSelection(selected: Set<string>): void {
   }
 }
 
-export function formatWeekRange(mondayIso: string, locale: 'ru' | 'ka'): string {
+export function formatWeekRange(mondayIso: string, locale: Locale): string {
   const start = formatShortDate(mondayIso, locale)
   const end = formatShortDate(addDaysIso(mondayIso, 6), locale)
   const { year } = parseIsoDate(mondayIso)

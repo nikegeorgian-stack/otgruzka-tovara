@@ -24,7 +24,7 @@ const CODE_STATUS: Record<string, PurchaseOrderStatus> = {
   DISC: 'arrived',
   GATE_OUT: 'arrived',
   GTOT: 'arrived',
-  DELIVERED: 'received',
+  DELIVERED: 'arrived',
   CUS: 'customs',
   CUSRM: 'customs',
 }
@@ -35,7 +35,8 @@ const KEYWORD_STATUS: [RegExp, PurchaseOrderStatus][] = [
   [/\b(arriv|arri|discharg|disc)\b/i, 'customs'],
   [/\b(customs|clearance|cus)\b/i, 'customs'],
   [/\b(gate.?out|delivered|delivery)\b/i, 'arrived'],
-  [/\b(received|empty.?return)\b/i, 'received'],
+  // empty return / delivered ≠ складская приёмка — max arrived (см. fst-procurement)
+  [/\b(received|empty.?return)\b/i, 'arrived'],
 ]
 
 function statusFromEvent(event: CarrierTrackingEvent): PurchaseOrderStatus | null {
@@ -49,22 +50,30 @@ function statusFromEvent(event: CarrierTrackingEvent): PurchaseOrderStatus | nul
   return null
 }
 
+/** Макс. статус из трекинга перевозчика — до склада; `received` только после receive. */
+const MAX_CARRIER_STATUS: PurchaseOrderStatus = 'arrived'
+
 export function inferStatusFromEvents(
   events: CarrierTrackingEvent[],
   current: PurchaseOrderStatus,
 ): PurchaseOrderStatus {
-  if (current === 'cancelled' || current === 'received') return current
+  if (current === 'cancelled' || current === 'received' || current === 'partial') {
+    return current
+  }
 
   let best: PurchaseOrderStatus = current
   let bestRank = STATUS_RANK[current]
+  const maxRank = STATUS_RANK[MAX_CARRIER_STATUS]
 
   for (const event of events) {
     const mapped = statusFromEvent(event)
     if (!mapped) continue
-    const rank = STATUS_RANK[mapped]
-    if (rank > bestRank) {
-      best = mapped
-      bestRank = rank
+    const clamped =
+      STATUS_RANK[mapped] > maxRank ? MAX_CARRIER_STATUS : mapped
+    const clampedRank = STATUS_RANK[clamped]
+    if (clampedRank > bestRank) {
+      best = clamped
+      bestRank = clampedRank
     }
   }
 

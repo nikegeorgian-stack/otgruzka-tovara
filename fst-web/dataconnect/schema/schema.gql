@@ -1,0 +1,29 @@
+# FST AppStore in PostgreSQL (Firebase SQL Connect)
+# Полный снимок AppStore v6 — одна строка на организацию (fibercell-main).
+# Синхронизация через revision (optimistic locking), без 3-way merge.
+
+type FstStore @table(key: ["id"]) {
+  id: String!
+  revision: Int! @default(value: 1)
+  """JSON-serialized AppStore v6 (sanitize secrets on write in client/API)."""
+  payloadJson: String!
+  fingerprint: String
+  updatedByUid: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Журнал событий — индексируется из auditLog и документов (SQL-фильтрация)."""
+type JournalEvent @table(key: ["id"]) {
+  id: String!
+  at: Timestamp!
+  category: String!
+  title: String!
+  detail: String!
+  actor: String
+  docDate: String
+  docNumber: String
+  docStatus: String
+  linkKind: String
+  linkRef: String
+  storeRevision: Int!
+}

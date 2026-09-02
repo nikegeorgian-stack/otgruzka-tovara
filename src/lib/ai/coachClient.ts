@@ -1,4 +1,5 @@
-import { allowedTargets, coachSystemPrompt, type Locale } from './coachTargets'
+import { allowedTargets, coachSystemPrompt } from './coachTargets'
+import type { Locale } from '@/i18n/types'
 
 export type CoachSuggestion =
   | { type: 'navigate'; view: string }

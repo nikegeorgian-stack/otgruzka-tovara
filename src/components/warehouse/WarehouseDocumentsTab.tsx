@@ -3,10 +3,12 @@ import { AppDialog } from '@/components/ui/AppDialog'
 import { WarehouseDocumentEditor, type WarehouseDocumentEditorHandle } from '@/components/warehouse/WarehouseDocumentEditor'
 import { WarehouseInventoryRevisionModal } from '@/components/warehouse/WarehouseInventoryRevisionModal'
 import { Button } from '@/components/ui/Button'
+import { CreateLinkedTaskButton } from '@/components/tasks/CreateLinkedTaskButton'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
-import { useConfirm } from '@/context/ConfirmContext'
-import { requestModalClose } from '@/lib/ui/requestModalClose'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import { draftFromWarehouseReceipt } from '@/lib/tasks/linkRefs'
+import type { WorkTaskDraft } from '@/lib/tasks/types'
 import type { WarehousePickDetail } from '@/lib/ai/warehousePickEvent'
 import {
   buildIssuePrintModelFromDocument,
@@ -59,6 +61,9 @@ type Props = Pick<
   /** Открыть документ из общего журнала */
   pendingOpenDocumentId?: string | null
   onPendingOpenConsumed?: () => void
+  access?: AccessStore
+  currentUser?: AppUser | null
+  onCreateWorkTask?: (draft: WorkTaskDraft) => string
 }
 
 type DocModalState =
@@ -96,11 +101,14 @@ export function WarehouseDocumentsTab({
   productionRequests,
   keeperId,
   keeperName,
+  access,
+  currentUser,
+  onCreateWorkTask,
 }: Props) {
   const { t, tf } = useI18n()
-  const { confirmUnsaved } = useConfirm()
   const docEditorRef = useRef<WarehouseDocumentEditorHandle>(null)
   const [docModal, setDocModal] = useState<DocModalState | null>(null)
+  const [docDirty, setDocDirty] = useState(false)
   const [receiptPrintPreview, setReceiptPrintPreview] = useState<ReceiptPrintModel | null>(null)
   const [issuePrintPreview, setIssuePrintPreview] = useState<IssuePrintModel | null>(null)
   const [filterType, setFilterType] = useState<'all' | 'receipt' | 'issue' | 'inventory'>('all')
@@ -238,6 +246,7 @@ export function WarehouseDocumentsTab({
 
   function closeDocModal() {
     setDocModal(null)
+    setDocDirty(false)
   }
 
   function docTypeLabel(type: WarehouseDocument['type']) {
@@ -246,20 +255,14 @@ export function WarehouseDocumentsTab({
     return t('warehouse.issue')
   }
 
-  function requestCloseNewDoc() {
-    void requestModalClose(
-      { confirmUnsaved },
-      {
-        isDirty: () => docEditorRef.current?.isDirty() ?? false,
-        save: () => docEditorRef.current?.saveDraft() ?? false,
-        close: closeDocModal,
-      },
-    )
-  }
-
   function docModalTitle(): string {
     if (!docModal) return ''
-    if (docModal.mode === 'new') return t('warehouse.doc.new')
+    if (docModal.mode === 'new') {
+      const typ = docModal.aiPick?.type
+      if (typ === 'issue') return t('warehouse.issue')
+      if (typ === 'receipt') return t('warehouse.receipt')
+      return t('warehouse.doc.new')
+    }
     if (docModal.mode === 'view') {
       return tf('warehouse.doc.viewTitle', { number: docModal.doc.number || '—' })
     }
@@ -318,6 +321,8 @@ export function WarehouseDocumentsTab({
                 [
                   'purchase',
                   'production_issue',
+                  'production_receipt',
+                  'loading',
                   'return',
                   'writeoff',
                   'transfer',
@@ -375,11 +380,6 @@ export function WarehouseDocumentsTab({
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.date}</td>
                   <td className="px-3 py-2.5 font-medium font-mono text-xs">
                     {d.number}
-                    {d.invoiceKey && d.invoiceKey !== d.number && (
-                      <span className="block text-[10px] font-normal text-stone-400">
-                        RS: {d.invoiceKey}
-                      </span>
-                    )}
                   </td>
                   <td className="px-3 py-2.5 text-stone-600">{warehouseName}</td>
                   <td className="px-3 py-2.5">
@@ -465,6 +465,24 @@ export function WarehouseDocumentsTab({
                             {t('warehouse.doc.cancel')}
                           </button>
                         )}
+                      {d.type === 'receipt' &&
+                        (d.status ?? 'posted') === 'posted' &&
+                        access &&
+                        currentUser &&
+                        onCreateWorkTask ? (
+                          <CreateLinkedTaskButton
+                            draft={draftFromWarehouseReceipt({
+                              documentId: d.id,
+                              documentNumber: d.number,
+                              createdBy: currentUser.id,
+                              createdByName: currentUser.displayName,
+                            })}
+                            access={access}
+                            currentUser={currentUser}
+                            onCreate={onCreateWorkTask}
+                            labelKey="tasks.link.receiptDiscrepancy"
+                          />
+                        ) : null}
                     </div>
                   </td>
                 </tr>
@@ -512,15 +530,20 @@ export function WarehouseDocumentsTab({
       {docModal && (
         <AppDialog
           open
-          onClose={requestCloseNewDoc}
+          onClose={closeDocModal}
           title={docModalTitle()}
-          size="xl"
+          size="preview"
+          dirty={docModal.mode !== 'view' && docDirty}
+          onSaveDirty={async () => {
+            const ok = docEditorRef.current?.saveDraft()
+            if (ok === false) throw new Error('draft_save_failed')
+          }}
           onPrimaryAction={
             docModal.mode === 'view' ? undefined : () => docEditorRef.current?.saveDraft()
           }
           initialFocus="none"
         >
-          <div className="px-4 py-4">
+          <div className="px-4 py-3">
             <WarehouseDocumentEditor
               ref={docEditorRef}
               warehouse={warehouse}
@@ -529,12 +552,14 @@ export function WarehouseDocumentsTab({
               brigades={brigades}
               warehouseId={whId}
               variant="modal"
+              lockType={docModal.mode !== 'new' || Boolean(docModal.aiPick?.type)}
               printMeta={printMeta}
               initialType={docModal.mode === 'new' ? docModal.aiPick?.type : undefined}
               initialPickSearch={docModal.mode === 'new' ? docModal.aiPick?.query : undefined}
               initialPickOpen={docModal.mode === 'new' ? Boolean(docModal.aiPick?.query) : false}
               existingDocument={docModal.mode !== 'new' ? docModal.doc : null}
               readOnly={docModal.mode === 'view'}
+              onDirtyChange={setDocDirty}
               onPost={(doc) => {
                 const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
                 if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
@@ -580,7 +605,7 @@ export function WarehouseDocumentsTab({
               productionRequests={productionRequests}
               keeperId={keeperId}
               keeperName={keeperName}
-              onCancel={requestCloseNewDoc}
+              onCancel={closeDocModal}
             />
           </div>
         </AppDialog>

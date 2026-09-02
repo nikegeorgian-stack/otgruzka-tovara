@@ -65,6 +65,7 @@ export function EmployeeLedgerPanel({ store, actions, asOfDate }: Props) {
 
   function removeEntry(e: LedgerEntry) {
     if (!e.refId) return
+    if (e.kind === 'advance' && e.financeDocumentId) return
     if (e.kind === 'advance') actions.onRemoveAdvance(e.refId)
     else if (e.kind === 'bonus' || e.kind === 'penalty') actions.onRemoveAdjustment(e.refId)
     else if (e.kind === 'payout') actions.onRemovePayout(e.refId)
@@ -136,7 +137,7 @@ export function EmployeeLedgerPanel({ store, actions, asOfDate }: Props) {
                         {formatGel(e.amount)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {e.refId && (
+                        {e.refId && !(e.kind === 'advance' && e.financeDocumentId) && (
                           <button
                             type="button"
                             className="rounded-sm border border-grid px-2 py-1 text-xs text-red-700 hover:bg-red-50"

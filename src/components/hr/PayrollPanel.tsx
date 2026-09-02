@@ -1,10 +1,13 @@
 import { useMemo } from 'react'
+import { collatorLocale } from '@/i18n/localeFormat'
 import { BilingualText } from '@/components/employee/BilingualText'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
 import { useI18n } from '@/context/I18nContext'
 import { employeeNameLines } from '@/i18n'
 import { formatMonthTitle, parseMonthKey } from '@/lib/dates'
+import { isSickConfirmed, isVacationConfirmed } from '@/lib/finance/calc'
+import { resolvePayrollAccrualRules } from '@/lib/finance/payrollAccrualRules'
 import { runExport } from '@/lib/export'
 import { holidaysInMonth } from '@/lib/georgiaCalendar'
 import { calculateRowPay, formatGel } from '@/lib/payroll'
@@ -41,16 +44,20 @@ export function PayrollPanel({ store, month, onMonthChange }: Props) {
         emp,
         schedule: emp.schedule,
         brigade: emp.brigade,
-        pay: calculateRowPay(emp, sheet, row.id, year, mo),
+        pay: calculateRowPay(emp, sheet, row.id, year, mo, {
+          sickConfirmed: isSickConfirmed(store, emp.id, month),
+          vacationConfirmed: isVacationConfirmed(store, emp.id, month),
+          accrual: resolvePayrollAccrualRules(store.settings),
+        }),
       })
     }
     return list.sort((a, b) =>
       employeeNameLines(a.emp, locale).primary.localeCompare(
         employeeNameLines(b.emp, locale).primary,
-        locale === 'ka' ? 'ka' : 'ru',
+        collatorLocale(locale),
       ),
     )
-  }, [sheet, store.employees, year, mo, locale])
+  }, [sheet, store, store.employees, year, mo, locale, month])
 
   const total = rows.reduce((s, r) => s + r.pay.amount, 0)
 

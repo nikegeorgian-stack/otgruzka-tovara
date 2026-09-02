@@ -4,6 +4,8 @@
  * Грузинский IBAN: GE + 2 контрольные цифры + 2 буквы (код банка) + 16 цифр = 22 символа.
  */
 
+import type { Locale } from '@/i18n/types'
+
 export type GeorgianBank = {
   /** Двухбуквенный код банка внутри IBAN (позиции 5–6). */
   code: string
@@ -62,7 +64,7 @@ export function bankByCode(code: string | undefined): GeorgianBank | null {
   return BANK_BY_CODE.get(code) ?? null
 }
 
-export function bankName(code: string | undefined, locale: 'ru' | 'ka'): string {
+export function bankName(code: string | undefined, locale: Locale): string {
   const b = bankByCode(code)
   if (!b) return code ?? ''
   return locale === 'ka' ? b.nameKa : b.nameRu

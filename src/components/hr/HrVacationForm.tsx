@@ -2,14 +2,15 @@ import { useState } from 'react'
 import { useI18n } from '@/context/I18nContext'
 import { newId } from '@/lib/hr/files'
 import { hrAbsenceLabel } from '@/lib/hr/labels'
-import { segmentsForDateRange } from '@/lib/hr/timesheetRange'
-import type { DayCode, Employee, HrAbsence, HrAbsenceType } from '@/lib/types'
+import { applyStatusPeriod } from '@/lib/hr/statusPeriod'
+import type { DayCode, Employee, HrAbsenceType } from '@/lib/types'
 
 type Props = {
   employees: Employee[]
   existingMonthKeys: string[]
   onSaveEmployee: (e: Employee) => void
-  onSetEmployeeFactRange: (
+  /** @deprecated факт синхронизируется через upsertEmployee */
+  onSetEmployeeFactRange?: (
     month: string,
     employeeId: string,
     fromDay: number,
@@ -18,16 +19,7 @@ type Props = {
   ) => void
 }
 
-const TYPE_TO_CODE: Partial<Record<HrAbsenceType, DayCode>> = {
-  vacation: 'ОТ',
-  sick: 'Б',
-}
-
-export function HrVacationForm({
-  employees,
-  onSaveEmployee,
-  onSetEmployeeFactRange,
-}: Props) {
+export function HrVacationForm({ employees, onSaveEmployee }: Props) {
   const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
   const [employeeId, setEmployeeId] = useState('')
@@ -47,27 +39,26 @@ export function HrVacationForm({
       setError(t('hr.vacation.pickEmployee'))
       return
     }
-    const segments = segmentsForDateRange(from, to)
-    if (segments.length === 0) {
+    if (!from || !to || from > to) {
       setError(t('hr.vacation.badDates'))
       return
     }
     const emp = employees.find((e) => e.id === employeeId)
     if (!emp) return
 
-    // HR-запись об отсутствии.
-    const absence: HrAbsence = {
-      id: newId(),
-      type,
-      startDate: from,
-      endDate: to,
-    }
-    onSaveEmployee({ ...emp, hrAbsences: [...(emp.hrAbsences ?? []), absence] })
-
-    // Простановка факта в табеле (после upsert — переживёт ресинк через factOverrides).
-    const code = TYPE_TO_CODE[type] ?? 'ОТ'
-    for (const seg of segments) {
-      onSetEmployeeFactRange(seg.monthKey, employeeId, seg.fromDay, seg.toDay, code)
+    if (type === 'sick' || type === 'vacation') {
+      onSaveEmployee(applyStatusPeriod(emp, type, from, to, 'vacation_form'))
+    } else {
+      const absence = {
+        id: newId(),
+        type,
+        startDate: from,
+        endDate: to,
+      }
+      onSaveEmployee({
+        ...emp,
+        hrAbsences: [...(emp.hrAbsences ?? []), absence],
+      })
     }
 
     setNotice(t('hr.vacation.done'))

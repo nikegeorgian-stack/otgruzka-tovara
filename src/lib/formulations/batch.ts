@@ -1,3 +1,4 @@
+import type { Locale } from '@/i18n/types'
 import { appendWarehouseAudit } from '@/lib/warehouse/audit'
 import { postWarehouseDocument } from '@/lib/warehouse/documents'
 import { computeAllBalances, validateIssueLines } from '@/lib/warehouse/stock'
@@ -171,7 +172,7 @@ export function createPendingBatchMix(
   formulations: FormulationStore,
   warehouse: WarehouseStore,
   input: PostBatchMixInput,
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
   options?: PostBatchMixOptions,
 ): { formulations: FormulationStore; warehouse: WarehouseStore; result: PostBatchMixResult } {
   const allowNegativeStock = options?.allowNegativeStock === true

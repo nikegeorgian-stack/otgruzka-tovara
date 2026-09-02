@@ -1,4 +1,7 @@
-export type Locale = 'ru' | 'ka'
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
+export type { Locale }
 
 export type CoachTarget = {
   /** Ключ цели = значение data-coach в DOM. */
@@ -130,18 +133,34 @@ export const COACH_TARGETS: CoachTarget[] = [
     aboutRu: 'настройки, пользователи и роли, доступы, резервные копии',
     keywords: ['настройк', 'пользовател', 'роль', 'доступ', 'бэкап', 'резерв коп'],
   },
+  {
+    key: 'nav:office',
+    view: 'office',
+    labelRu: 'Офис',
+    labelKa: 'ოფისი',
+    aboutRu: 'списки сотрудников: фильтр, колонки, печать и Excel без зарплаты',
+    keywords: ['офис', 'список сотрудник', 'печать сотрудник', 'excel сотрудник'],
+  },
+  {
+    key: 'nav:meals',
+    view: 'meals',
+    labelRu: 'Обеды',
+    labelKa: 'სადილები',
+    aboutRu: 'заказ обеда на завтра, кухня повара, принятие дня',
+    keywords: ['обед', 'еда', 'заказ обеда', 'повар', 'кухн', 'ланч', 'питание'],
+  },
 ]
 
 export function targetLabel(key: string, locale: Locale): string | null {
   const target = COACH_TARGETS.find((t) => t.key === key)
   if (!target) return null
-  return locale === 'ka' ? target.labelKa : target.labelRu
+  return labelRuKa(locale, target.labelRu, target.labelKa)
 }
 
 export function viewLabel(view: string, locale: Locale): string | null {
   const target = COACH_TARGETS.find((t) => t.view === view)
   if (!target) return null
-  return locale === 'ka' ? target.labelKa : target.labelRu
+  return labelRuKa(locale, target.labelRu, target.labelKa)
 }
 
 /** Простое распознавание темы вопроса по ключевым словам (для аналитики). */

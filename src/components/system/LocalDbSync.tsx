@@ -205,7 +205,7 @@ export function LocalDbSync({ store, replaceStore, onSaveError }: Props) {
 
   if (!ready) {
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-100">
+      <div className="fixed inset-0 z-[430] flex items-center justify-center bg-stone-100">
         <p className="text-sm text-stone-600">Загрузка локальной базы SQLite…</p>
       </div>
     )
@@ -227,7 +227,7 @@ export function LocalDbSync({ store, replaceStore, onSaveError }: Props) {
       )}
       {!error && dbPath && (
         <div
-          className={`fixed bottom-3 left-3 z-[50] rounded-sm border px-2.5 py-1 text-[10px] shadow-sm print:hidden ${
+          className={`fixed bottom-3 left-3 z-[50] rounded-sm border px-2.5 py-1 text-[10px] shadow-sm print:hidden lg:left-[calc(var(--app-sidebar-w,3.5rem)+0.75rem)] ${
             isDirty
               ? 'border-amber-200 bg-amber-50/95 text-amber-900'
               : 'border-emerald-200 bg-emerald-50/95 text-emerald-900'

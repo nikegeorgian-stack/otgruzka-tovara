@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { FormulationRecipeEditor } from '@/components/directories/FormulationRecipeEditor'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { ProductColorBadge } from '@/components/ui/ProductColorBadge'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { consumeDirectoryOpenIntent } from '@/lib/directories/openIntent'
 import {
   extractSolidsPct,
   maxBatchesFromStock,
@@ -90,6 +92,12 @@ export function FormulationsDirectoryPanel({
     setSelected({ ...r, components: r.components.map((c) => ({ ...c })) })
   }
 
+  useEffect(() => {
+    const intent = consumeDirectoryOpenIntent('formulations')
+    if (intent?.create) openRecipe(emptyFormulationRecipe(store))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function saveRecipe() {
     if (!selected) return
     if (!selected.name.trim()) {
@@ -147,7 +155,7 @@ export function FormulationsDirectoryPanel({
             <option value="">{t('formulation.allCategories')}</option>
             {FORMULATION_CATEGORIES.map((c) => (
               <option key={c.id} value={c.id}>
-                {locale === 'ka' ? c.labelKa : c.labelRu}
+                {labelRuKa(locale, c.labelRu, c.labelKa)}
               </option>
             ))}
           </select>

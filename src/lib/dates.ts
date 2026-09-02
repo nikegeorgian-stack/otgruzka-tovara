@@ -45,10 +45,41 @@ const MONTH_NAMES_KA = [
   'დეკემბერი',
 ]
 
-export function formatMonthTitle(key: string, locale: 'ru' | 'ka' = 'ru'): string {
+const MONTH_NAMES_EN = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+function monthNames(locale: 'ru' | 'ka' | 'en') {
+  if (locale === 'ka') return MONTH_NAMES_KA
+  if (locale === 'en') return MONTH_NAMES_EN
+  return MONTH_NAMES
+}
+
+export function formatMonthTitle(key: string, locale: 'ru' | 'ka' | 'en' = 'ru'): string {
   const { year, month } = parseMonthKey(key)
-  const names = locale === 'ka' ? MONTH_NAMES_KA : MONTH_NAMES
+  const names = monthNames(locale)
   return `${names[month - 1]} ${year}`
+}
+
+/** «Август 2026» — для заголовка «График работ на …». */
+export function formatMonthNameCapitalized(key: string, locale: 'ru' | 'ka' | 'en' = 'ru'): string {
+  const { year, month } = parseMonthKey(key)
+  const names = monthNames(locale)
+  const raw = names[month - 1] ?? ''
+  if (locale === 'en') return `${raw} ${year}`
+  const cap = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : raw
+  return `${cap} ${year}`
 }
 
 export function shiftMonth(key: string, delta: number): string {
@@ -64,14 +95,16 @@ export function isWeekend(year: number, month: number, day: number): boolean {
 
 const DOW_SHORT_RU = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
 const DOW_SHORT_KA = ['კვ', 'ორშ', 'სამ', 'ოთხ', 'ხუთ', 'პარ', 'შაბ']
+const DOW_SHORT_EN = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 export function weekdayShort(
   year: number,
   month: number,
   day: number,
-  locale: 'ru' | 'ka' = 'ru',
+  locale: 'ru' | 'ka' | 'en' = 'ru',
 ): string {
-  const names = locale === 'ka' ? DOW_SHORT_KA : DOW_SHORT_RU
+  const names =
+    locale === 'ka' ? DOW_SHORT_KA : locale === 'en' ? DOW_SHORT_EN : DOW_SHORT_RU
   return names[new Date(year, month - 1, day).getDay()]
 }
 
@@ -103,9 +136,10 @@ export function parseIsoDate(iso: string): { year: number; month: number; day: n
   return { year: y, month: m, day: d }
 }
 
-export function formatShortDate(iso: string, locale: 'ru' | 'ka' = 'ru'): string {
+export function formatShortDate(iso: string, locale: 'ru' | 'ka' | 'en' = 'ru'): string {
   const { year, month, day } = parseIsoDate(iso)
-  return new Date(year, month - 1, day).toLocaleDateString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+  const tag = locale === 'ka' ? 'ka-GE' : locale === 'en' ? 'en-US' : 'ru-RU'
+  return new Date(year, month - 1, day).toLocaleDateString(tag, {
     day: '2-digit',
     month: '2-digit',
   })

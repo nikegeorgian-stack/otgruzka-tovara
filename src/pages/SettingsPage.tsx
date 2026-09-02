@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { AccessAdminPanel } from '@/components/auth/AccessAdminPanel'
+import { WorkshopMasterCoveragePanel } from '@/components/access/WorkshopMasterCoveragePanel'
 import { CoachSettingsPanel } from '@/components/ai/CoachSettingsPanel'
+import { RsGeSettingsPanel } from '@/components/settings/RsGeSettingsPanel'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { useI18n } from '@/context/I18nContext'
+import { LOCALES } from '@/i18n'
 import { useConfirm } from '@/context/ConfirmContext'
 import { listDailyBackups, restoreDailyBackup, saveBackupToFolder } from '@/lib/backup'
 import { formatMonthTitle, monthKey, shiftMonth } from '@/lib/dates'
@@ -15,7 +18,9 @@ import {
   monthClosureInfo,
 } from '@/lib/monthManage'
 import { exportToJson } from '@/lib/storage'
-import { canManageAccess } from '@/lib/access/permissions'
+import { CloudStoreSizePanel } from '@/components/web/CloudStoreSizePanel'
+import { AgentChainContextPanel } from '@/components/settings/AgentChainContextPanel'
+import { canManageAccess, canManageMasterCoverage, isSysAdmin } from '@/lib/access/permissions'
 import type { AccessRoleId } from '@/lib/access/types'
 import type { AppUser } from '@/lib/access/types'
 import type { AppStore, PrintSignatures, ViewId } from '@/lib/types'
@@ -26,10 +31,38 @@ type Props = {
   store: AppStore
   currentUser: AppUser | null
   onUpsertAppUser: (input: UpsertAppUserInput) => Promise<{ allowlistSyncFailed?: boolean }>
-  onRemoveAppUser: (id: string) => void
+  onRemoveWebUser: (target: { id: string; login: string; inStore: boolean }) => Promise<void>
   onSetRoleViews: (roleId: AccessRoleId, views: ViewId[]) => void
+  onSetRoleDirectorySections: (
+    roleId: AccessRoleId,
+    sections: import('@/lib/directories/types').DirectorySection[] | null,
+  ) => void
   onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleAllowDocumentCancel: (roleId: AccessRoleId, allowed: boolean) => void
+  onSetRoleTimesheetAccess: (roleId: AccessRoleId, level: 'none' | 'view' | 'edit') => void
+  onSetRoleTaskAccess: (
+    roleId: AccessRoleId,
+    level: import('@/lib/tasks/types').TaskAccessLevel,
+  ) => void
+  onUpsertUserGroup: (input: {
+    id?: string
+    name: string
+    note?: string
+    userIds?: string[]
+  }) => void
+  onRemoveUserGroup: (groupId: string) => void
+  onUpsertWorkshopMasterCoverage?: (input: {
+    id?: string
+    coverUserId: string
+    absentUserId: string
+    brigades?: string[]
+    fromDate: string
+    toDate: string
+    note?: string
+    post?: boolean
+  }) => void
+  onPostWorkshopMasterCoverage?: (coverageId: string) => void
+  onEndWorkshopMasterCoverage?: (coverageId: string) => void
   onSetWarehouseMonthClosed: (month: string, closed: boolean) => void
   onAddMonth: (month: string) => void
   onRemoveMonth: (month: string) => void
@@ -38,21 +71,36 @@ type Props = {
   onSyncMonthRosterFromHr?: (month: string) => void
   canReopenMonth?: boolean
   onUpdateSettings: (patch: Partial<AppStore['settings']>) => void
+  onSetSuggestionStatus?: (
+    id: string,
+    status: import('@/lib/aiChat/types').FeedbackStatus,
+    byName?: string,
+  ) => void
   onRestoreTrashEmployee: (deletedAt: string) => void
   onRestoreTrashMonth: (deletedAt: string) => void
   onPurgeTrashEmployee: (deletedAt: string) => void
   onPurgeTrashMonth: (deletedAt: string) => void
-  onReplaceStore: (store: AppStore) => void
+  onReplaceStore: (
+    store: AppStore,
+  ) => void | { ok: true } | { ok: false; message?: string }
 }
 
 export function SettingsPage({
   store,
   currentUser,
   onUpsertAppUser,
-  onRemoveAppUser,
+  onRemoveWebUser,
   onSetRoleViews,
+  onSetRoleDirectorySections,
   onSetRoleAllowNegativeStock,
   onSetRoleAllowDocumentCancel,
+  onSetRoleTimesheetAccess,
+  onSetRoleTaskAccess,
+  onUpsertUserGroup,
+  onRemoveUserGroup,
+  onUpsertWorkshopMasterCoverage,
+  onPostWorkshopMasterCoverage,
+  onEndWorkshopMasterCoverage,
   onSetWarehouseMonthClosed,
   onAddMonth,
   onRemoveMonth,
@@ -61,6 +109,7 @@ export function SettingsPage({
   onSyncMonthRosterFromHr,
   canReopenMonth = false,
   onUpdateSettings,
+  onSetSuggestionStatus,
   onRestoreTrashEmployee,
   onRestoreTrashMonth,
   onPurgeTrashEmployee,
@@ -69,6 +118,7 @@ export function SettingsPage({
 }: Props) {
   const { t, tf, locale, setLocale } = useI18n()
   const { confirm } = useConfirm()
+  const isWeb = import.meta.env.VITE_FST_WEB === 'true'
   const auditCount = store.auditLog.length
   const auditFillPct = Math.round((auditCount / MAX_AUDIT_ENTRIES) * 100)
   const auditNearCap = auditCount >= MAX_AUDIT_ENTRIES * 0.9
@@ -178,7 +228,10 @@ export function SettingsPage({
 
   return (
     <PageLayout className="gap-8">
-      <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
+      <PageHeader
+        title={isWeb ? t('web.admin.title') : t('settings.title')}
+        subtitle={isWeb ? t('web.admin.pageSubtitle') : t('settings.subtitle')}
+      />
 
       {notice && (
         <FormNotice
@@ -189,25 +242,62 @@ export function SettingsPage({
       )}
 
       {currentUser && canManageAccess(currentUser) && (
+        <div data-coach="settings:access">
         <AccessAdminPanel
           access={store.access}
           employees={store.employees}
           brigades={store.brigades}
-          webMode={import.meta.env.VITE_FST_WEB === 'true'}
+          webMode={isWeb}
           currentUser={currentUser}
           onUpsertUser={onUpsertAppUser}
-          onRemoveUser={onRemoveAppUser}
+          onRemoveUser={onRemoveWebUser}
           onSetRoleViews={onSetRoleViews}
+          onSetRoleDirectorySections={onSetRoleDirectorySections}
           onSetRoleAllowNegativeStock={onSetRoleAllowNegativeStock}
           onSetRoleAllowDocumentCancel={onSetRoleAllowDocumentCancel}
+          onSetRoleTimesheetAccess={onSetRoleTimesheetAccess}
+          onSetRoleTaskAccess={onSetRoleTaskAccess}
+          onUpsertUserGroup={onUpsertUserGroup}
+          onRemoveUserGroup={onRemoveUserGroup}
+        />
+        </div>
+      )}
+
+      {currentUser &&
+        canManageMasterCoverage(currentUser) &&
+        onUpsertWorkshopMasterCoverage &&
+        onPostWorkshopMasterCoverage &&
+        onEndWorkshopMasterCoverage && (
+          <WorkshopMasterCoveragePanel
+            store={store}
+            onUpsert={onUpsertWorkshopMasterCoverage}
+            onPost={onPostWorkshopMasterCoverage}
+            onEnd={onEndWorkshopMasterCoverage}
+          />
+        )}
+
+      {isWeb && currentUser && canManageAccess(currentUser) && (
+        <CloudStoreSizePanel store={store} />
+      )}
+
+      {currentUser && canManageAccess(currentUser) && <AgentChainContextPanel />}
+
+      {currentUser && canManageAccess(currentUser) && <RsGeSettingsPanel />}
+
+      {!isWeb && currentUser && canManageAccess(currentUser) && (
+        <CoachSettingsPanel
+          store={store}
+          onUpdateSettings={onUpdateSettings}
+          onSetSuggestionStatus={onSetSuggestionStatus}
+          adminName={currentUser?.displayName}
+          currentUserId={currentUser?.id}
+          currentUserName={currentUser?.displayName}
+          currentUserLogin={currentUser?.login}
+          isFeedbackAdmin
         />
       )}
 
-      {currentUser && canManageAccess(currentUser) && (
-        <CoachSettingsPanel store={store} onUpdateSettings={onUpdateSettings} />
-      )}
-
-      {currentUser && canManageAccess(currentUser) && (
+      {!isWeb && currentUser && canManageAccess(currentUser) && (
         <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
           <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
             {t('settings.warehousePeriods')}
@@ -268,24 +358,26 @@ export function SettingsPage({
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.language')}
         </h3>
-        <div className="mt-3 flex gap-2">
-          {(['ru', 'ka'] as const).map((l) => (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {LOCALES.map(({ id }) => (
             <button
-              key={l}
+              key={id}
               type="button"
               className={`rounded-sm border px-4 py-2 text-sm font-medium ${
-                locale === l
+                locale === id
                   ? 'border-accent bg-accent text-white'
                   : 'border-grid bg-white hover:bg-paper-dark'
               }`}
-              onClick={() => setLocale(l)}
+              onClick={() => setLocale(id)}
             >
-              {t(l === 'ru' ? 'locale.ru' : 'locale.ka')}
+              {t(`locale.${id}`)}
             </button>
           ))}
         </div>
       </section>
 
+      {!isWeb && (
+        <>
       <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
           {t('settings.brigades')}
@@ -329,7 +421,13 @@ export function SettingsPage({
                   onClick={async () => {
                     const restored = restoreDailyBackup(b.date)
                     if (restored && (await confirm({ message: tf('settings.restoreConfirm', { date: b.date }) }))) {
-                      onReplaceStore(restored)
+                      const result = onReplaceStore(restored)
+                      if (result && typeof result === 'object' && 'ok' in result && !result.ok) {
+                        setNotice({
+                          type: 'error',
+                          message: result.message ?? t('bulk.blockedPending'),
+                        })
+                      }
                     }
                   }}
                 >
@@ -341,11 +439,17 @@ export function SettingsPage({
         )}
       </section>
 
-      {(store.trash.employees.length > 0 || store.trash.months.length > 0) && (
-        <section className="rounded-sm border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
+      {isSysAdmin(currentUser) && (
+        <section
+          className="rounded-sm border border-amber-200 bg-amber-50/40 p-5 shadow-sm"
+          data-coach="settings:trash"
+        >
           <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
             {t('settings.trash')}
           </h3>
+          {store.trash.employees.length === 0 && store.trash.months.length === 0 ? (
+            <p className="mt-2 text-sm text-stone-500">{t('settings.trashEmpty')}</p>
+          ) : null}
           {store.trash.employees.map((item) => (
             <div key={item.deletedAt} className="mt-2 flex flex-wrap items-center gap-2 text-sm">
               <span>{item.employee.fullName}</span>
@@ -448,6 +552,37 @@ export function SettingsPage({
           )}
         </section>
       )}
+
+      <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+          {t('settings.employerPrint')}
+        </h3>
+        <p className="mt-1 text-sm text-stone-500">{t('settings.employerPrintHint')}</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ['orgRu', 'settings.employerOrgRu'],
+              ['orgKa', 'settings.employerOrgKa'],
+              ['idCode', 'settings.employerIdCode'],
+              ['unitRu', 'settings.employerUnitRu'],
+              ['unitKa', 'settings.employerUnitKa'],
+            ] as const
+          ).map(([key, labelKey]) => (
+            <label key={key} className="text-xs font-medium text-stone-500">
+              {t(labelKey)}
+              <input
+                className="mt-1 w-full rounded-sm border border-grid px-2 py-1.5 text-sm"
+                value={store.settings.employer?.[key] ?? ''}
+                onChange={(e) =>
+                  onUpdateSettings({
+                    employer: { ...store.settings.employer, [key]: e.target.value },
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </section>
 
       <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
@@ -622,6 +757,8 @@ export function SettingsPage({
           </button>
         </form>
       </section>
+        </>
+      )}
     </PageLayout>
   )
 }

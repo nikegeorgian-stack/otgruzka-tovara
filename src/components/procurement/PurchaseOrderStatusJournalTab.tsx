@@ -1,4 +1,5 @@
 import { OrderStatusBadge } from '@/components/procurement/OrderStatusBadge'
+import { intlLocale } from '@/i18n/localeFormat'
 import { useI18n } from '@/context/I18nContext'
 import type { PurchaseOrderStatusChange } from '@/lib/procurement/types'
 
@@ -54,7 +55,7 @@ export function PurchaseOrderStatusJournalTab({
               {sorted.map((entry) => (
                 <tr key={entry.id} className="border-t border-grid/60">
                   <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-stone-600">
-                    {new Date(entry.at).toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+                    {new Date(entry.at).toLocaleString(intlLocale(locale), {
                       day: '2-digit',
                       month: '2-digit',
                       year: '2-digit',

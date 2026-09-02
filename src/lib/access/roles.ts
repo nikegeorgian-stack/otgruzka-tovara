@@ -40,10 +40,10 @@ export const ACCESS_ROLES: RoleDefinition[] = [
   },
   {
     id: 'operations_director',
-    labelRu: 'Операционный директор',
-    labelKa: 'ოპერაციული დირექტორი',
-    descriptionRu: 'Сводка, производство, план, закупки — без администрирования',
-    descriptionKa: 'შეჯამება, წარმოება, გეგმა, შესყიდვები',
+    labelRu: 'Генеральный директор',
+    labelKa: 'გენერალური დირექტორი',
+    descriptionRu: 'Сводка завода, план, заказы и риски — без администрирования',
+    descriptionKa: 'ქარხნის შეჯამება, გეგმა, შეკვეთები და რისკები',
   },
   {
     id: 'technologist',
@@ -51,6 +51,13 @@ export const ACCESS_ROLES: RoleDefinition[] = [
     labelKa: 'ტექნოლოგი',
     descriptionRu: 'Рецептуры пропитки, замес партий, этикетки на куб',
     descriptionKa: 'რეცეპტურა და ნაზავი',
+  },
+  {
+    id: 'otc',
+    labelRu: 'ОТК',
+    labelKa: 'ხარისხის კონტროლი',
+    descriptionRu: 'Лабораторные испытания, сортировка качества, дефекты',
+    descriptionKa: 'ლაბორატორია, სორტირება, დეფექტები',
   },
   {
     id: 'mixer',
@@ -87,6 +94,55 @@ export const ACCESS_ROLES: RoleDefinition[] = [
     descriptionRu: 'Зарплата, ставки, сводка по табелю',
     descriptionKa: 'ხელფასი, განაკვეთები, ცხრილი',
   },
+  {
+    id: 'employee',
+    labelRu: 'Сотрудник',
+    labelKa: 'თანამშრომელი',
+    descriptionRu: 'Личный кабинет и заказ обеда себе',
+    descriptionKa: 'პირადი კაბინეტი და საკუთარი სადილის შეკვეთა',
+  },
+  {
+    id: 'it_specialist',
+    labelRu: 'IT-специалист',
+    labelKa: 'IT-სპეციალისტი',
+    descriptionRu: 'IT-офис и журналы без полного администрирования',
+    descriptionKa: 'IT-ოფისი და ჟურნალები სრული ადმინის გარეშე',
+  },
+  {
+    id: 'sales_dispatcher',
+    labelRu: 'Диспетчер продаж / отгрузки',
+    labelKa: 'გაყიდვების / ჩატვირთვის დისპეტჩერი',
+    descriptionRu: 'Заказы клиентов, склад погрузки и сводка — без HR и закупок',
+    descriptionKa: 'კლიენტის შეკვეთები, ჩატვირთვა და შეჯამება — HR და შესყიდვების გარეშე',
+  },
+  {
+    id: 'office_manager',
+    labelRu: 'Офис-менеджер',
+    labelKa: 'ოფის-მენეჯერი',
+    descriptionRu: 'Списки сотрудников: фильтр, печать и Excel — без зарплаты и полного HR',
+    descriptionKa: 'თანამშრომლების სიები: ფილტრი, ბეჭდვა და Excel — ხელფასისა და სრული HR-ის გარეშე',
+  },
+  {
+    id: 'timeclock',
+    labelRu: 'Терминал явки',
+    labelKa: 'დასწრების ტერმინალი',
+    descriptionRu: 'Только киоск: фиксация прихода и ухода сотрудников',
+    descriptionKa: 'მხოლოდ კიოსკი: მოსვლისა და წასვლის ფიქსაცია',
+  },
+  {
+    id: 'cook',
+    labelRu: 'Повар',
+    labelKa: 'მზარეული',
+    descriptionRu: 'Обеды: заказы на день, принятие и отчёты — без зарплаты и кадров',
+    descriptionKa: 'სადილები: დღის შეკვეთები და მიღება — ხელფასისა და კადრების გარეშე',
+  },
+  {
+    id: 'secretary',
+    labelRu: 'Секретарь',
+    labelKa: 'მდივანი',
+    descriptionRu: 'Протоколы совещаний, поручения, ознакомление и бланки — без финансов и склада',
+    descriptionKa: 'სხდომის ოქმები, დავალებები და გაცნობა — ფინანსებისა და საწყობის გარეშე',
+  },
 ]
 
 export const DEFAULT_ROLE_VIEWS: Record<AccessRoleId, ViewId[]> = {
@@ -101,12 +157,25 @@ export const DEFAULT_ROLE_VIEWS: Record<AccessRoleId, ViewId[]> = {
     'finance',
     'hr_inspector',
     'directories',
+    'engineer_log',
+    'tasks',
     'journals',
+    'mixer',
+    'director',
+    'technologist',
+    'otc',
+    'it',
+    'office',
+    'meals',
+    'protocols',
+    'org_tree',
     'settings',
+    'my',
+    'timeclock',
   ],
-  warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals'],
-  hr: ['hr', 'directories', 'month', 'summary', 'journals'],
-  hr_inspector: ['hr_inspector', 'summary', 'journals'],
+  warehouse_keeper: ['warehouse', 'procurement', 'directories', 'journals', 'meals', 'tasks'],
+  hr: ['hr', 'directories', 'month', 'summary', 'journals', 'meals', 'tasks', 'org_tree'],
+  hr_inspector: ['hr_inspector', 'summary', 'journals', 'meals', 'tasks'],
   operations_director: [
     'director',
     'summary',
@@ -115,34 +184,66 @@ export const DEFAULT_ROLE_VIEWS: Record<AccessRoleId, ViewId[]> = {
     'planner',
     'procurement',
     'warehouse',
+    'technologist',
+    'otc',
     'hr',
+    'directories',
     'journals',
+    'meals',
+    'tasks',
+    'protocols',
+    'org_tree',
   ],
-  workshop_master: ['month', 'production', 'hr', 'journals'],
-  procurement_manager: ['procurement', 'warehouse', 'directories', 'journals'],
+  workshop_master: ['month', 'production', 'hr', 'directories', 'otc', 'journals', 'meals', 'tasks'],
+  procurement_manager: ['procurement', 'warehouse', 'directories', 'journals', 'meals', 'tasks'],
   chief_engineer: [
+    'engineer_log',
     'production',
     'planner',
     'directories',
     'warehouse',
     'summary',
     'technologist',
+    'otc',
     'mixer',
     'journals',
+    'meals',
+    'tasks',
   ],
-  technologist: ['technologist', 'mixer', 'journals'],
-  mixer: ['mixer', 'journals'],
-  finance: ['finance', 'month', 'summary', 'journals'],
+  technologist: [
+    'technologist',
+    'otc',
+    'mixer',
+    'warehouse',
+    'directories',
+    'journals',
+    'meals',
+    'tasks',
+  ],
+  otc: ['otc', 'directories', 'journals', 'meals', 'tasks'],
+  mixer: ['mixer', 'journals', 'meals', 'tasks'],
+  finance: ['finance', 'month', 'summary', 'directories', 'journals', 'meals', 'tasks'],
+  employee: ['my', 'meals', 'tasks', 'protocols'],
+  timeclock: ['timeclock'],
+  it_specialist: ['it', 'journals', 'meals', 'tasks'],
+  sales_dispatcher: ['director', 'warehouse', 'summary', 'directories', 'journals', 'meals', 'tasks'],
+  office_manager: ['office', 'my', 'meals', 'tasks', 'protocols'],
+  cook: ['meals', 'my', 'tasks'],
+  secretary: ['protocols', 'org_tree', 'my', 'journals', 'directories', 'tasks'],
 }
 
-export function roleLabel(roleId: AccessRoleId, locale: 'ru' | 'ka'): string {
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
+export function roleLabel(roleId: AccessRoleId, locale: Locale): string {
   const row = ACCESS_ROLES.find((r) => r.id === roleId)
   if (!row) return roleId
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }
 
-export function roleDescription(roleId: AccessRoleId, locale: 'ru' | 'ka'): string {
+export function roleDescription(roleId: AccessRoleId, locale: Locale): string {
   const row = ACCESS_ROLES.find((r) => r.id === roleId)
   if (!row) return ''
-  return locale === 'ka' ? row.descriptionKa : row.descriptionRu
+  if (locale === 'ka') return row.descriptionKa
+  return row.descriptionRu
 }

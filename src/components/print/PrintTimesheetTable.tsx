@@ -1,6 +1,5 @@
-import { Fragment, useMemo } from 'react'
+import { useMemo } from 'react'
 import { getBrigades } from '@/lib/brigades'
-import { CODE_DEFS } from '@/lib/codes'
 import {
   dayDateKey,
   daysInMonth,
@@ -16,11 +15,16 @@ import {
 } from '@/lib/monthViewOptions'
 import { getSubstitution, substitutionLabel } from '@/lib/substitutions'
 import { getFactMark, rowStats } from '@/lib/stats'
+import { scheduleDisplayLabel } from '@/lib/schedules'
 import type { AppStore, DayCode, Locale, MonthSheet } from '@/lib/types'
 
 const CODE_PRINT: Record<string, string> = {
+  '4': 'print-code--8',
+  '6': 'print-code--8',
   '8': 'print-code--8',
+  '10': 'print-code--11',
   '11': 'print-code--11',
+  '12': 'print-code--11',
   'Н': 'print-code--n',
   '22': 'print-code--22',
   'В': 'print-code--v',
@@ -139,95 +143,81 @@ export function PrintTimesheetTable({
           )}
         </tr>
       </thead>
-      <tbody>
-        {layoutBlocks.map((block) => {
-          if (block.kind === 'unit') {
-            return (
-              <tr key={`unit-${block.unitId}`} className="print-brigade-row print-unit-row">
+      {layoutBlocks.map((block) => {
+        if (block.kind === 'unit') {
+          return (
+            <tbody key={`unit-${block.unitId}`} className="print-unit-block">
+              <tr className="print-brigade-row print-unit-row">
                 <td colSpan={totalCols}>{block.unitLabel}</td>
               </tr>
-            )
-          }
-
-          const brigade = block.brigade
-          const visibleRows = block.rows.filter((r) => r.employeeId)
-          if (!visibleRows.length) return null
-
-          return (
-            <Fragment key={`${block.kind}-${block.unitId ?? 'x'}-${brigade}`}>
-              <tr className="print-brigade-row">
-                <td colSpan={totalCols}>{brigade}</td>
-              </tr>
-              {visibleRows.map((row, idx) => {
-                const emp = store.employees.find((e) => e.id === row.employeeId)!
-                const rs = rowStats(sheet, row.id, days, year, month)
-                return (
-                  <tr key={row.id}>
-                    <td className="print-td print-td-center">{idx + 1}</td>
-                    <td className="print-td print-td-name">{employeeName(emp, printLocale)}</td>
-                    <td className="print-td print-td-center">{emp.tabNumber}</td>
-                    <td className="print-td print-td-center">
-                      {emp.schedule === '5/2 8ч'
-                        ? '5/2'
-                        : emp.schedule === '1/1 11ч'
-                          ? '1/1'
-                          : '2/2'}
-                    </td>
-                    {dayNums.map((d) => {
-                      const dateKey = dayDateKey(year, month, d)
-                      const planCode = sheet.plan[row.id]?.[dateKey] ?? ''
-                      const factCode = getFactMark(sheet, row.id, dateKey)
-                      const code = mode === 'plan' ? planCode : factCode
-                      const mismatch = planCode !== factCode
-                      const subTitle =
-                        mode === 'fact'
-                          ? substitutionLabel(sheet, store.employees, row.id, dateKey)
-                          : undefined
-                      return (
-                        <td
-                          key={d}
-                          className={`print-td print-td-day ${mismatch && mode === 'fact' ? 'print-mismatch' : ''}`}
-                          title={subTitle}
-                        >
-                          <PrintCode code={code} />
-                          {getSubstitution(sheet, row.id, dateKey) && mode === 'fact' && (
-                            <span className="print-sub-mark">З</span>
-                          )}
-                        </td>
-                      )
-                    })}
-                    {showTotals && (
-                      <>
-                        <td className="print-td print-td-center print-td-bold">
-                          {rs.planHours}
-                        </td>
-                        {mode === 'fact' && (
-                          <td className="print-td print-td-center print-td-bold">
-                            {rs.factHours}
-                          </td>
-                        )}
-                      </>
-                    )}
-                  </tr>
-                )
-              })}
-            </Fragment>
+            </tbody>
           )
-        })}
-      </tbody>
-    </table>
-  )
-}
+        }
 
-export function PrintCodeLegend({ locale }: { locale: Locale }) {
-  return (
-    <div className="print-legend">
-      <span>{t(locale, 'print.legend')}:</span>
-      {CODE_DEFS.map((c) => (
-        <span key={c.code}>
-          <strong>{c.code}</strong>={t(locale, `code.label.${c.code}`)}
-        </span>
-      ))}
-    </div>
+        const brigade = block.brigade
+        const visibleRows = block.rows.filter((r) => r.employeeId)
+        if (!visibleRows.length) return null
+
+        return (
+          <tbody
+            key={`${block.kind}-${block.unitId ?? 'x'}-${brigade}`}
+            className="print-brigade-block"
+          >
+            <tr className="print-brigade-row">
+              <td colSpan={totalCols}>{brigade}</td>
+            </tr>
+            {visibleRows.map((row, idx) => {
+              const emp = store.employees.find((e) => e.id === row.employeeId)!
+              const rs = rowStats(sheet, row.id, days, year, month, emp)
+              return (
+                <tr key={row.id}>
+                  <td className="print-td print-td-center">{idx + 1}</td>
+                  <td className="print-td print-td-name">{employeeName(emp, printLocale)}</td>
+                  <td className="print-td print-td-center">{emp.tabNumber}</td>
+                  <td className="print-td print-td-center">
+                    {scheduleDisplayLabel(emp)}
+                  </td>
+                  {dayNums.map((d) => {
+                    const dateKey = dayDateKey(year, month, d)
+                    const planCode = sheet.plan[row.id]?.[dateKey] ?? ''
+                    const factCode = getFactMark(sheet, row.id, dateKey)
+                    const code = mode === 'plan' ? planCode : factCode
+                    const mismatch = planCode !== factCode
+                    const subTitle =
+                      mode === 'fact'
+                        ? substitutionLabel(sheet, store.employees, row.id, dateKey)
+                        : undefined
+                    return (
+                      <td
+                        key={d}
+                        className={`print-td print-td-day ${isWeekend(year, month, d) ? 'print-weekend' : ''} ${mismatch && mode === 'fact' ? 'print-mismatch' : ''}`}
+                        title={subTitle}
+                      >
+                        <PrintCode code={code} />
+                        {getSubstitution(sheet, row.id, dateKey) && mode === 'fact' && (
+                          <span className="print-sub-mark">З</span>
+                        )}
+                      </td>
+                    )
+                  })}
+                  {showTotals && (
+                    <>
+                      <td className="print-td print-td-center print-td-bold">
+                        {rs.planHours}
+                      </td>
+                      {mode === 'fact' && (
+                        <td className="print-td print-td-center print-td-bold">
+                          {rs.factHours}
+                        </td>
+                      )}
+                    </>
+                  )}
+                </tr>
+              )
+            })}
+          </tbody>
+        )
+      })}
+    </table>
   )
 }

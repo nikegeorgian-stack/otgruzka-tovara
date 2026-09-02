@@ -71,7 +71,7 @@ export function SummaryPage({ store, onNavigate }: Props) {
 
       <ExecutiveKpiStrip kpis={erpKpis} onNavigate={onNavigate} className="mb-6" />
 
-      <div className="fc-table-wrap">
+      <div className="fc-table-wrap" data-coach="summary:table">
         <table className="fc-table min-w-full">
           <thead>
             <tr>

@@ -1,5 +1,7 @@
 import type { AppUser, AccessStore } from './types'
 import type { Employee } from '@/lib/types'
+import { isFstAdminEmail } from '@/lib/cloud/fstAdmin'
+import { isPasswordChangeComplete } from '@/lib/cloud/passwordChangeSession'
 import { resolveFstWebProfile, type FstWebUserProfile } from '@/lib/cloud/fstWebUsers'
 
 /** Сотрудник, привязанный к учётной записи (если есть и активен). */
@@ -25,9 +27,29 @@ export function mergeWebAppUser(
   webUser: AppUser,
   access: AccessStore,
 ): AppUser {
-  const stored = access.users.find(
-    (u) => u.login === webUser.login && u.active,
-  )
+  const login = webUser.login.trim().toLowerCase()
+  const stored = access.users.find((u) => u.login === login && u.active)
+  const passwordChangedThisSession = isPasswordChangeComplete(login)
+
+  if (isFstAdminEmail(login)) {
+    return {
+      ...webUser,
+      roleId: 'sysadmin',
+      id: stored?.id ?? webUser.id,
+      displayName: stored?.displayName || webUser.displayName,
+      employeeId: stored?.employeeId,
+      defaultBrigades: stored?.defaultBrigades,
+      viewDefaults: stored?.viewDefaults,
+      webViews: stored?.webViews,
+      timesheetLevel: stored?.timesheetLevel,
+      timesheetViewBrigades: stored?.timesheetViewBrigades,
+      timesheetEditBrigades: stored?.timesheetEditBrigades,
+      webAccount: stored?.webAccount ?? true,
+      mustChangePassword:
+        passwordChangedThisSession ? false : stored?.mustChangePassword === true,
+    }
+  }
+
   if (!stored) return webUser
   return {
     ...webUser,
@@ -38,7 +60,12 @@ export function mergeWebAppUser(
     defaultBrigades: stored.defaultBrigades,
     viewDefaults: stored.viewDefaults,
     webViews: stored.webViews,
+    timesheetLevel: stored.timesheetLevel,
+    timesheetViewBrigades: stored.timesheetViewBrigades,
+    timesheetEditBrigades: stored.timesheetEditBrigades,
     webAccount: stored.webAccount ?? true,
+    mustChangePassword:
+      passwordChangedThisSession ? false : stored.mustChangePassword === true,
   }
 }
 

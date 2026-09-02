@@ -43,6 +43,7 @@ type WarehouseActions = Pick<
   | 'onUpsertLoadingShipment'
   | 'onPostLoadingShipment'
   | 'onRemoveLoadingShipment'
+  | 'onMarkWarehouseDocsExported'
   | 'onUpsertCounterparty'
   | 'onOpenCounterparties'
   | 'onUpsertWorkwearCatalogItem'
@@ -77,6 +78,7 @@ export function buildWarehousePageProps({
     onSaveProductionRequest,
     onPostProductionRequest,
     embedded,
+    exportStore: store,
     printMeta: {
       site: store.settings.site,
       responsible: store.settings.responsible,

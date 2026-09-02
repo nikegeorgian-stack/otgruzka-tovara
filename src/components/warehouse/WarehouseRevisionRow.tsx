@@ -88,6 +88,9 @@ export const WarehouseRevisionRow = memo(function WarehouseRevisionRow({
         <input
           type="text"
           inputMode="decimal"
+          data-modal-ignore-enter
+          data-inventory-counted
+          data-inventory-item-id={item.id}
           disabled={!editable}
           className="w-full border-0 bg-transparent px-2 py-1.5 text-right font-mono disabled:text-stone-500"
           value={touched ? counted : ''}
@@ -97,6 +100,27 @@ export const WarehouseRevisionRow = memo(function WarehouseRevisionRow({
             setTouched(true)
           }}
           onBlur={flush}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            e.preventDefault()
+            flush()
+
+            const currentInput = e.currentTarget
+            requestAnimationFrame(() => {
+              let row = currentInput.closest('tr')?.nextElementSibling
+              while (row) {
+                const nextInput = row.querySelector<HTMLInputElement>(
+                  'input[data-inventory-counted]:not(:disabled)',
+                )
+                if (nextInput) {
+                  nextInput.focus()
+                  nextInput.select()
+                  return
+                }
+                row = row.nextElementSibling
+              }
+            })
+          }}
         />
       </td>
       <td

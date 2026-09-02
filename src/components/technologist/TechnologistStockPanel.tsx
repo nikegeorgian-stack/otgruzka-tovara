@@ -10,6 +10,7 @@ import type { FormulationStore } from '@/lib/formulations/types'
 import { openItemRenameRequests } from '@/lib/warehouse/itemRenameRequests'
 import type { CreateItemRenameRequestInput } from '@/lib/warehouse/itemRenameRequests'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import type { WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
 
 type Props = {
@@ -57,6 +58,7 @@ export function TechnologistStockPanel({
         if (!q) return true
         return (
           item.name.toLowerCase().includes(q) ||
+          (item.technicalName?.toLowerCase().includes(q) ?? false) ||
           item.internalCode.toLowerCase().includes(q) ||
           (item.sku?.toLowerCase().includes(q) ?? false)
         )
@@ -129,7 +131,7 @@ export function TechnologistStockPanel({
                   return (
                     <tr key={item.id}>
                       <td>
-                        <div className="font-medium text-ink">{item.name}</div>
+                        <div className="font-medium text-ink">{warehouseItemDisplayName(item)}</div>
                         <div className="text-xs text-stone-500">
                           {item.internalCode}
                           {item.sku ? ` · ${item.sku}` : ''} · {item.unit}

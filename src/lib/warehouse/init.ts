@@ -1,6 +1,7 @@
 import seedWarehouse from '@/data/seed-warehouse.json'
 import { ensureProductionWarehouseLocations } from '@/lib/warehouse/productionLocations'
 import { assignMissingInternalCodes, formatInternalCode } from './itemHistory'
+import { ensureWarehouseLocationCodes } from './locationCodes'
 import { normalizeLocationKind } from './locationKinds'
 import type {
   WarehouseCategory,
@@ -15,9 +16,7 @@ function newId(): string {
 }
 
 export const DEFAULT_WAREHOUSE_LOCATIONS: Omit<WarehouseLocation, 'id'>[] = [
-  { name: 'Основной', sortOrder: 0, kind: 'raw' },
-  { name: 'Офис', sortOrder: 1, kind: 'office' },
-  { name: 'Химия', sortOrder: 2, kind: 'chemistry' },
+  { name: 'Основной', sortOrder: 0, kind: 'other' },
 ]
 
 type SeedItem = { name: string; category: string; unit: string }
@@ -84,7 +83,7 @@ export function createDefaultWarehouse(): WarehouseStore {
   const categories = buildCategories(seedCategoryNames())
   const items = buildItemsFromSeed(categories, mainWh)
 
-  return {
+  return ensureWarehouseLocationCodes({
     locations,
     categories,
     items,
@@ -94,7 +93,7 @@ export function createDefaultWarehouse(): WarehouseStore {
     auditLog: [],
     nextInternalCode: items.length + 1,
     itemHistories: {},
-  }
+  })
 }
 
 function needsCatalogMigration(store: WarehouseStore): boolean {
@@ -136,8 +135,18 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     name: l.name?.trim() || 'Склад',
     sortOrder: l.sortOrder ?? i,
     kind: normalizeLocationKind(l.kind, l.name?.trim() || 'Склад'),
+    code: l.code?.trim() || undefined,
   }))
   if (!locations.length) locations = defaultLocations()
+
+  // «Основной» всегда общий (other): иначе приход режет канцтовары/хоз как «не сырьё».
+  locations = locations.map((l) => {
+    const n = l.name.trim().toLowerCase()
+    if (n === 'основной' || n.startsWith('основн')) {
+      return l.kind === 'other' ? l : { ...l, kind: 'other' as const }
+    }
+    return l
+  })
 
   const mainWh = locations[0]!.id
 
@@ -145,12 +154,13 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     id: c.id || newId(),
     name: c.name?.trim() || 'Прочее',
     sortOrder: c.sortOrder ?? i,
+    code: c.code?.trim() || undefined,
   }))
 
   const catIds = new Set(categories.map((c) => c.id))
   const fallbackCat = categories[0]?.id ?? newId()
   if (!categories.length) {
-    categories.push({ id: fallbackCat, name: 'Прочее', sortOrder: 0 })
+    categories.push({ id: fallbackCat, name: 'Прочее', sortOrder: 0, code: '01' })
   }
 
   const locIds = new Set(locations.map((l) => l.id))
@@ -159,6 +169,9 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     id: it.id || newId(),
     internalCode: it.internalCode?.trim() ?? '',
     name: it.name?.trim() || '—',
+    technicalName: it.technicalName?.trim() || undefined,
+    nameKa: it.nameKa?.trim() || undefined,
+    nameEn: it.nameEn?.trim() || undefined,
     categoryId: catIds.has(it.categoryId) ? it.categoryId : fallbackCat,
     warehouseId: locIds.has(it.warehouseId) ? it.warehouseId : mainWh,
     unit: normalizeUnit(it.unit),
@@ -211,5 +224,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     store = migrateCatalog(store)
   }
 
-  return ensureProductionWarehouseLocations(assignMissingInternalCodes(store))
+  return ensureWarehouseLocationCodes(
+    ensureProductionWarehouseLocations(assignMissingInternalCodes(store)),
+  )
 }

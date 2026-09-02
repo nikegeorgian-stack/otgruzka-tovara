@@ -27,6 +27,9 @@ export type HrKpis = {
   fired: number
   expiringDocs: number
   overdueDocs: number
+  expiringContracts: number
+  overdueContracts: number
+  missingPrimaryContracts: number
   expiringTrainings: number
   overdueTrainings: number
 }
@@ -37,6 +40,9 @@ export function computeHrKpis(employees: Employee[]): HrKpis {
   let fired = 0
   let expiringDocs = 0
   let overdueDocs = 0
+  let expiringContracts = 0
+  let overdueContracts = 0
+  let missingPrimaryContracts = 0
   let expiringTrainings = 0
   let overdueTrainings = 0
 
@@ -46,9 +52,23 @@ export function computeHrKpis(employees: Employee[]): HrKpis {
     else if (status === 'vacation' || status === 'sick') vacationSick++
     else if (status === 'fired') fired++
 
+    if (status !== 'fired') {
+      const contracts = e.hrContracts ?? []
+      const primary = contracts.find((c) => c.isPrimary) ?? contracts[0]
+      if (!primary || primary.status === 'pending') missingPrimaryContracts++
+    }
+
     for (const doc of e.hrDocuments ?? []) {
+      // Архив копий: трудовой договор в цепочке hrContracts, не здесь.
+      if (doc.docType === 'Трудовой договор') continue
       if (isOverdue(doc.expiresAt)) overdueDocs++
       else if (isExpiringSoon(doc.expiresAt)) expiringDocs++
+    }
+    for (const c of e.hrContracts ?? []) {
+      if (!c.isPrimary || !c.endDate) continue
+      if (c.status === 'superseded') continue
+      if (isOverdue(c.endDate)) overdueContracts++
+      else if (isExpiringSoon(c.endDate)) expiringContracts++
     }
     for (const tr of e.hrTrainings ?? []) {
       if (isOverdue(tr.validUntil)) overdueTrainings++
@@ -63,6 +83,9 @@ export function computeHrKpis(employees: Employee[]): HrKpis {
     fired,
     expiringDocs,
     overdueDocs,
+    expiringContracts,
+    overdueContracts,
+    missingPrimaryContracts,
     expiringTrainings,
     overdueTrainings,
   }

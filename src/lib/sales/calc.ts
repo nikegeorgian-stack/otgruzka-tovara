@@ -25,7 +25,11 @@ export function salesLineMetrics(
   requests: ProductionRequest[],
 ): SalesLineMetrics {
   const linkedOrders = plannerOrders.filter((o) => line.productionOrderIds.includes(o.id))
-  const plannedMp = linkedOrders.reduce((s, o) => s + (o.totalQtyMp || 0), 0)
+  const poPlannedMp = linkedOrders.reduce((s, o) => s + (o.totalQtyMp || 0), 0)
+  const reservedMp = line.progress?.reservedFinishedGoodsQty ?? 0
+  const allocatedMp = line.progress?.productionAllocatedQty ?? poPlannedMp
+  /** Обеспечено = резерв ГП + аллокация ПЗ (или сумма ПЗ, если progress ещё нет) */
+  const plannedMp = Math.round((reservedMp + allocatedMp) * 10) / 10
   const producedMp = Math.round(
     linkedOrders.reduce((s, o) => s + totalFactMpForOrder(o, requests), 0) * 10,
   ) / 10
@@ -160,9 +164,16 @@ export function salesDashboardKpis(
   let atRiskOrders = 0
   let inProductionOrders = 0
   for (const order of orders) {
-    if (order.status === 'completed' || order.status === 'cancelled') continue
+    const commercial = order.commercialStatus
+    if (commercial === 'completed' || commercial === 'cancelled') continue
+    if (!commercial && (order.status === 'completed' || order.status === 'cancelled')) continue
     openOrders += 1
-    if (order.status === 'in_production') inProductionOrders += 1
+    if (
+      order.fulfillmentStatus === 'in_production' ||
+      order.status === 'in_production'
+    ) {
+      inProductionOrders += 1
+    }
     const m = salesOrderMetrics(order, plannerOrders, requests, today)
     toProduceMp += Math.max(0, m.orderedMp - m.producedMp)
     if (m.atRisk) atRiskOrders += 1

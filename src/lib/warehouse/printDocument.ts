@@ -1,4 +1,5 @@
 import type { Locale, PrintSignatures } from '@/lib/types'
+import { intlLocale } from '@/i18n/localeFormat'
 import type { Counterparty } from '@/lib/counterparties/types'
 import { resolveCounterpartyDisplayName } from '@/lib/warehouse/documentValidation'
 import { itemStockValue, toBaseQty } from '@/lib/warehouse/stock'
@@ -212,7 +213,7 @@ export function buildReceiptPrintModel(
     totalSum,
     receivedBy: master,
     accountant: accountant || director,
-    generatedAt: new Date().toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU'),
+    generatedAt: new Date().toLocaleString(intlLocale(locale)),
   }
 }
 
@@ -250,7 +251,7 @@ export function buildIssuePrintModel(
     issuedBy: doc.keeperName || meta.responsible || '—',
     receivedBy: master,
     accountant: accountant || director,
-    generatedAt: new Date().toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU'),
+    generatedAt: new Date().toLocaleString(intlLocale(locale)),
   }
 }
 

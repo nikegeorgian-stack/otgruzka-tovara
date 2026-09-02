@@ -21,15 +21,22 @@ export type WarehouseLocation = {
   sortOrder: number
   /** Зона учёта: сырьё, химия, выработка… */
   kind?: WarehouseLocationKind
+  /**
+   * Стабильный номер склада для фильтров/отчётов (не зависит от названия).
+   * Пример: 01, 02, WH-03.
+   */
+  code?: string
 }
 
 export type WarehouseDocumentPurpose =
   | 'purchase'
   | 'production_issue'
+  | 'production_receipt'
   | 'return'
   | 'writeoff'
   | 'transfer'
   | 'other'
+  | 'loading'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -45,6 +52,8 @@ export type WarehouseCategory = {
   id: string
   name: string
   sortOrder: number
+  /** Код группы номенклатуры для фильтров (01, 01.01…). */
+  code?: string
 }
 
 export type UnitConversion = {
@@ -69,6 +78,15 @@ export type WarehouseItem = {
   /** Внутренний код (выдаётся автоматически, менять нельзя) */
   internalCode: string
   name: string
+  /**
+   * Техническое название (задаёт только технолог).
+   * В списках приоритетнее `name`; название в накладной (`name`) не перезаписывается.
+   */
+  technicalName?: string
+  /** Наименование на грузинском (черновик из русского). Аддитивно. */
+  nameKa?: string
+  /** Наименование на английском (черновик из русского). Аддитивно. */
+  nameEn?: string
   categoryId: string
   warehouseId: string
   unit: string
@@ -100,6 +118,8 @@ export type StockMovement = {
   comment?: string
   /** Резерв под заказ планировщика */
   productionOrderId?: string
+  /** Резерв под задание миксеру (ЗД-…) */
+  mixTaskId?: string
   /** if entered in alternate unit */
   inputUnit?: string
   /** Себестоимость за базовую единицу (для прихода) — для средневзвешенной оценки */
@@ -167,12 +187,28 @@ export type WarehouseDocument = {
   /** Ключ инвойса RS.ge (серия/номер) */
   invoiceKey?: string
   sellerTin?: string
+  /** Заказ закупки (ЗЗ), из которого создан приход */
+  purchaseOrderId?: string
   lines: WarehouseDocumentLine[]
   /** Связь с замесом пропитки */
   batchRunId?: string
   /** Связь с заявкой кладовщика на пополнение (ЗКл) */
   keeperRequestId?: string
-  docRole?: 'batch_issue' | 'batch_receipt' | 'transfer_issue' | 'transfer_receipt' | 'reversal'
+  docRole?:
+    | 'batch_issue'
+    | 'batch_receipt'
+    | 'transfer_issue'
+    | 'transfer_receipt'
+    | 'reversal'
+    | 'production_receipt'
+    | 'production_issue'
+    | 'loading_issue'
+  /** Связь с погрузкой ГП */
+  loadingShipmentId?: string
+  /** Когда документ выгружен бухгалтеру / в Balance */
+  exportedAt?: string
+  exportedBy?: string
+  exportedByName?: string
   /** Блокировка редактирования черновика другим пользователем */
   lockedBy?: string
   lockedByName?: string
@@ -393,6 +429,8 @@ export type LoadingShipment = {
   createdAt: string
   updatedAt: string
   postedAt?: string
+  /** Авто-расход ГП при проведении погрузки */
+  postedDocumentId?: string
 }
 
 /** Черновик выдачи за день — проводится одним расходом в конце смены */

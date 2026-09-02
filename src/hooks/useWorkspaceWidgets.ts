@@ -3,26 +3,20 @@ import {
   WORKSPACE_WIDGETS_STORAGE_PREFIX,
   type WorkspaceWidgetId,
 } from '@/lib/ui/workspaceWidgets'
+import { safeLocalGet, safeLocalRemove, safeLocalSet } from '@/lib/safeStorage'
+import { onCloseOverlays } from '@/lib/ui/overlayEvents'
 
 function readStored(viewKey: string): WorkspaceWidgetId | null {
   if (typeof window === 'undefined') return null
-  try {
-    const v = localStorage.getItem(`${WORKSPACE_WIDGETS_STORAGE_PREFIX}${viewKey}`)
-    return v || null
-  } catch {
-    return null
-  }
+  const v = safeLocalGet(`${WORKSPACE_WIDGETS_STORAGE_PREFIX}${viewKey}`)
+  return v || null
 }
 
 function writeStored(viewKey: string, id: WorkspaceWidgetId | null): void {
   if (typeof window === 'undefined') return
-  try {
-    const key = `${WORKSPACE_WIDGETS_STORAGE_PREFIX}${viewKey}`
-    if (id) localStorage.setItem(key, id)
-    else localStorage.removeItem(key)
-  } catch {
-    /* ignore */
-  }
+  const key = `${WORKSPACE_WIDGETS_STORAGE_PREFIX}${viewKey}`
+  if (id) safeLocalSet(key, id)
+  else safeLocalRemove(key)
 }
 
 /** Открытый виджет-панель; состояние сохраняется в localStorage по ключу раздела. */
@@ -32,6 +26,8 @@ export function useWorkspaceWidgets(viewKey: string) {
   useEffect(() => {
     writeStored(viewKey, openId)
   }, [viewKey, openId])
+
+  useEffect(() => onCloseOverlays(() => setOpenId(null)), [])
 
   const open = useCallback((id: WorkspaceWidgetId) => setOpenId(id), [])
   const close = useCallback(() => setOpenId(null), [])

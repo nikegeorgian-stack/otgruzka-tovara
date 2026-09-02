@@ -133,6 +133,7 @@ export function filterOrders(
     status?: PurchaseOrder['status'] | 'active' | 'all'
     scope?: ProcurementScope | ''
     category?: PurchaseOrder['category'] | ''
+    categoryId?: string
     counterpartyId?: string
     transportMode?: TransportMode | ''
     search?: string
@@ -148,6 +149,7 @@ export function filterOrders(
       return false
     }
     if (filters.scope && o.scope !== filters.scope) return false
+    if (filters.categoryId && o.categoryId !== filters.categoryId) return false
     if (filters.category && o.category !== filters.category) return false
     if (filters.counterpartyId && o.counterpartyId !== filters.counterpartyId) return false
     if (filters.transportMode) {

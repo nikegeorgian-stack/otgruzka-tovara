@@ -1,5 +1,6 @@
 import type { PackagingPlan } from '@/lib/packaging/types'
 import type { PlannerStore } from '@/lib/planner/types'
+import type { Locale } from '@/i18n/types'
 
 /** Линии: пропитка (RATL) 1 и 2, упаковка */
 export type ProductionLineId = '1' | '2' | 'pack'
@@ -228,7 +229,7 @@ export const PRODUCTION_CATEGORIES: {
 export function categoryLabel(
   key: ProductionCategoryKey,
   lineId: ProductionLineId,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   const cat = PRODUCTION_CATEGORIES.find((c) => c.key === key)!
   if (locale === 'ka') return cat.labelKa

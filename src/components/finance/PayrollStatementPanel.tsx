@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
+import { collatorLocale } from '@/i18n/localeFormat'
 import { BilingualText } from '@/components/employee/BilingualText'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
+import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
 import { formatMonthTitle } from '@/lib/dates'
 import { runExport } from '@/lib/export'
@@ -11,11 +13,18 @@ import {
   statementTotals,
   type StatementRow,
 } from '@/lib/finance/calc'
+import {
+  collectUnconfirmedAbsences,
+  hasUnconfirmedAbsences,
+} from '@/lib/finance/unconfirmedAbsences'
+import { collectUnsignedBrigades } from '@/lib/brigadeSignoff'
 import { isMonthClosed, monthClosureInfo } from '@/lib/monthManage'
 import { formatGel } from '@/lib/payroll'
 import type { AppStore } from '@/lib/types'
 import { FinanceOpDialog, type FinanceOpKind, type FinanceOpResult } from './FinanceOpDialog'
 import { PayslipModal } from './PayslipModal'
+import { PrintPayrollStatementModal } from './PrintPayrollStatementModal'
+import { PrintBankTransferModal } from './PrintBankTransferModal'
 import type { FinanceActions } from './financeTypes'
 
 type Props = {
@@ -27,24 +36,62 @@ type Props = {
 }
 
 export function PayrollStatementPanel({ store, month, onMonthChange, actions, asOfDate }: Props) {
-  const { t, locale, employeeNameLines } = useI18n()
+  const { t, tf, locale, employeeNameLines } = useI18n()
+  const { confirm } = useConfirm()
   const [op, setOp] = useState<{ kind: FinanceOpKind; row: StatementRow } | null>(null)
   const [payslip, setPayslip] = useState<StatementRow | null>(null)
+  const [printOpen, setPrintOpen] = useState(false)
+  const [bankPrintOpen, setBankPrintOpen] = useState(false)
 
   const rows = useMemo(() => {
     const list = monthStatement(store, month, asOfDate)
     return list.sort((a, b) =>
       employeeNameLines(a.emp).primary.localeCompare(
         employeeNameLines(b.emp).primary,
-        locale === 'ka' ? 'ka' : 'ru',
+        collatorLocale(locale),
       ),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, month, locale, asOfDate])
 
+  const bankRows = useMemo(
+    () => rows.filter((r) => r.remaining > 0.005),
+    [rows],
+  )
+
   const totals = useMemo(() => statementTotals(rows), [rows])
   const closed = isMonthClosed(store, month)
   const closure = monthClosureInfo(store, month)
+  const unconfirmed = useMemo(
+    () => collectUnconfirmedAbsences(store, month, asOfDate),
+    [store, month, asOfDate],
+  )
+  const unconfirmedOpen = hasUnconfirmedAbsences(unconfirmed)
+  const unsignedBrigades = useMemo(
+    () => collectUnsignedBrigades(store, month),
+    [store, month],
+  )
+
+  async function warnIfUnconfirmed(): Promise<boolean> {
+    if (!unconfirmedOpen && unsignedBrigades.length === 0) return true
+    const parts: string[] = []
+    if (unconfirmedOpen) {
+      parts.push(
+        tf('fin.unconfirmed.warn', {
+          sick: unconfirmed.sickCount,
+          vacation: unconfirmed.vacationCount,
+        }),
+      )
+    }
+    if (unsignedBrigades.length > 0) {
+      parts.push(tf('fin.unconfirmed.brigades', { count: unsignedBrigades.length }))
+    }
+    return confirm({
+      title: t('fin.unconfirmed.title'),
+      message: parts.join('\n\n'),
+      confirmLabel: t('fin.unconfirmed.continue'),
+    })
+  }
 
   function handleSubmit(result: FinanceOpResult) {
     if (!op) return
@@ -112,12 +159,112 @@ export function PayrollStatementPanel({ store, month, onMonthChange, actions, as
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => void runExport('payroll_statement', store, { month, locale })}
+            disabled={!rows.length}
+            onClick={() => {
+              void (async () => {
+                if (!(await warnIfUnconfirmed())) return
+                setPrintOpen(true)
+              })()
+            }}
+          >
+            {t('fin.printStatement')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void (async () => {
+                if (!(await warnIfUnconfirmed())) return
+                void runExport('payroll_statement', store, { month, locale })
+              })()
+            }}
           >
             {t('fin.exportStatement')}
           </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!bankRows.length}
+            onClick={() => {
+              void (async () => {
+                if (!(await warnIfUnconfirmed())) return
+                setBankPrintOpen(true)
+              })()
+            }}
+          >
+            {t('fin.printBankTransfer')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!bankRows.length}
+            onClick={() => {
+              void (async () => {
+                if (!(await warnIfUnconfirmed())) return
+                void runExport('payroll_bank_transfer', store, { month, locale })
+              })()
+            }}
+          >
+            {t('fin.exportBankTransfer')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!rows.length}
+            title={t('fin.salary1c.hint')}
+            data-coach="finance:export1c"
+            onClick={() => {
+              void (async () => {
+                if (!(await warnIfUnconfirmed())) return
+                void runExport('salary_calculation_1c', store, { month, locale }).catch((err) => {
+                  console.error(err)
+                  window.alert(t('fin.salary1c.empty'))
+                })
+              })()
+            }}
+          >
+            {t('fin.salary1c.export')}
+          </Button>
         </div>
       </div>
+
+      {(unconfirmedOpen || unsignedBrigades.length > 0) && (
+        <div className="rounded-sm border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+          <p className="font-semibold">{t('fin.unconfirmed.title')}</p>
+          {unconfirmedOpen ? (
+            <p className="mt-1">
+              {tf('fin.unconfirmed.banner', {
+                sick: unconfirmed.sickCount,
+                vacation: unconfirmed.vacationCount,
+              })}
+            </p>
+          ) : null}
+          {unsignedBrigades.length > 0 ? (
+            <p className="mt-1">
+              {tf('fin.unconfirmed.brigades', { count: unsignedBrigades.length })}
+              {': '}
+              {unsignedBrigades.slice(0, 8).join(', ')}
+              {unsignedBrigades.length > 8 ? ` +${unsignedBrigades.length - 8}` : ''}
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs text-rose-800">{t('fin.unconfirmed.hint')}</p>
+          {unconfirmed.items.length > 0 ? (
+            <ul className="mt-2 max-h-28 list-inside list-disc overflow-auto text-xs text-rose-900">
+              {unconfirmed.items.slice(0, 12).map((it) => (
+                <li key={it.employeeId}>
+                  {it.employeeName}
+                  {it.brigade ? ` · ${it.brigade}` : ''}
+                  {it.sickDays > 0 ? ` · Б ${it.sickDays}` : ''}
+                  {it.vacationDays > 0 ? ` · ОТ ${it.vacationDays}` : ''}
+                </li>
+              ))}
+              {unconfirmed.items.length > 12 ? (
+                <li>… +{unconfirmed.items.length - 12}</li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
+      )}
 
       {closed && (
         <div className="rounded-sm border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -279,6 +426,26 @@ export function PayrollStatementPanel({ store, month, onMonthChange, actions, as
           row={payslip}
           responsible={store.settings.responsible}
           onClose={() => setPayslip(null)}
+        />
+      )}
+
+      {printOpen && (
+        <PrintPayrollStatementModal
+          store={store}
+          month={month}
+          rows={rows}
+          printLocale={locale}
+          onClose={() => setPrintOpen(false)}
+        />
+      )}
+
+      {bankPrintOpen && (
+        <PrintBankTransferModal
+          store={store}
+          month={month}
+          rows={bankRows}
+          printLocale={locale}
+          onClose={() => setBankPrintOpen(false)}
         />
       )}
     </div>

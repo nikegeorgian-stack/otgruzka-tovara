@@ -4,6 +4,8 @@ import { finishedWarehouseLocationId } from '@/lib/warehouse/loadingProfile'
 import { LOADING_CONTAINERS } from '@/lib/warehouse/loading'
 import type { UpsertLoadingShipmentInput } from '@/lib/warehouse/loadingShipments'
 import type { LoadingShipment, LoadingShipmentLine, WarehouseStore } from '@/lib/warehouse/types'
+import { deriveLegacySalesStatus } from './statuses'
+import { fulfillmentFromProgress, recalculateSalesOrderProgress } from './progress'
 import type { SalesOrder, SalesOrderLine } from './types'
 
 const BOX_TARE_KG = 5
@@ -249,4 +251,152 @@ export function syncSalesOrderLoadingInStore(store: AppStore, orderId: string): 
     updatedAt: new Date().toISOString(),
   }
   return { ...store, sales: { ...store.sales, orders } }
+}
+
+/** Отгружено п.м. по строкам из проведённых погрузок заказа */
+export function shippedMpByLineFromLoading(
+  shipments: LoadingShipment[],
+  orderId: string,
+): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const sh of shipments) {
+    if (sh.salesOrderId !== orderId || sh.status !== 'posted') continue
+    const mp = sh.lines.reduce(
+      (s, l) => s + (l.rolls || 0) * (l.rollLengthM || 0),
+      0,
+    )
+    if (mp <= 0) continue
+    if (sh.salesLineId) {
+      out.set(sh.salesLineId, (out.get(sh.salesLineId) ?? 0) + mp)
+    }
+  }
+  return out
+}
+
+/** Синхронизировать shippedQty allocations/строк ЗК из проведённых погрузок */
+export function syncSalesOrderShippedQtyFromLoading(
+  store: AppStore,
+  orderId: string,
+): AppStore {
+  const idx = store.sales.orders.findIndex((o) => o.id === orderId)
+  if (idx < 0) return store
+
+  const order = store.sales.orders[idx]!
+  const shippedByLine = shippedMpByLineFromLoading(
+    store.warehouse.loadingShipments ?? [],
+    orderId,
+  )
+  if (shippedByLine.size === 0) return store
+
+  let allocations = [...(store.sales.allocations ?? [])]
+  for (const [lineId, mp] of shippedByLine) {
+    const lineAllocs = allocations.filter(
+      (a) => a.salesLineId === lineId && a.status === 'active',
+    )
+    const totalPlanned = lineAllocs.reduce((s, a) => s + (a.plannedGoodQty || 0), 0)
+    let remaining = mp
+    allocations = allocations.map((a) => {
+      if (a.salesLineId !== lineId || a.status !== 'active') return a
+      const share =
+        totalPlanned > 0
+          ? (a.plannedGoodQty / totalPlanned) * mp
+          : mp / Math.max(1, lineAllocs.length)
+      const delta = Math.round(share * 10) / 10
+      remaining = Math.round(Math.max(0, remaining - delta) * 10) / 10
+      return {
+        ...a,
+        shippedQty: Math.max(a.shippedQty || 0, delta),
+      }
+    })
+  }
+
+  const reservations = store.sales.reservations ?? []
+  let updated = recalculateSalesOrderProgress(order, allocations, reservations)
+  updated = {
+    ...updated,
+    lines: updated.lines.map((line) => {
+      const fromLoading = shippedByLine.get(line.id)
+      if (!fromLoading || !line.progress) return line
+      const shippedQty = Math.max(line.progress.shippedQty, fromLoading)
+      if (shippedQty === line.progress.shippedQty) return line
+      return {
+        ...line,
+        progress: { ...line.progress, shippedQty },
+      }
+    }),
+  }
+  updated = recalculateSalesOrderProgress(updated, allocations, reservations)
+
+  const orders = [...store.sales.orders]
+  orders[idx] = updated
+  return {
+    ...store,
+    sales: { ...store.sales, allocations, orders },
+  }
+}
+
+/**
+ * Пересчитать fulfillment ЗК из количеств отгрузки (не только «все ПГ posted»).
+ * Не трогает cancelled / completed / уже shipped.
+ */
+export function markSalesOrderShippedIfFullyLoaded(store: AppStore, orderId: string): AppStore {
+  let next = syncSalesOrderShippedQtyFromLoading(store, orderId)
+  const idx = next.sales.orders.findIndex((o) => o.id === orderId)
+  if (idx < 0) return next
+
+  const order = next.sales.orders[idx]!
+  const commercial = order.commercialStatus ?? (
+    order.status === 'cancelled' ? 'cancelled'
+      : order.status === 'completed' ? 'completed'
+        : order.status === 'draft' ? 'draft'
+          : 'confirmed'
+  )
+  if (
+    commercial === 'cancelled' ||
+    commercial === 'completed' ||
+    order.status === 'shipped' ||
+    order.fulfillmentStatus === 'shipped'
+  ) {
+    return next
+  }
+
+  const links = collectOrderLoadingShipments(next.warehouse.loadingShipments ?? [], orderId)
+  if (links.all.length === 0) return next
+  if (!links.all.every((s) => s.status === 'posted')) return next
+
+  const fulfillment = fulfillmentFromProgress(
+    order.lines.map((l) => ({ progress: l.progress! })),
+  )
+  if (fulfillment !== 'shipped' && fulfillment !== 'partially_shipped') {
+    const orders = [...next.sales.orders]
+    orders[idx] = {
+      ...order,
+      fulfillmentStatus: fulfillment,
+      status: deriveLegacySalesStatus(commercial, fulfillment),
+      updatedAt: new Date().toISOString(),
+    }
+    return { ...next, sales: { ...next.sales, orders } }
+  }
+
+  const orders = [...next.sales.orders]
+  orders[idx] = {
+    ...order,
+    commercialStatus: commercial === 'draft' ? 'confirmed' : commercial,
+    fulfillmentStatus: fulfillment,
+    status: deriveLegacySalesStatus(commercial, fulfillment),
+    updatedAt: new Date().toISOString(),
+    history:
+      fulfillment === 'shipped'
+        ? [
+            ...order.history,
+            {
+              id: crypto.randomUUID(),
+              at: new Date().toISOString(),
+              type: 'status',
+              message: 'Статус: shipped (отгружено по количеству)',
+            },
+          ]
+        : order.history,
+  }
+  return { ...next, sales: { ...next.sales, orders } }
 }

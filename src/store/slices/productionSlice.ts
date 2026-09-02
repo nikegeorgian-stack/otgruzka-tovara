@@ -23,6 +23,7 @@ import type { ProductionOrder } from '@/lib/planner/types'
 import { newId } from '@/lib/production/files'
 import { normalizeProductionRequest } from '@/lib/production/init'
 import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehouse'
+import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
 import type { StoreSliceDeps } from '../storeApi'
 
@@ -272,6 +273,8 @@ export function createProductionSlice({ setStore }: StoreSliceDeps) {
           req,
           s.production.planner.orders,
           s.finishedProducts.items,
+          s.packagingRecipes,
+          s.formulations.recipes,
         )
         if (!post.ok) {
           result = { ok: false, messageKey: post.messageKey }
@@ -305,7 +308,7 @@ export function createProductionSlice({ setStore }: StoreSliceDeps) {
         }
 
         result = { ok: true, messageKey: undefined }
-        return {
+        let next = {
           ...s,
           warehouse: post.store,
           production: {
@@ -314,6 +317,8 @@ export function createProductionSlice({ setStore }: StoreSliceDeps) {
             planner: { ...s.production.planner, orders },
           },
         }
+        next = applyProductionPostToSales(next, updated)
+        return next
       })
       return result
     },

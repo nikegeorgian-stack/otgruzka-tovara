@@ -2,12 +2,16 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState, typ
 import { runDailyBackup } from '@/lib/backup'
 import { needsAdminSetup } from '@/lib/access/init'
 import {
-  firstViewForAdminCabinet,
   readAdminCabinet,
   writeAdminCabinet,
   type AdminCabinetId,
 } from '@/lib/access/adminCabinet'
-import { canAccessView, firstAllowedView, isSysAdmin } from '@/lib/access/permissions'
+import {
+  canAccessView,
+  canShowNavItemForAdminPreview,
+  firstAllowedView,
+  isSysAdmin,
+} from '@/lib/access/permissions'
 import { readRouteFromLocation, viewToHash } from '@/lib/nav/viewRouting'
 import { verifyPassword } from '@/lib/access/password'
 import { mergeWebAppUser } from '@/lib/access/userEmployee'
@@ -18,6 +22,7 @@ import type { DirectorySection } from '@/lib/directories/types'
 import type { HrSection } from '@/lib/hr/types'
 import { USE_LOCAL_DB } from '@/lib/localDb/config'
 import { loadWorkspaceDrafts } from '@/lib/persistence/workspaceDrafts'
+import { releaseUiChrome } from '@/lib/ui/overlayEvents'
 import {
   loadStore,
   applyAppStoreSeeds,
@@ -34,10 +39,16 @@ import {
   restoreTrashEmployee,
   restoreTrashMonth,
 } from '@/lib/trash'
-import type { AppStore, ViewId } from '@/lib/types'
+import type { AppStore, Locale, ViewId } from '@/lib/types'
+import {
+  isLocale,
+  readUiLocalePref,
+  writeUiLocalePref,
+} from '@/lib/i18n/uiLocalePrefs'
 import type { WorkspacePane } from '@/lib/workspace/types'
 import { popVoiceUndo, pushVoiceUndo, type VoiceUndoEntry } from '@/lib/voiceUndo'
 import { ensureMonthReady } from '@/lib/monthReady'
+import { type SetStore } from '@/store/storeApi'
 import {
   createDirectoriesSlice,
   createFormulationBatchSlice,
@@ -45,7 +56,12 @@ import {
   createSalesSlice,
   createAiChatSlice,
   createTechnologistQcSlice,
+  createOtcSlice,
   createWastewaterSlice,
+  createEngineerLogSlice,
+  createNightShiftSlice,
+  createMealsSlice,
+  createAttendanceSlice,
   createHrSlice,
   createCandidatesSlice,
   createProductionSlice,
@@ -57,6 +73,9 @@ import {
   createProcurementSlice,
   createAccessSlice,
   createFinanceSlice,
+  createTasksSlice,
+  createProtocolsSlice,
+  createOrgChartSlice,
   createWorkspaceSlice,
 } from '@/store'
 
@@ -65,9 +84,15 @@ const skipLocalAuth = import.meta.env.VITE_FST_WEB === 'true'
 export function useAppStore() {
   const webSession = useFstWebSession()
   const initialLoad = useRef<LoadStoreResult>(loadStore())
-  const [store, setStore] = useState<AppStore>(() =>
+  const [store, setStoreInner] = useState<AppStore>(() =>
     applyAppStoreSeeds(purgeExpiredTrash(initialLoad.current.store)),
   )
+  const setStore = useCallback<SetStore>((action, _meta) => {
+    setStoreInner((prev) => {
+      const next = typeof action === 'function' ? action(prev) : action
+      return next
+    })
+  }, [])
   const [loadWarning, setLoadWarning] = useState<LoadStoreResult['warning']>(
     () => initialLoad.current.warning,
   )
@@ -102,10 +127,12 @@ export function useAppStore() {
 
   const getStore = useCallback(() => storeRef.current, [])
   const getActiveMonth = useCallback(() => activeMonthRef.current, [])
+  const actorRef = useRef<{ id?: string; name?: string } | null>(null)
+  const getActor = useCallback(() => actorRef.current, [])
 
   const sliceDeps = useMemo(
-    () => ({ setStore, getStore }),
-    [getStore],
+    () => ({ setStore, getStore, getActor }),
+    [getStore, getActor],
   )
 
   const timesheet = useMemo(() => createTimesheetSlice(sliceDeps), [sliceDeps])
@@ -119,12 +146,20 @@ export function useAppStore() {
   const sales = useMemo(() => createSalesSlice(sliceDeps), [sliceDeps])
   const aiChat = useMemo(() => createAiChatSlice(sliceDeps), [sliceDeps])
   const technologistQc = useMemo(() => createTechnologistQcSlice(sliceDeps), [sliceDeps])
+  const otc = useMemo(() => createOtcSlice(sliceDeps), [sliceDeps])
   const wastewater = useMemo(() => createWastewaterSlice(sliceDeps), [sliceDeps])
+  const engineerLog = useMemo(() => createEngineerLogSlice(sliceDeps), [sliceDeps])
+  const nightShift = useMemo(() => createNightShiftSlice(sliceDeps), [sliceDeps])
+  const meals = useMemo(() => createMealsSlice(sliceDeps), [sliceDeps])
+  const attendanceSlice = useMemo(() => createAttendanceSlice(sliceDeps), [sliceDeps])
   const procurement = useMemo(() => createProcurementSlice(sliceDeps), [sliceDeps])
   const production = useMemo(() => createProductionSlice(sliceDeps), [sliceDeps])
   const directories = useMemo(() => createDirectoriesSlice(sliceDeps), [sliceDeps])
   const accessSlice = useMemo(() => createAccessSlice(sliceDeps), [sliceDeps])
   const finance = useMemo(() => createFinanceSlice(sliceDeps), [sliceDeps])
+  const tasks = useMemo(() => createTasksSlice(sliceDeps), [sliceDeps])
+  const protocols = useMemo(() => createProtocolsSlice(sliceDeps), [sliceDeps])
+  const orgChart = useMemo(() => createOrgChartSlice(sliceDeps), [sliceDeps])
   const settings = useMemo(
     () => createSettingsSlice(sliceDeps, { getActiveMonth, setActiveMonth }),
     [sliceDeps, getActiveMonth],
@@ -153,6 +188,16 @@ export function useAppStore() {
     setViewState('hr')
   }, [])
 
+  /** При любой смене раздела — снять залипшие модалки/backdrop (иначе сайдбар «мёртвый»). */
+  const viewChromeReady = useRef(false)
+  useEffect(() => {
+    if (!viewChromeReady.current) {
+      viewChromeReady.current = true
+      return
+    }
+    releaseUiChrome()
+  }, [view])
+
   const workspace = useMemo(
     () =>
       createWorkspaceSlice({
@@ -167,19 +212,16 @@ export function useAppStore() {
   )
 
   useEffect(() => {
-    setStore((s) => runDailyBackup(s))
-  }, [])
+    setStore((s) => runDailyBackup(s), { origin: 'system' })
+  }, [setStore])
 
   useEffect(() => {
-    if (import.meta.env.VITE_FST_WEB === 'true') return
-    setStore((s) => ensureMonthReady(s, activeMonthRef.current))
-  }, [])
+    setStore((s) => ensureMonthReady(s, activeMonthRef.current), { origin: 'system' })
+  }, [setStore])
 
   useEffect(() => {
-    if (import.meta.env.VITE_FST_WEB !== 'true') return
-    if (view !== 'month') return
-    setStore((s) => ensureMonthReady(s, activeMonthRef.current))
-  }, [view, activeMonth])
+    setStore((s) => ensureMonthReady(s, activeMonthRef.current), { origin: 'system' })
+  }, [view, activeMonth, setStore])
 
   useEffect(() => {
     if (import.meta.env.VITE_FST_WEB === 'true') return
@@ -208,21 +250,15 @@ export function useAppStore() {
   const dismissSaveError = useCallback(() => setSaveError(null), [])
   const reportSaveError = useCallback((err: SaveStoreResult | null) => setSaveError(err), [])
 
-  const setLocale = useCallback(
-    (locale: AppStore['settings']['locale']) => {
-      settings.updateSettings({ locale })
-    },
-    [settings],
-  )
-
   const setActiveMonthReady = useCallback((month: string) => {
     setActiveMonth(month)
-    setStore((s) => ensureMonthReady(s, month))
-  }, [])
+    setStore((s) => ensureMonthReady(s, month), { origin: 'system' })
+  }, [setStore])
 
   const userBootDefaultsRef = useRef<string | null>(null)
   const lastPersistedViewRef = useRef<ViewId | null>(null)
   const lastPersistedMonthRef = useRef<string | null>(null)
+  const localeMigratedRef = useRef<string | null>(null)
 
   const access: AccessStore = useMemo(() => store.access, [store.access])
 
@@ -235,6 +271,53 @@ export function useAppStore() {
     if (!sessionUserId) return null
     return store.access.users.find((u) => u.id === sessionUserId && u.active) ?? null
   }, [store.access, sessionUserId, webSession.appUser, skipLocalAuth])
+
+  actorRef.current = currentUser
+    ? { id: currentUser.id, name: currentUser.displayName }
+    : null
+
+  /** Язык UI — только личный (учётка / localStorage), не общий settings.locale. */
+  const uiLocale = useMemo((): Locale => {
+    const personal = currentUser?.viewDefaults?.global?.locale
+    if (isLocale(personal)) return personal
+    const cached = readUiLocalePref(currentUser?.id)
+    if (cached) return cached
+    return 'ru'
+  }, [currentUser])
+
+  const setLocale = useCallback(
+    (locale: Locale) => {
+      writeUiLocalePref(currentUser?.id, locale)
+      if (currentUser?.id) {
+        accessSlice.updateUserViewDefaults(currentUser.id, 'global', { locale })
+      }
+    },
+    [accessSlice, currentUser?.id],
+  )
+
+  /** Один раз перенести старый общий settings.locale в личные prefs учётки. */
+  useEffect(() => {
+    if (!currentUser) {
+      localeMigratedRef.current = null
+      return
+    }
+    if (localeMigratedRef.current === currentUser.id) return
+    localeMigratedRef.current = currentUser.id
+    if (isLocale(currentUser.viewDefaults?.global?.locale)) {
+      writeUiLocalePref(currentUser.id, currentUser.viewDefaults!.global!.locale!)
+      return
+    }
+    const cached = readUiLocalePref(currentUser.id)
+    if (cached) {
+      accessSlice.updateUserViewDefaults(currentUser.id, 'global', { locale: cached })
+      return
+    }
+    const legacy = storeRef.current.settings.locale
+    if (isLocale(legacy)) {
+      writeUiLocalePref(currentUser.id, legacy)
+      accessSlice.updateUserViewDefaults(currentUser.id, 'global', { locale: legacy })
+    }
+  }, [accessSlice, currentUser])
 
   useEffect(() => {
     if (!currentUser) {
@@ -304,22 +387,32 @@ export function useAppStore() {
     setSessionUserId(null)
   }, [])
 
-  const setAdminCabinet = useCallback((cabinet: AdminCabinetId) => {
-    writeAdminCabinet(cabinet)
-    setAdminCabinetState(cabinet)
-    const nextView = firstViewForAdminCabinet(cabinet)
-    setViewState(nextView)
-    if (cabinet === 'hr') {
-      setHrSection('employees')
-    }
-  }, [])
+  const setAdminCabinet = useCallback(
+    (cabinet: AdminCabinetId) => {
+      writeAdminCabinet(cabinet)
+      setAdminCabinetState(cabinet)
+      const nextView = firstAllowedView(storeRef.current.access, currentUser, cabinet)
+      setViewState(nextView)
+      if (cabinet === 'hr') {
+        setHrSection('employees')
+      }
+    },
+    [currentUser],
+  )
 
   useEffect(() => {
-    if (skipLocalAuth || !currentUser) return
-    if (!canAccessView(access, currentUser, view)) {
-      setViewState(firstAllowedView(access, currentUser))
+    if (!currentUser) return
+    if (isSysAdmin(currentUser) && adminCabinet !== 'full') {
+      const isWeb = import.meta.env.VITE_FST_WEB === 'true'
+      if (!canShowNavItemForAdminPreview(access, currentUser, view, adminCabinet, isWeb)) {
+        setViewState(firstAllowedView(access, currentUser, adminCabinet))
+      }
+      return
     }
-  }, [currentUser, view, access])
+    if (!canAccessView(access, currentUser, view, adminCabinet)) {
+      setViewState(firstAllowedView(access, currentUser, adminCabinet))
+    }
+  }, [currentUser, view, access, adminCabinet])
 
   // Синхронизация раздела с адресом (#/<view>): запоминается при перезагрузке,
   // работают кнопки «назад/вперёд» браузера, появляется shareable-ссылка.
@@ -372,7 +465,7 @@ export function useAppStore() {
     if (isSysAdmin(currentUser)) {
       const cabinet = readAdminCabinet()
       setAdminCabinetState(cabinet)
-      setViewState(firstViewForAdminCabinet(cabinet))
+      setViewState(firstAllowedView(access, currentUser, cabinet))
       if (cabinet === 'hr') setHrSection('employees')
       return
     }
@@ -452,6 +545,7 @@ export function useAppStore() {
     assignRowEmployee: timesheet.assignRowEmployee,
     addBrigadeRowToMonth: timesheet.addBrigadeRowToMonth,
     removeBrigadeRowFromMonth: timesheet.removeBrigadeRowFromMonth,
+    reorderBrigadeRowInMonth: timesheet.reorderBrigadeRowInMonth,
     removeEmptyBrigadeRowFromMonth: timesheet.removeEmptyBrigadeRowFromMonth,
     replaceEmployeeInBrigade: timesheet.replaceEmployeeInBrigade,
     swapEmployeeRows: timesheet.swapEmployeeRows,
@@ -461,7 +555,12 @@ export function useAppStore() {
     setBrigadier: timesheet.setBrigadier,
     setBrigadierDay: timesheet.setBrigadierDay,
     setBrigadierMonth: timesheet.setBrigadierMonth,
+    setBrigadierFromDay: timesheet.setBrigadierFromDay,
+    setRowInactiveFrom: timesheet.setRowInactiveFrom,
+    setRowActiveFrom: timesheet.setRowActiveFrom,
+    clearRowPeriod: timesheet.clearRowPeriod,
     assignPermanentToBrigade: timesheet.assignPermanentToBrigade,
+    transferEmployeeFromDate: timesheet.transferEmployeeFromDate,
     setBrigadeRoster: timesheet.setBrigadeRoster,
     captureVoiceUndo,
     undoVoiceAction,
@@ -471,25 +570,39 @@ export function useAppStore() {
     setSubstitution: timesheet.setSubstitution,
     clearSubstitution: timesheet.clearSubstitution,
     setMark: timesheet.setMark,
+    setMarksBatch: timesheet.setMarksBatch,
+    commitPlanDraft: timesheet.commitPlanDraft,
+    commitTimesheetDraft: timesheet.commitTimesheetDraft,
+    voidTimesheetEntry: timesheet.voidTimesheetEntry,
     setFactExtraHours: timesheet.setFactExtraHours,
     setFactHours: timesheet.setFactHours,
+    setBrigadeSignoff: timesheet.setBrigadeSignoff,
     addBrigadeDayWorker: timesheet.addBrigadeDayWorker,
+    clearBrigadeDayTransfer: timesheet.clearBrigadeDayTransfer,
     bulkHolidayV: timesheet.bulkHolidayV,
     bulkCopyPlanToFact: timesheet.bulkCopyPlanToFact,
     bulkCopyPlanToFact52: timesheet.bulkCopyPlanToFact52,
     regenerateRowPlan: timesheet.regenerateRowPlan,
     regenerateMonthPlan: timesheet.regenerateMonthPlan,
     replaceStore: settings.replaceStore,
+    applyCloudStore: settings.applyCloudStore,
+    replaceStoreForBulk: settings.replaceStoreForBulk,
+    cancelBulkPreview: settings.cancelBulkPreview,
     resetStore: settings.resetStore,
     updateSettings: settings.updateSettings,
+    uiLocale,
     setLocale,
     addBrigade: timesheet.addBrigade,
     renameBrigade: timesheet.renameBrigade,
     setBrigadeNameKa: timesheet.setBrigadeNameKa,
+    setBrigadeNameEn: timesheet.setBrigadeNameEn,
     setBrigadeUnit: timesheet.setBrigadeUnit,
+    setBrigadeHasBrigadier: timesheet.setBrigadeHasBrigadier,
     removeBrigade: timesheet.removeBrigade,
     addMonth: settings.addMonth,
     removeMonth: settings.removeMonth,
+    clearMonthTimesheet: settings.clearMonthTimesheet,
+    clearMonthsBefore: settings.clearMonthsBefore,
     archiveMonth: settings.archiveMonth,
     syncMonthRosterFromHr: settings.syncMonthRosterFromHr,
     prepareArchiveMonth: settings.prepareArchiveMonth,
@@ -500,12 +613,24 @@ export function useAppStore() {
     restoreTrashEmployee: (at: string) => setStore((s) => restoreTrashEmployee(s, at)),
     restoreTrashMonth: (at: string) => setStore((s) => restoreTrashMonth(s, at)),
     restoreTrashCandidate: (at: string) => setStore((s) => restoreTrashCandidate(s, at)),
-    purgeTrashEmployee: (at: string) =>
-      setStore((s) => permanentlyDeleteTrashEmployee(s, at)),
-    purgeTrashMonth: (at: string) =>
-      setStore((s) => permanentlyDeleteTrashMonth(s, at)),
-    purgeTrashCandidate: (at: string) =>
-      setStore((s) => permanentlyDeleteTrashCandidate(s, at)),
+    purgeTrashEmployee: (at: string) => {
+      const item = getStore().trash?.employees?.find((t) => t.deletedAt === at)
+      if (item) {
+      }
+      setStore((s) => permanentlyDeleteTrashEmployee(s, at))
+    },
+    purgeTrashMonth: (at: string) => {
+      const item = getStore().trash?.months?.find((t) => t.deletedAt === at)
+      if (item) {
+      }
+      setStore((s) => permanentlyDeleteTrashMonth(s, at))
+    },
+    purgeTrashCandidate: (at: string) => {
+      const item = getStore().trash?.candidates?.find((t) => t.deletedAt === at)
+      if (item) {
+      }
+      setStore((s) => permanentlyDeleteTrashCandidate(s, at))
+    },
     upsertWarehouseItem: warehouse.upsertWarehouseItem,
     archiveWarehouseItem: warehouse.archiveWarehouseItem,
     removeWarehouseItem: warehouse.removeWarehouseItem,
@@ -548,6 +673,7 @@ export function useAppStore() {
     upsertLoadingShipment: warehouse.upsertLoadingShipment,
     postLoadingShipment: warehouse.postLoadingShipment,
     removeLoadingShipment: warehouse.removeLoadingShipment,
+    markWarehouseDocsExported: warehouse.markWarehouseDocsExported,
     upsertWorkwearCatalogItem: workwear.upsertWorkwearCatalogItem,
     archiveWorkwearCatalogItem: workwear.archiveWorkwearCatalogItem,
     postWorkwearIssuance: workwear.postWorkwearIssuance,
@@ -577,9 +703,12 @@ export function useAppStore() {
     upsertCounterparty: directories.upsertCounterparty,
     removeCounterparty: directories.removeCounterparty,
     upsertFinishedProduct: directories.upsertFinishedProduct,
+    patchFinishedProductCatalog: directories.patchFinishedProductCatalog,
     removeFinishedProduct: directories.removeFinishedProduct,
     upsertPackagingRecipe: directories.upsertPackagingRecipe,
     removePackagingRecipe: directories.removePackagingRecipe,
+    upsertBoxRecipe: directories.upsertBoxRecipe,
+    removeBoxRecipe: directories.removeBoxRecipe,
     upsertFormulationRecipe: directories.upsertFormulationRecipe,
     removeFormulationRecipe: directories.removeFormulationRecipe,
     postFormulationBatchMix: formulationBatch.postFormulationBatchMix,
@@ -589,6 +718,8 @@ export function useAppStore() {
     updateMixTask: mixTasks.updateMixTask,
     cancelMixTask: mixTasks.cancelMixTask,
     completeMixTask: mixTasks.completeMixTask,
+    reserveMixTaskMaterials: mixTasks.reserveMixTaskMaterials,
+    unreserveMixTaskMaterials: mixTasks.unreserveMixTaskMaterials,
     upsertSalesOrder: sales.upsertSalesOrder,
     removeSalesOrder: sales.removeSalesOrder,
     setSalesOrderStatus: sales.setSalesOrderStatus,
@@ -598,6 +729,8 @@ export function useAppStore() {
     createCombinedLoadingFromSalesOrder: sales.createCombinedLoadingFromSalesOrder,
     appendAiChatEntries: aiChat.appendAiChatEntries,
     addSuggestion: aiChat.addSuggestion,
+    setSuggestionStatus: aiChat.setSuggestionStatus,
+    replyToSuggestion: aiChat.replyToSuggestion,
     upsertEadCalculation: technologistQc.upsertEadCalculation,
     removeEadCalculation: technologistQc.removeEadCalculation,
     upsertEadControl: technologistQc.upsertEadControl,
@@ -608,30 +741,133 @@ export function useAppStore() {
     removeImpregnationQc: technologistQc.removeImpregnationQc,
     addRoomClimateReading: technologistQc.addRoomClimateReading,
     removeRoomClimateReading: technologistQc.removeRoomClimateReading,
+    upsertShiftHandoff: technologistQc.upsertShiftHandoff,
+    acknowledgeShiftHandoff: technologistQc.acknowledgeShiftHandoff,
+    setShiftHandoffStatus: technologistQc.setShiftHandoffStatus,
+    removeShiftHandoff: technologistQc.removeShiftHandoff,
+    upsertOtcNorm: otc.upsertOtcNorm,
+    removeOtcNorm: otc.removeOtcNorm,
+    upsertOtcLabTest: otc.upsertOtcLabTest,
+    removeOtcLabTest: otc.removeOtcLabTest,
+    upsertOtcAlkaliSeries: otc.upsertOtcAlkaliSeries,
+    removeOtcAlkaliSeries: otc.removeOtcAlkaliSeries,
+    upsertOtcSorting: otc.upsertOtcSorting,
+    removeOtcSorting: otc.removeOtcSorting,
+    upsertOtcDefect: otc.upsertOtcDefect,
+    removeOtcDefect: otc.removeOtcDefect,
     upsertWastewaterCube: wastewater.upsertWastewaterCube,
     createWastewaterCube: wastewater.createWastewaterCube,
     applyWastewaterCubeTransition: wastewater.applyWastewaterCubeTransition,
     removeWastewaterCube: wastewater.removeWastewaterCube,
+    upsertEngineerLogEntry: engineerLog.upsertEngineerLogEntry,
+    removeEngineerLogEntry: engineerLog.removeEngineerLogEntry,
+    toggleEngineerLogPin: engineerLog.toggleEngineerLogPin,
+    toggleEngineerLogChecklistItem: engineerLog.toggleEngineerLogChecklistItem,
+    setEngineerLogEntryStatus: engineerLog.setEngineerLogEntryStatus,
+    createWorkTask: tasks.createWorkTask,
+    updateWorkTask: tasks.updateWorkTask,
+    moveWorkTask: tasks.moveWorkTask,
+    completeWorkTask: tasks.completeWorkTask,
+    cancelWorkTask: tasks.cancelWorkTask,
+    addTaskComment: tasks.addTaskComment,
+    toggleTaskChecklistItem: tasks.toggleTaskChecklistItem,
+    toggleTaskAssigneeDone: tasks.toggleTaskAssigneeDone,
+    addTaskAttachmentMeta: tasks.addTaskAttachmentMeta,
+    beginTaskAttachmentDelete: tasks.beginTaskAttachmentDelete,
+    removeTaskAttachmentMeta: tasks.removeTaskAttachmentMeta,
+    upsertMeetingProtocol: protocols.upsertMeetingProtocol,
+    sendProtocolItemForAck: protocols.sendProtocolItemForAck,
+    confirmProtocolItemAck: protocols.confirmProtocolItemAck,
+    refuseProtocolItemAck: protocols.refuseProtocolItemAck,
+    adminFixProtocolItemAck: protocols.adminFixProtocolItemAck,
+    registerProtocolAttachment: protocols.registerProtocolAttachment,
+    archiveMeetingProtocol: protocols.archiveMeetingProtocol,
+    upsertProtocolItem: protocols.upsertProtocolItem,
+    archiveProtocolItem: protocols.archiveProtocolItem,
+    setProtocolItemStatus: protocols.setProtocolItemStatus,
+    setOrgChartDisplayMode: orgChart.setOrgChartDisplayMode,
+    upsertOrgChartNode: orgChart.upsertOrgChartNode,
+    moveOrgChartNode: orgChart.moveOrgChartNode,
+    reparentOrgChartNode: orgChart.reparentOrgChartNode,
+    archiveOrgChartNode: orgChart.archiveOrgChartNode,
+    removeOrgChartNode: orgChart.removeOrgChartNode,
+    assignOrgChartEmployee: orgChart.assignOrgChartEmployee,
+    unassignOrgChartEmployee: orgChart.unassignOrgChartEmployee,
+    setOrgChartHrLink: orgChart.setOrgChartHrLink,
+    autoLayoutOrgChart: orgChart.autoLayoutOrgChart,
+    autoLayoutOrgChartBranch: orgChart.autoLayoutOrgChartBranch,
+    upsertNightShiftDraft: nightShift.upsertNightShiftDraft,
+    postNightShift: nightShift.postNightShift,
+    saveAndPostNightShift: nightShift.saveAndPostNightShift,
+    voidNightShift: nightShift.voidNightShift,
+    upsertMealOrder: meals.upsertMealOrder,
+    acceptMealDay: meals.acceptMealDay,
+    unacceptMealDay: meals.unacceptMealDay,
+    updateMealSettings: meals.updateMealSettings,
+    upsertMealOption: meals.upsertMealOption,
+    upsertMealCatalogItem: meals.upsertMealCatalogItem,
+    setMealWeekBase: meals.setMealWeekBase,
+    setMealWeekExtras: meals.setMealWeekExtras,
+    setMealDayExtras: meals.setMealDayExtras,
+    copyPreviousMealWeek: meals.copyPreviousMealWeek,
+    publishMealWeek: meals.publishMealWeek,
+    addMealAdvanceReceipt: meals.addMealAdvanceReceipt,
+    recordAttendancePunch: attendanceSlice.recordAttendancePunch,
     upsertPurchaseOrder: procurement.upsertPurchaseOrder,
     createPurchaseOrder: procurement.createPurchaseOrder,
     removePurchaseOrder: procurement.removePurchaseOrder,
     addPurchaseOrderMilestone: procurement.addPurchaseOrderMilestone,
     setPurchaseOrderStatus: procurement.setPurchaseOrderStatus,
     receivePurchaseOrder: procurement.receivePurchaseOrder,
+    upsertProcurementCategory: procurement.upsertProcurementCategory,
+    removeProcurementCategory: procurement.removeProcurementCategory,
+    upsertRoutePoint: procurement.upsertRoutePoint,
+    removeRoutePoint: procurement.removeRoutePoint,
     giveAdvance: finance.giveAdvance,
     removeAdvance: finance.removeAdvance,
+    saveAdvanceDocumentDraft: finance.saveAdvanceDocumentDraft,
+    prepareAdvanceDocument: finance.prepareAdvanceDocument,
+    unprepareAdvanceDocument: finance.unprepareAdvanceDocument,
+    postAdvanceDocument: finance.postAdvanceDocument,
+    voidAdvanceDocument: finance.voidAdvanceDocument,
+    deleteAdvanceDocumentDraft: finance.deleteAdvanceDocumentDraft,
+    markFinanceDocExported: finance.markFinanceDocExported,
+    saveAdvanceAccrualDraft: finance.saveAdvanceAccrualDraft,
+    postAdvanceAccrual: finance.postAdvanceAccrual,
+    voidAdvanceAccrual: finance.voidAdvanceAccrual,
+    deleteAdvanceAccrualDraft: finance.deleteAdvanceAccrualDraft,
+    createDisbursementFromAccrual: finance.createDisbursementFromAccrual,
+    savePayoutDocumentDraft: finance.savePayoutDocumentDraft,
+    preparePayoutDocument: finance.preparePayoutDocument,
+    unpreparePayoutDocument: finance.unpreparePayoutDocument,
+    postPayoutDocument: finance.postPayoutDocument,
+    voidPayoutDocument: finance.voidPayoutDocument,
+    deletePayoutDocumentDraft: finance.deletePayoutDocumentDraft,
     addAdjustment: finance.addAdjustment,
     removeAdjustment: finance.removeAdjustment,
     addPayout: finance.addPayout,
     removePayout: finance.removePayout,
     confirmSick: finance.confirmSick,
     unconfirmSick: finance.unconfirmSick,
+    confirmVacation: finance.confirmVacation,
+    unconfirmVacation: finance.unconfirmVacation,
     upsertAppUser: accessSlice.upsertAppUser,
     removeAppUser: accessSlice.removeAppUser,
+    removeWebUser: accessSlice.removeWebUser,
     setRoleViews: accessSlice.setRoleViews,
+    setRoleDirectorySections: accessSlice.setRoleDirectorySections,
     setRoleAllowNegativeStock: accessSlice.setRoleAllowNegativeStock,
     setRoleAllowDocumentCancel: accessSlice.setRoleAllowDocumentCancel,
+    setRoleTimesheetAccess: accessSlice.setRoleTimesheetAccess,
+    setRoleTaskAccess: accessSlice.setRoleTaskAccess,
+    upsertUserGroup: accessSlice.upsertUserGroup,
+    removeUserGroup: accessSlice.removeUserGroup,
     setupInitialAdminPassword: accessSlice.setupInitialAdminPassword,
+    completeWebPasswordChange: accessSlice.completeWebPasswordChange,
+    clearWebMustChangePasswordFlag: accessSlice.clearWebMustChangePasswordFlag,
     updateUserViewDefaults: accessSlice.updateUserViewDefaults,
+    upsertWorkshopMasterCoverage: accessSlice.upsertWorkshopMasterCoverage,
+    postWorkshopMasterCoverage: accessSlice.postWorkshopMasterCoverage,
+    endWorkshopMasterCoverage: accessSlice.endWorkshopMasterCoverage,
   }
 }

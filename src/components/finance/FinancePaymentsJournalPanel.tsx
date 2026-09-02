@@ -12,6 +12,8 @@ type Props = {
   month: string
   onMonthChange: (m: string) => void
   asOfDate?: string
+  /** Внутри панели документов — без дублирования шапки. */
+  embedded?: boolean
 }
 
 function methodLabel(method: string, t: (k: string) => string): string {
@@ -19,7 +21,7 @@ function methodLabel(method: string, t: (k: string) => string): string {
   return t(key)
 }
 
-export function FinancePaymentsJournalPanel({ store, month, onMonthChange, asOfDate }: Props) {
+export function FinancePaymentsJournalPanel({ store, month, onMonthChange, asOfDate, embedded }: Props) {
   const { t, locale } = useI18n()
   const [kindFilter, setKindFilter] = useState<'all' | 'advance' | 'payout'>('all')
 
@@ -74,20 +76,22 @@ export function FinancePaymentsJournalPanel({ store, month, onMonthChange, asOfD
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-ink">{t('finance.payments.title')}</h2>
-          <p className="text-sm text-stone-500">
-            {formatMonthTitle(month, locale)} · {t('finance.payments.subtitle')}
-          </p>
+      {!embedded && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-ink">{t('finance.payments.title')}</h2>
+            <p className="text-sm text-stone-500">
+              {formatMonthTitle(month, locale)} · {t('finance.payments.subtitle')}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <MonthNavigator month={month} onChange={onMonthChange} />
+            <Button variant="secondary" size="sm" onClick={exportCsv} disabled={!filtered.length}>
+              {t('finance.dashboard.exportPayments')}
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <MonthNavigator month={month} onChange={onMonthChange} />
-          <Button variant="secondary" size="sm" onClick={exportCsv} disabled={!filtered.length}>
-            {t('finance.dashboard.exportPayments')}
-          </Button>
-        </div>
-      </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-sm border border-grid bg-white px-4 py-3 shadow-sm">

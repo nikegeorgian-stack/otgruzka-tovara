@@ -2,6 +2,8 @@ import { newId } from '@/lib/hr/files'
 import { applyHrStatus } from '@/lib/hr/sync'
 import { suggestNextTabNumber } from '@/lib/hr/tabNumber'
 import type { Employee } from '@/lib/types'
+import type { Locale } from '@/i18n/types'
+import { normalizeQuestionnaire } from './candidateQuestionnaire'
 import type { Candidate, CandidateStatus, HrDocument, HrEducation, HrWorkExperience } from './types'
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -23,7 +25,7 @@ export function isHireStatus(status: CandidateStatus): boolean {
   return HIRE_STATUSES.includes(status)
 }
 
-export function candidateStatusLabel(status: CandidateStatus, locale: 'ru' | 'ka'): string {
+export function candidateStatusLabel(status: CandidateStatus, locale: Locale): string {
   const ru: Record<CandidateStatus, string> = {
     new: 'Новый',
     interview_scheduled: 'Собеседование назначено',
@@ -99,6 +101,7 @@ export function normalizeCandidate(raw: unknown): Candidate | null {
     id: typeof r.id === 'string' && r.id ? r.id : newId(),
     fullName,
     nameKa: typeof r.nameKa === 'string' ? r.nameKa : undefined,
+    nameEn: typeof r.nameEn === 'string' ? r.nameEn : undefined,
     phone: typeof r.phone === 'string' ? r.phone : undefined,
     email: typeof r.email === 'string' ? r.email : undefined,
     position: typeof r.position === 'string' ? r.position : undefined,
@@ -119,6 +122,7 @@ export function normalizeCandidate(raw: unknown): Candidate | null {
     education: normArray<HrEducation>(r.education),
     workExperience: normArray<HrWorkExperience>(r.workExperience),
     documents: normArray<HrDocument>(r.documents),
+    questionnaire: normalizeQuestionnaire(r.questionnaire),
     createdAt: typeof r.createdAt === 'string' ? r.createdAt : now,
     updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : now,
   }
@@ -141,6 +145,7 @@ export function candidateToEmployee(
       id: newId(),
       fullName: candidate.fullName,
       nameKa: candidate.nameKa,
+      nameEn: candidate.nameEn,
       tabNumber: suggestNextTabNumber(employees),
       position: candidate.position ?? '',
       brigade,

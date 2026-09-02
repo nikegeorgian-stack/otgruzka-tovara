@@ -1,3 +1,4 @@
+import { sanitizeStoreForExport } from '@/lib/storage'
 import { stripUndefinedDeep } from './firestoreSanitize'
 import type { AppStore } from '@/lib/types'
 
@@ -15,9 +16,9 @@ export function fingerprintJson(json: string): string {
   return `${json.length}:${h >>> 0}`
 }
 
-/** Один проход: очистка undefined + сериализация (дорого — не дублировать). */
+/** Один проход: очистка undefined + redact секретов + сериализация. */
 export function prepareCloudPayload(store: AppStore): PreparedCloudPayload {
-  const payload = stripUndefinedDeep(store)
+  const payload = stripUndefinedDeep(sanitizeStoreForExport(store))
   const json = JSON.stringify(payload)
   return {
     payload,

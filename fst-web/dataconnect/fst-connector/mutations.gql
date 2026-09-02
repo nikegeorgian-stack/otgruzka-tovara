@@ -1,0 +1,68 @@
+mutation CreateFstStore(
+  $id: String!
+  $payloadJson: String!
+  $fingerprint: String!
+  $updatedByUid: String!
+) @auth(level: USER, insecureReason: "Shared FST store for all authenticated team members") @transaction {
+  fstStore_insert(data: {
+    id: $id
+    revision: 1
+    payloadJson: $payloadJson
+    fingerprint: $fingerprint
+    updatedByUid: $updatedByUid
+  })
+}
+
+# Optimistic lock via WHERE revision = expectedRevision.
+# If 0 rows updated → @check fails → client merge+retry.
+mutation UpdateFstStore(
+  $id: String!
+  $expectedRevision: Int!
+  $revision: Int!
+  $payloadJson: String!
+  $fingerprint: String!
+  $updatedByUid: String!
+) @auth(level: USER, insecureReason: "Shared FST store for all authenticated team members") @transaction {
+  fstStore_updateMany(
+    where: {
+      id: { eq: $id }
+      revision: { eq: $expectedRevision }
+    }
+    data: {
+      revision: $revision
+      payloadJson: $payloadJson
+      fingerprint: $fingerprint
+      updatedByUid: $updatedByUid
+    }
+  ) @check(expr: "this == 1", message: "revision_conflict")
+}
+
+mutation UpsertJournalEvent(
+  $id: String!
+  $at: Timestamp!
+  $category: String!
+  $title: String!
+  $detail: String!
+  $actor: String
+  $docDate: String
+  $docNumber: String
+  $docStatus: String
+  $linkKind: String
+  $linkRef: String
+  $storeRevision: Int!
+) @auth(level: USER, insecureReason: "Journal indexing") {
+  journalEvent_upsert(data: {
+    id: $id
+    at: $at
+    category: $category
+    title: $title
+    detail: $detail
+    actor: $actor
+    docDate: $docDate
+    docNumber: $docNumber
+    docStatus: $docStatus
+    linkKind: $linkKind
+    linkRef: $linkRef
+    storeRevision: $storeRevision
+  })
+}

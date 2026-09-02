@@ -72,12 +72,20 @@ export type ProductionOrder = {
   rawMaterialItemId?: string
   /** Рецепт упаковки палеты */
   packagingRecipeId?: string
+  /** Рецепт коробки */
+  boxRecipeId?: string
   /** Рецептура пропиточного состава */
   formulationRecipeId?: string
   /** Запрос / назначение рецептуры технологом */
   formulationRecipeStatus?: FormulationRecipeStatus
-  /** Целевая граммовка для подбора рецепта, г/м² */
+  /** Целевая граммовка / плотность для подбора рецепта, г/м² */
   targetGsm?: number
+  /** Размер ячейки сетки (4x4, 4x5, 5x5…) */
+  meshCellSize?: string
+  /** Сколько рулонов заказано (явно; иначе из п.м / п.м в рулоне) */
+  orderedRolls?: number
+  /** Рулонов в коробке (иначе из рецепта упаковки) */
+  rollsPerBox?: number
   /** Примечание по этикетке из заказа клиента */
   labelNote?: string
   /** Связь с заказом клиента */
@@ -115,11 +123,14 @@ export const PLANNER_ORDER_CATEGORIES: {
   { key: 'cat32', labelRu: '3,2 кат', labelKa: '3,2 კატ' },
 ]
 
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
 export function plannerCategoryLabel(
   key: PlannerOrderCategory,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   const row = PLANNER_ORDER_CATEGORIES.find((c) => c.key === key)
   if (!row) return key
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }

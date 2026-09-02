@@ -8,6 +8,7 @@ import {
   openItemRenameRequests,
 } from '@/lib/warehouse/itemRenameRequests'
 import type { WarehouseStore } from '@/lib/warehouse/types'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 
 type Tab = 'open' | 'journal'
 
@@ -141,7 +142,7 @@ export function WarehouseItemRenameRequestsPanel({
       )}
 
       {rejectId && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
+        <div className={`${CHROME_BACKDROP_CLASS} z-[120] bg-black/40`}>
           <div className="w-full max-w-md rounded-sm bg-white p-5 shadow-sm">
             <h3 className="font-bold text-ink">{t('warehouse.renameRequests.rejectTitle')}</h3>
             <textarea

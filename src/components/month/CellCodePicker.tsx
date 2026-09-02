@@ -3,14 +3,55 @@ import { createPortal } from 'react-dom'
 import { usePopoverZIndex } from '@/hooks/useModalScope'
 import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { useI18n } from '@/context/I18nContext'
-import { FACT_EXTRA_HOURS_OPTIONS } from '@/lib/factExtra'
+import { hoursForCode } from '@/lib/codes'
+import { FACT_EXTRA_HOURS_OPTIONS, isWorkCode } from '@/lib/factExtra'
 import { scheduleShortLabel } from '@/lib/schedules'
 import type { DayCode, ScheduleType } from '@/lib/types'
 import { CELL_CODE_STYLES } from './DayCell'
 
-const PLAN_PICK_CODES: DayCode[] = ['ОТ', 'ОО', 'Б', 'В', '8', '11', 'Н', '22', 'X', 'ПР', '']
+const PLAN_PICK_CODES: DayCode[] = [
+  'ОТ',
+  'ОО',
+  'Б',
+  'В',
+  '4',
+  '6',
+  '8',
+  '11',
+  'Н',
+  '22',
+  'X',
+  'ПР',
+  '',
+]
 
-const FACT_BASE_CODES: DayCode[] = ['ОТ', 'ОО', 'Б', 'В', '8', '11', 'Н', '22', 'X', 'ПР', '']
+const FACT_BASE_CODES: DayCode[] = [
+  'ОТ',
+  'ОО',
+  'Б',
+  'В',
+  '4',
+  '6',
+  '8',
+  '11',
+  'Н',
+  '22',
+  'X',
+  'ПР',
+  '',
+]
+
+/** Частые варианты неполной / полной смены (4, 7 и т.д.). */
+const HOUR_OVERRIDE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const
+
+const KEEP_OPEN_FOR_HOURS: ReadonlySet<DayCode> = new Set([
+  '4',
+  '6',
+  '8',
+  '11',
+  'Н',
+  '22',
+])
 
 type Props = {
   x: number
@@ -19,8 +60,13 @@ type Props = {
   mode: 'plan' | 'fact'
   current: DayCode
   currentExtra?: number
+  currentOverrideHours?: number | null
+  /** Код плана этой ячейки — для кнопки «Как по плану» (как в перекличке). */
+  planCode?: DayCode
   onPick: (code: DayCode) => void
   onPickExtra?: (hours: number) => void
+  /** Точные отработанные часы смены (override). */
+  onPickHoursOverride?: (hours: number | null) => void
   /** Циклический график сотрудника (2/2 или 1/1) — включает блок «цикл с этого дня». */
   cycleSchedule?: ScheduleType
   onPickCycle?: (variant: 'first' | 'last') => void
@@ -61,8 +107,11 @@ export function CellCodePicker({
   mode,
   current,
   currentExtra = 0,
+  currentOverrideHours = null,
+  planCode,
   onPick,
   onPickExtra,
+  onPickHoursOverride,
   cycleSchedule,
   onPickCycle,
   onClose,
@@ -71,7 +120,19 @@ export function CellCodePicker({
   const ref = useRef<HTMLDivElement>(null)
   const popoverZ = usePopoverZIndex()
   const [pos, setPos] = useState({ left: x, top: y })
+  const [customHours, setCustomHours] = useState(
+    () => (currentOverrideHours != null ? String(currentOverrideHours) : ''),
+  )
   const canAddExtra = mode === 'fact' && !!onPickExtra
+  const canOverrideHours = mode === 'fact' && !!onPickHoursOverride
+  const workCode = isWorkCode(current)
+  const planOff = hoursForCode((planCode ?? '') as DayCode) <= 0
+  /** На выходном плане можно сразу указать часы — код подставится сам. */
+  const hoursEnabled = workCode || (canOverrideHours && planOff)
+
+  useEffect(() => {
+    setCustomHours(currentOverrideHours != null ? String(currentOverrideHours) : '')
+  }, [currentOverrideHours])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -110,7 +171,7 @@ export function CellCodePicker({
     <div
       ref={ref}
       className={`app-dialog-panel fixed overflow-hidden rounded-sm border border-grid bg-white shadow-sm  ${
-        canAddExtra ? 'w-[18rem]' : 'w-[16rem]'
+        canAddExtra || canOverrideHours ? 'w-[18rem]' : 'w-[16rem]'
       }`}
       style={{ left: pos.left, top: pos.top, zIndex: popoverZ }}
       role="dialog"
@@ -123,6 +184,26 @@ export function CellCodePicker({
         <p className="font-mono text-sm font-medium text-ink">{dateLabel}</p>
       </div>
       <div className="p-2">
+      {mode === 'fact' && planCode !== undefined ? (
+        <button
+          type="button"
+          className={`mb-2 w-full rounded-sm border px-2 py-1.5 text-left text-xs font-semibold transition-all hover:ring-2 hover:ring-emerald-400/50 ${
+            current === planCode
+              ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
+              : 'border-grid bg-paper hover:bg-paper-dark'
+          }`}
+          title={t('rollcall.cameHint')}
+          onClick={() => {
+            onPick(planCode)
+            onClose()
+          }}
+        >
+          {t('rollcall.came')}
+          <span className="ml-1 font-mono text-stone-500">
+            ({planCode || '·'})
+          </span>
+        </button>
+      ) : null}
       <div className="grid grid-cols-5 gap-1">
         {codes.map((code) => {
           const active = code === current
@@ -145,7 +226,9 @@ export function CellCodePicker({
               label={label}
               onClick={() => {
                 onPick(code)
-                onClose()
+                const keepOpenForHours =
+                  canOverrideHours && KEEP_OPEN_FOR_HOURS.has(code)
+                if (!keepOpenForHours) onClose()
               }}
             />
           )
@@ -186,6 +269,84 @@ export function CellCodePicker({
         </div>
       )}
 
+      {canOverrideHours && (
+        <div className="mt-2 border-t border-grid pt-2">
+          <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+            {planOff && !workCode
+              ? t('cellPicker.hoursWeekendTitle')
+              : t('cellPicker.hoursTitle')}
+          </p>
+          <div className="grid grid-cols-6 gap-1">
+            {HOUR_OVERRIDE_OPTIONS.map((h) => (
+              <button
+                key={h}
+                type="button"
+                title={tf('cellPicker.hoursExact', { n: h })}
+                disabled={!hoursEnabled}
+                className={`rounded-sm border px-0.5 py-1.5 font-mono text-xs font-bold transition-all hover:ring-2 hover:ring-rose-400/60 disabled:cursor-not-allowed disabled:opacity-35 ${
+                  currentOverrideHours === h ||
+                  (currentOverrideHours == null && workCode && hoursForCode(current) === h)
+                    ? 'border-rose-500 bg-rose-100 text-rose-900 ring-2 ring-rose-400 ring-offset-1'
+                    : 'border-rose-200 bg-rose-50 text-rose-800'
+                }`}
+                onClick={() => onPickHoursOverride!(h)}
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+          <div className="mt-1.5 flex items-center gap-1">
+            <input
+              type="number"
+              min={0}
+              max={24}
+              step={1}
+              inputMode="numeric"
+              disabled={!hoursEnabled}
+              placeholder={t('cellPicker.hoursCustom')}
+              title={t('cellPicker.hoursCustomHint')}
+              className="min-w-0 flex-1 rounded-sm border border-rose-200 bg-rose-50/50 px-2 py-1.5 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-35"
+              value={customHours}
+              onChange={(e) => setCustomHours(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                const n = Number(customHours.replace(',', '.'))
+                if (!Number.isFinite(n)) return
+                onPickHoursOverride!(Math.max(0, Math.min(24, Math.round(n))))
+              }}
+            />
+            <button
+              type="button"
+              title={t('cellPicker.hoursApply')}
+              disabled={!hoursEnabled || !customHours.trim()}
+              className="rounded-sm border border-rose-300 bg-rose-100 px-2 py-1.5 text-[10px] font-semibold text-rose-900 hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={() => {
+                const n = Number(customHours.replace(',', '.'))
+                if (!Number.isFinite(n)) return
+                onPickHoursOverride!(Math.max(0, Math.min(24, Math.round(n))))
+              }}
+            >
+              OK
+            </button>
+            <button
+              type="button"
+              title={t('cellPicker.hoursClear')}
+              disabled={currentOverrideHours == null}
+              className="rounded-sm border border-stone-200 bg-stone-50 px-2 py-1.5 font-mono text-xs text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={() => onPickHoursOverride!(null)}
+            >
+              —
+            </button>
+          </div>
+          {!hoursEnabled ? (
+            <p className="mt-1.5 px-1 text-[10px] text-stone-400">{t('cellPicker.extraNeedWork')}</p>
+          ) : planOff && !workCode ? (
+            <p className="mt-1.5 px-1 text-[10px] text-amber-700">{t('cellPicker.hoursWeekendHint')}</p>
+          ) : null}
+        </div>
+      )}
+
       {canAddExtra && (
         <div className="mt-2 border-t border-grid pt-2">
           <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
@@ -197,16 +358,13 @@ export function CellCodePicker({
                 key={h}
                 type="button"
                 title={tf('cellPicker.extraHours', { n: h })}
-                disabled={!current || !['8', '11', 'Н', '22'].includes(current)}
+                disabled={!workCode}
                 className={`rounded-sm border px-0.5 py-1.5 font-mono text-xs font-bold transition-all hover:ring-2 hover:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-35 ${
                   currentExtra === h
                     ? 'border-amber-500 bg-amber-100 text-amber-900 ring-2 ring-amber-400 ring-offset-1'
                     : 'border-amber-200 bg-amber-50 text-amber-800'
                 }`}
-                onClick={() => {
-                  onPickExtra!(h)
-                  onClose()
-                }}
+                onClick={() => onPickExtra!(h)}
               >
                 +{h}
               </button>
@@ -216,10 +374,7 @@ export function CellCodePicker({
               title={t('cellPicker.extraClear')}
               disabled={currentExtra <= 0}
               className="rounded-sm border border-stone-200 bg-stone-50 px-0.5 py-1.5 font-mono text-xs text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => {
-                onPickExtra!(0)
-                onClose()
-              }}
+              onClick={() => onPickExtra!(0)}
             >
               —
             </button>
@@ -227,7 +382,7 @@ export function CellCodePicker({
           {mode === 'fact' && current === 'Н' && (
             <p className="mt-1.5 px-1 text-[10px] text-violet-700">{t('cellPicker.nightHint')}</p>
           )}
-          {canAddExtra && current && !['8', '11', 'Н', '22'].includes(current) && (
+          {canAddExtra && current && !workCode && (
             <p className="mt-1.5 px-1 text-[10px] text-stone-400">{t('cellPicker.extraNeedWork')}</p>
           )}
         </div>

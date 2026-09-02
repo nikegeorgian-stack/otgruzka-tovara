@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { AppDialog } from '@/components/ui/AppDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -32,7 +33,7 @@ import {
   filterFormulationComponentItems,
   formulationRecipeDisplayName,
 } from '@/lib/formulations/warehouseSync'
-import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
+import { computeAllBalances, formatQty, resolveItemUnitPrice } from '@/lib/warehouse/stock'
 import type { CreateItemRequestInput } from '@/lib/warehouse/itemRequests'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 
@@ -66,6 +67,7 @@ export function FormulationRecipeBuilder({
   const [requestUnit, setRequestUnit] = useState('кг')
   const [requestNote, setRequestNote] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [priceNotice, setPriceNotice] = useState<string | null>(null)
 
   const componentItems = useMemo(
     () => filterFormulationComponentItems(warehouse.items, categoryNames),
@@ -166,6 +168,27 @@ export function FormulationRecipeBuilder({
     })
   }
 
+  function pullPricesFromWarehouse() {
+    let updated = 0
+    let missing = 0
+    const components = recipe.components.map((c) => {
+      if (isFormulationWaterComponent(c) || !c.warehouseItemId) return c
+      const price = resolveItemUnitPrice(warehouse, c.warehouseItemId)
+      if (price == null) {
+        missing++
+        return c
+      }
+      updated++
+      return { ...c, pricePerKg: price }
+    })
+    onChange({ ...recipe, components })
+    setPriceNotice(
+      updated > 0
+        ? tf('technologist.pullPrices.ok', { n: updated, miss: missing })
+        : t('technologist.pullPrices.none'),
+    )
+  }
+
   function trySave() {
     if (!recipe.name.trim()) {
       setSaveError(t('formulation.errName'))
@@ -246,7 +269,7 @@ export function FormulationRecipeBuilder({
                   >
                     {FORMULATION_CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {locale === 'ka' ? c.labelKa : c.labelRu}
+                        {labelRuKa(locale, c.labelRu, c.labelKa)}
                       </option>
                     ))}
                   </select>
@@ -283,7 +306,7 @@ export function FormulationRecipeBuilder({
                     <option value="">—</option>
                     {FORMULATION_COLOR_VARIANTS.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {locale === 'ka' ? c.labelKa : c.labelRu}
+                        {labelRuKa(locale, c.labelRu, c.labelKa)}
                       </option>
                     ))}
                   </select>
@@ -393,7 +416,21 @@ export function FormulationRecipeBuilder({
             </div>
           </Card>
 
-          <Card title={t('formulation.components')}>
+          <Card
+            title={t('formulation.components')}
+            actions={
+              <Button size="sm" variant="secondary" type="button" onClick={pullPricesFromWarehouse}>
+                {t('technologist.pullPrices')}
+              </Button>
+            }
+          >
+            {priceNotice ? (
+              <FormNotice
+                type="info"
+                message={priceNotice}
+                onDismiss={() => setPriceNotice(null)}
+              />
+            ) : null}
             {recipe.components.length === 0 ? (
               <p className="py-8 text-center text-sm text-stone-500">
                 {t('technologist.recipeComponentsEmpty')}
@@ -440,7 +477,7 @@ export function FormulationRecipeBuilder({
                           ×
                         </button>
                       </div>
-                      <div className="mt-2 grid gap-2 sm:grid-cols-4">
+                      <div className="mt-2 grid gap-2 sm:grid-cols-5">
                         <FormField label={t('formulation.comp.weight')}>
                           <Input
                             type="number"
@@ -461,6 +498,20 @@ export function FormulationRecipeBuilder({
                             onChange={(e) =>
                               patchComponent(c.id, {
                                 batchKg: e.target.value ? Number(e.target.value) : undefined,
+                              })
+                            }
+                          />
+                        </FormField>
+                        <FormField label={t('formulation.comp.price')}>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            disabled={isWater}
+                            value={c.pricePerKg ?? ''}
+                            onChange={(e) =>
+                              patchComponent(c.id, {
+                                pricePerKg: e.target.value ? Number(e.target.value) : undefined,
                               })
                             }
                           />

@@ -8,6 +8,7 @@ import {
   detectBankFromIban,
   normalizeIban,
 } from '@/lib/hr/banks'
+import { promoteBankAccount } from '@/lib/hr/employeeBank'
 import type {
   HrBankAccount,
   HrEducation,
@@ -184,12 +185,14 @@ function BankAccountRow({
   locale,
   onUpdate,
   onRemove,
+  onPromote,
 }: {
   acc: HrBankAccount
   employeeName: string
   locale: Locale
   onUpdate: (patch: Partial<HrBankAccount>) => void
   onRemove: () => void
+  onPromote?: () => void
 }) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
@@ -289,19 +292,49 @@ function BankAccountRow({
             </span>
           )}
         </label>
+
+        <label className="block text-xs font-medium text-stone-500">
+          {t('hr.bank.validFrom')}
+          <input
+            type="date"
+            className={`${fieldClass} mt-1`}
+            value={acc.validFrom ?? ''}
+            onChange={(ev) => onUpdate({ validFrom: ev.target.value || undefined })}
+          />
+        </label>
+        <label className="block text-xs font-medium text-stone-500">
+          {t('hr.bank.validUntil')}
+          <input
+            type="date"
+            className={`${fieldClass} mt-1`}
+            value={acc.validUntil ?? ''}
+            onChange={(ev) => onUpdate({ validUntil: ev.target.value || undefined })}
+          />
+        </label>
       </div>
 
-      <div className="mt-2 flex items-center justify-between">
-        <label className="flex items-center gap-1.5 text-xs text-stone-600">
-          <input
-            type="checkbox"
-            checked={acc.isPrimary ?? false}
-            onChange={(ev) => onUpdate({ isPrimary: ev.target.checked })}
-          />
-          {t('hr.bank.primary')}
-        </label>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-stone-600">
+            <input
+              type="checkbox"
+              checked={acc.isPrimary ?? false}
+              onChange={(ev) => onUpdate({ isPrimary: ev.target.checked })}
+            />
+            {t('hr.bank.primary')}
+          </label>
+          {onPromote ? (
+            <button
+              type="button"
+              className="rounded-sm border border-teal-700 px-2 py-1 text-[11px] font-semibold text-teal-800 hover:bg-teal-50"
+              onClick={onPromote}
+            >
+              {t('hr.bank.promoteToday')}
+            </button>
+          ) : null}
+        </div>
         <button type="button" className={removeBtnClass} onClick={onRemove}>
-          Удалить
+          {t('hr.bank.remove')}
         </button>
       </div>
     </div>
@@ -318,31 +351,78 @@ export function BankSection({
   onChange: (next: HrBankAccount[]) => void
 }) {
   const { t, locale } = useI18n()
+  const today = new Date().toISOString().slice(0, 10)
+
   const add = () =>
-    onChange([...items, { id: newId(), iban: '', currency: 'GEL', isPrimary: items.length === 0 }])
+    onChange([
+      ...items,
+      {
+        id: newId(),
+        iban: '',
+        currency: 'GEL',
+        isPrimary: items.length === 0,
+        validFrom: today,
+      },
+    ])
+
   const update = (id: string, patch: Partial<HrBankAccount>) =>
     onChange(items.map((a) => (a.id === id ? { ...a, ...patch } : a)))
-  const remove = (id: string) => onChange(items.filter((a) => a.id !== id))
+
+  const remove = (id: string) => {
+    const acc = items.find((a) => a.id === id)
+    if (acc?.iban?.trim() && !acc.validUntil) {
+      onChange(
+        items.map((a) =>
+          a.id === id ? { ...a, isPrimary: false, validUntil: today } : a,
+        ),
+      )
+      return
+    }
+    onChange(items.filter((a) => a.id !== id))
+  }
+
+  const promote = (id: string) => onChange(promoteBankAccount(items, id, today))
+
+  const sorted = [...items].sort((a, b) => {
+    const aClosed = a.validUntil && a.validUntil < today ? 1 : 0
+    const bClosed = b.validUntil && b.validUntil < today ? 1 : 0
+    if (aClosed !== bClosed) return aClosed - bClosed
+    if ((a.isPrimary ? 1 : 0) !== (b.isPrimary ? 1 : 0)) return (b.isPrimary ? 1 : 0) - (a.isPrimary ? 1 : 0)
+    return (b.validFrom || '').localeCompare(a.validFrom || '')
+  })
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-ink">{t('hr.bank.title')}</h4>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-ink">{t('hr.bank.title')}</h4>
+          <p className="text-xs text-stone-500">{t('hr.bank.periodHint')}</p>
+        </div>
         <button type="button" className={addBtnClass} onClick={add}>
           + {t('hr.bank.add')}
         </button>
       </div>
       {items.length === 0 && <p className="text-xs text-stone-400">{t('hr.bank.empty')}</p>}
-      {items.map((acc) => (
-        <BankAccountRow
-          key={acc.id}
-          acc={acc}
-          employeeName={employeeName}
-          locale={locale as Locale}
-          onUpdate={(patch) => update(acc.id, patch)}
-          onRemove={() => remove(acc.id)}
-        />
-      ))}
+      {sorted.map((acc) => {
+        const closed = Boolean(acc.validUntil && acc.validUntil < today)
+        return (
+          <div key={acc.id} className={closed ? 'opacity-70' : undefined}>
+            {closed ? (
+              <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                {t('hr.bank.archived')}
+              </p>
+            ) : null}
+            <BankAccountRow
+              acc={acc}
+              employeeName={employeeName}
+              locale={locale as Locale}
+              onUpdate={(patch) => update(acc.id, patch)}
+              onRemove={() => remove(acc.id)}
+              onPromote={closed ? undefined : () => promote(acc.id)}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }

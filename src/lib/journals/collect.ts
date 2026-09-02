@@ -1,6 +1,18 @@
 import type { AppStore } from '@/lib/types'
+import { getFinance } from '@/lib/finance/calc'
+import { documentLineTotal, listAdvanceDocuments } from '@/lib/finance/advanceDocuments'
+import {
+  accrualLineTotal,
+  listAdvanceAccruals,
+} from '@/lib/finance/advanceAccrual'
+import {
+  documentLineTotal as payoutLineTotal,
+  listPayoutDocuments,
+} from '@/lib/finance/payoutDocuments'
 import { formatMixDate } from '@/lib/formulations/cubeLabel'
 import type { PurchaseOrder, PurchaseOrderStatusChange } from '@/lib/procurement/types'
+import { resolveCounterpartyDisplayName } from '@/lib/warehouse/documentValidation'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import {
   AUDIT_ACTION_LABEL,
   AUDIT_DOC_TYPE_KEY,
@@ -19,7 +31,23 @@ function push(out: UnifiedJournalEntry[], entry: UnifiedJournalEntry) {
 
 function itemName(store: AppStore, itemId?: string): string {
   if (!itemId) return ''
-  return store.warehouse.items.find((i) => i.id === itemId)?.name ?? itemId.slice(0, 8)
+  const item = store.warehouse.items.find((i) => i.id === itemId)
+  return item ? warehouseItemDisplayName(item) : itemId.slice(0, 8)
+}
+
+function inventoryDocumentPreview(
+  store: AppStore,
+  document: AppStore['warehouse']['documents'][number],
+): string {
+  if (document.type !== 'inventory' || document.lines.length === 0) return ''
+  const itemById = new Map(store.warehouse.items.map((item) => [item.id, item]))
+  const preview = document.lines.slice(0, 3).map((line) => {
+    const item = itemById.get(line.itemId)
+    return `${item?.name ?? line.itemId}: ${line.quantity}${item?.unit ? ` ${item.unit}` : ''}`
+  })
+  const more =
+    document.lines.length > preview.length ? `; +${document.lines.length - preview.length}` : ''
+  return ` · ${preview.join('; ')}${more}`
 }
 
 function employeeName(store: AppStore, id?: string): string | undefined {
@@ -67,10 +95,16 @@ const MOVEMENT_TYPE: Record<string, string> = {
 export function collectJournalEntries(
   store: AppStore,
   categories: JournalCategory[],
+  opts?: {
+    viewerUserId?: string
+    viewerRoleId?: import('@/lib/access/types').AccessRoleId
+    /** null/undefined = весь завод; массив = только эти бригады */
+    viewerBrigades?: string[] | null
+  },
 ): UnifiedJournalEntry[] {
   const allowed = new Set(categories)
   const out: UnifiedJournalEntry[] = []
-  const locale = store.settings.locale === 'ka' ? 'ka' : 'ru'
+  const locale = store.settings.locale
 
   if (TIMESHEET_CATEGORIES.some((c) => allowed.has(c))) {
     for (const e of store.auditLog) {
@@ -82,6 +116,24 @@ export function collectJournalEntries(
         link = { kind: 'month', month: e.month }
       } else if (e.employeeId && category === 'hr') {
         link = { kind: 'hr', employeeId: e.employeeId }
+      } else if (
+        e.action === 'meals_order' ||
+        e.action === 'meals_accept' ||
+        e.action === 'meals_unaccept' ||
+        e.action === 'meals_catalog' ||
+        e.action === 'meals_week' ||
+        e.action === 'meals_advance'
+      ) {
+        link = { kind: 'meals' }
+      } else if (
+        e.action === 'directory_change' ||
+        e.action === 'brigade_rename' ||
+        e.action === 'counterparty_upsert' ||
+        e.action === 'counterparty_remove' ||
+        e.action === 'finished_product_upsert' ||
+        e.action === 'finished_product_remove'
+      ) {
+        link = { kind: 'directories' }
       }
 
       push(out, {
@@ -90,18 +142,210 @@ export function collectJournalEntries(
         at: e.at,
         title: AUDIT_ACTION_LABEL[e.action] ?? e.action,
         detail: e.detail,
-        actor: e.employeeId ? employeeName(store, e.employeeId) : undefined,
+        actor: e.byName ?? (e.by ? employeeName(store, e.by) : undefined),
+        actorId: e.by,
+        entryKind: 'event',
         refId: e.month ?? e.employeeId,
-        docDate: e.month ?? e.at.slice(0, 10),
+        docDate: e.dateKey ?? e.month ?? e.at.slice(0, 10),
+        docNumber:
+          e.action === 'month_close' || e.action === 'month_reopen' || e.action === 'bulk'
+            ? e.month
+            : undefined,
         docTypeKey: AUDIT_DOC_TYPE_KEY[category],
+        docStatus: e.action,
         mode: 'view',
         link,
       })
+    }
+
+    if (allowed.has('timesheet') || allowed.has('access')) {
+      const nameById = new Map(
+        store.access.users.map((u) => [u.id, u.displayName] as const),
+      )
+      const category: JournalCategory = allowed.has('timesheet') ? 'timesheet' : 'access'
+      for (const c of store.access.workshopMasterCoverages ?? []) {
+        const cover = nameById.get(c.coverUserId) ?? c.coverUserId
+        const absent = nameById.get(c.absentUserId) ?? c.absentUserId
+        push(out, {
+          id: `coverage-doc-${c.id}`,
+          category,
+          at: c.postedAt ?? c.endedAt ?? c.createdAt,
+          title: c.number,
+          detail: `${cover} ← ${absent} · ${c.fromDate}…${c.toDate} · ${c.brigades.join(', ')}`,
+          actor: c.postedByName ?? c.createdByName,
+          actorId: c.postedBy ?? c.createdBy,
+          entryKind: 'document',
+          refId: c.id,
+          docDate: c.fromDate,
+          docNumber: c.number,
+          docTypeKey: 'coverage.docType',
+          docStatus: c.status,
+          mode: 'view',
+          link: { kind: 'month', month: c.fromDate.slice(0, 7) },
+        })
+      }
+      for (const d of store.nightShifts?.documents ?? []) {
+        push(out, {
+          id: `night-shift-doc-${d.id}`,
+          category,
+          at: d.postedAt ?? d.voidedAt ?? d.createdAt,
+          title: d.number,
+          detail: `${d.date} · ${d.employeeIds.length} чел.${
+            d.note ? ` · ${d.note}` : ''
+          }${
+            d.reasons && Object.keys(d.reasons).length
+              ? ` · ${Object.values(d.reasons).filter(Boolean).slice(0, 3).join('; ')}`
+              : ''
+          } · ${(d.brigades?.length ? d.brigades : d.groups).join(', ')}`,
+          actor: d.postedByName ?? d.createdByName,
+          actorId: d.postedBy ?? d.createdBy,
+          entryKind: 'document',
+          refId: d.id,
+          docDate: d.date,
+          docNumber: d.number,
+          docTypeKey: 'nightShift.docType',
+          docStatus: d.status,
+          mode: d.status === 'draft' ? 'edit' : 'view',
+          link: { kind: 'month', month: d.date.slice(0, 7) },
+        })
+      }
+      for (const d of store.timesheetEntries?.documents ?? []) {
+        if (d.status === 'draft') continue
+        if (opts?.viewerRoleId === 'workshop_master' && opts.viewerUserId) {
+          const isAuthor =
+            d.createdBy === opts.viewerUserId || d.postedBy === opts.viewerUserId
+          if (!isAuthor) {
+            const scope = opts.viewerBrigades
+            const marks = d.applied ?? d.changes
+            const overlap =
+              Array.isArray(scope) &&
+              marks.some((m) => m.brigade && scope.includes(m.brigade))
+            if (!overlap) continue
+          }
+        }
+        const n = d.applied?.length ?? d.changes.length
+        push(out, {
+          id: `timesheet-entry-doc-${d.id}`,
+          category,
+          at: d.postedAt ?? d.voidedAt ?? d.createdAt,
+          title: d.number,
+          detail: `${d.month} · ${n} яч.${
+            d.skipped ? ` · пропуск ${d.skipped}` : ''
+          }${d.status === 'void' ? ' · аннулирован' : ''}`,
+          actor: d.postedByName ?? d.createdByName,
+          actorId: d.postedBy ?? d.createdBy,
+          entryKind: 'document',
+          refId: d.id,
+          docDate: `${d.month}-01`,
+          docNumber: d.number,
+          docTypeKey: 'timesheetEntry.docType',
+          docStatus: d.status,
+          mode: 'view',
+          link: {
+            kind: 'timesheet_entry_document',
+            documentId: d.id,
+            month: d.month,
+          },
+        })
+      }
+    }
+
+    if (allowed.has('finance')) {
+      const fin = getFinance(store)
+      for (const doc of listAdvanceDocuments(fin, { includeVoid: true })) {
+        const total = documentLineTotal(doc.lines)
+        push(out, {
+          id: `fin-adv-doc-${doc.id}`,
+          category: 'finance',
+          at: doc.postedAt ?? doc.voidedAt ?? doc.readyAt ?? doc.at,
+          title: doc.number,
+          detail: `${doc.lines.length} чел. · ${total} ₾ · ${doc.method}${doc.status === 'void' ? ' · аннулирован' : ''}`,
+          actor: doc.byName,
+          actorId: doc.byId,
+          entryKind: 'document',
+          refId: doc.id,
+          docDate: doc.date,
+          docNumber: doc.number,
+          docTypeKey: 'fin.advDoc.journalType',
+          docStatus: doc.status,
+          mode: doc.status === 'draft' ? 'edit' : 'view',
+          link: {
+            kind: 'finance_advance_document',
+            documentId: doc.id,
+            month: doc.month,
+          },
+        })
+      }
+      for (const doc of listPayoutDocuments(fin, { includeVoid: true })) {
+        const total = payoutLineTotal(doc.lines)
+        push(out, {
+          id: `fin-pay-doc-${doc.id}`,
+          category: 'finance',
+          at: doc.postedAt ?? doc.voidedAt ?? doc.readyAt ?? doc.at,
+          title: doc.number,
+          detail: `${doc.lines.length} чел. · ${total} ₾ · ${doc.method}${doc.status === 'void' ? ' · аннулирован' : ''}`,
+          actor: doc.byName,
+          actorId: doc.byId,
+          entryKind: 'document',
+          refId: doc.id,
+          docDate: doc.date,
+          docNumber: doc.number,
+          docTypeKey: 'fin.payout.journalType',
+          docStatus: doc.status,
+          mode: doc.status === 'draft' ? 'edit' : 'view',
+          link: {
+            kind: 'finance_payout_document',
+            documentId: doc.id,
+            month: doc.month,
+          },
+        })
+      }
+      for (const doc of listAdvanceAccruals(fin, { includeVoid: true })) {
+        const total = accrualLineTotal(doc.lines)
+        push(out, {
+          id: `fin-accrual-${doc.id}`,
+          category: 'finance',
+          at: doc.postedAt ?? doc.voidedAt ?? doc.at,
+          title: doc.number,
+          detail: `${doc.lines.length} чел. · ${total} ₾${doc.status === 'void' ? ' · сторно' : ''}`,
+          actor: doc.byName,
+          actorId: doc.byId,
+          entryKind: 'document',
+          refId: doc.id,
+          docDate: doc.at.slice(0, 10),
+          docNumber: doc.number,
+          docTypeKey: 'fin.accrual.journalType',
+          docStatus: doc.status,
+          mode: doc.status === 'draft' ? 'edit' : 'view',
+          link: {
+            kind: 'finance_accrual_document',
+            documentId: doc.id,
+            month: doc.month,
+          },
+        })
+      }
     }
   }
 
   if (allowed.has('sales')) {
     for (const order of store.sales.orders) {
+      push(out, {
+        id: `so-doc-${order.id}`,
+        category: 'sales',
+        at: order.updatedAt || order.createdAt,
+        title: order.orderNumber,
+        detail: `${order.lines.length} поз.${order.dueDate ? ` · срок ${order.dueDate}` : ''}${order.note ? ` · ${order.note}` : ''}`,
+        actor: undefined,
+        entryKind: 'document',
+        refId: order.id,
+        docDate: order.orderDate,
+        docNumber: order.orderNumber,
+        docTypeKey: 'journals.docType.salesOrder',
+        docStatus: order.status,
+        counterpartyName: order.customer || undefined,
+        mode: order.status === 'draft' ? 'edit' : 'view',
+        link: { kind: 'sales_order', orderId: order.id },
+      })
       for (const h of order.history) {
         push(out, {
           id: `so-${order.id}-${h.id}`,
@@ -110,11 +354,13 @@ export function collectJournalEntries(
           title: order.orderNumber,
           detail: h.message,
           actor: order.customer || undefined,
+          entryKind: 'event',
           refId: order.id,
           docDate: order.orderDate,
           docNumber: order.orderNumber,
-          docTypeKey: 'nav.director',
+          docTypeKey: 'journals.docType.salesOrder',
           docStatus: order.status,
+          counterpartyName: order.customer || undefined,
           mode: order.status === 'draft' ? 'edit' : 'view',
           link: { kind: 'sales_order', orderId: order.id },
         })
@@ -199,6 +445,7 @@ export function collectJournalEntries(
         title: e.action,
         detail: e.detail,
         actor: e.actorName,
+        entryKind: 'event',
         refId: e.itemId ?? e.productionRequestId ?? e.batchRunId,
       })
     }
@@ -212,12 +459,21 @@ export function collectJournalEntries(
         at: m.createdAt,
         title: MOVEMENT_TYPE[m.type] ?? m.type,
         detail: `${itemName(store, m.itemId)} · ${m.quantity} · ${m.date}${m.comment ? ` · ${m.comment}` : ''}`,
-        refId: m.documentNo ?? m.documentId,
+        entryKind: 'event',
+        refId: m.id,
+        docDate: m.date,
+        docNumber: m.documentNo,
+        docTypeKey: 'journals.category.warehouse_movements',
+        link: m.documentId
+          ? { kind: 'warehouse_document', documentId: m.documentId }
+          : undefined,
+        mode: 'view',
       })
     }
   }
 
   if (allowed.has('warehouse_documents')) {
+    const counterparties = store.counterparties?.items ?? []
     for (const d of store.warehouse.documents) {
       const status = d.status ?? 'posted'
       const typeKey =
@@ -226,18 +482,21 @@ export function collectJournalEntries(
           : d.type === 'receipt'
             ? 'warehouse.receipt'
             : 'warehouse.issue'
+      const counterpartyName = resolveCounterpartyDisplayName(d, counterparties, '') || undefined
       push(out, {
         id: `wh-d-${d.id}`,
         category: 'warehouse_documents',
         at: d.postedAt ?? d.createdAt,
         title: d.number,
-        detail: `${d.lines.length} поз.${d.comment ? ` · ${d.comment}` : ''}`,
+        detail: `${d.lines.length} поз.${inventoryDocumentPreview(store, d)}${counterpartyName ? ` · ${counterpartyName}` : ''}${d.comment ? ` · ${d.comment}` : ''}`,
         actor: d.keeperName ?? d.postedByName,
+        entryKind: 'document',
         refId: d.id,
         docDate: d.date,
         docNumber: d.number,
         docTypeKey: typeKey,
         docStatus: status,
+        counterpartyName,
         mode: status === 'draft' ? 'edit' : 'view',
         link: { kind: 'warehouse_document', documentId: d.id },
       })
@@ -246,7 +505,6 @@ export function collectJournalEntries(
 
   if (allowed.has('warehouse_loading')) {
     for (const s of store.warehouse.loadingShipments ?? []) {
-      if (s.status !== 'posted') continue
       push(out, {
         id: `wh-l-${s.id}`,
         category: 'warehouse_loading',
@@ -254,12 +512,14 @@ export function collectJournalEntries(
         title: s.number,
         detail: `${s.counterpartyName} · ${s.lines.length} поз. · ${(s.totalsGrossKg / 1000).toFixed(3)} т${s.orderNo ? ` · ${s.orderNo}` : ''}`,
         actor: s.keeperName,
+        entryKind: 'document',
         refId: s.id,
         docDate: s.date,
         docNumber: s.number,
-        docTypeKey: 'warehouse.tab.loading',
+        docTypeKey: 'journals.docType.loading',
         docStatus: s.status,
-        mode: 'view',
+        counterpartyName: s.counterpartyName || undefined,
+        mode: s.status === 'draft' ? 'edit' : 'view',
         link: { kind: 'warehouse_loading', shipmentId: s.id },
       })
     }
@@ -496,7 +756,7 @@ export function filterJournalEntries(
     if (opts.dateTo && day > opts.dateTo) return false
     if (statusQ && !(e.docStatus ?? '').toLowerCase().includes(statusQ)) return false
     if (!q) return true
-    const hay = `${e.title} ${e.detail} ${e.actor ?? ''} ${e.refId ?? ''} ${e.docNumber ?? ''}`.toLowerCase()
+    const hay = `${e.title} ${e.detail} ${e.actor ?? ''} ${e.refId ?? ''} ${e.docNumber ?? ''} ${e.counterpartyName ?? ''}`.toLowerCase()
     return hay.includes(q)
   })
 }

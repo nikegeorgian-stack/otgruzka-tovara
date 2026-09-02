@@ -14,7 +14,9 @@ import {
 } from '@/lib/formulations/mixTasks'
 import type { FormulationMixTask, FormulationStore } from '@/lib/formulations/types'
 import { formulationColorLabel } from '@/lib/formulations/types'
+import type { MixTaskReserveResult } from '@/lib/formulations/mixTaskReserve'
 import type { ProductionOrder } from '@/lib/planner/types'
+import type { CreateMixTaskResult } from '@/store/slices/mixTasksSlice'
 
 type Props = {
   formulations: FormulationStore
@@ -22,8 +24,10 @@ type Props = {
   brigades: string[]
   operatorId?: string
   operatorName?: string
-  onCreateMixTask: (input: MixTaskInput) => { ok: boolean; task?: FormulationMixTask }
+  onCreateMixTask: (input: MixTaskInput) => CreateMixTaskResult
   onCancelMixTask: (id: string) => void
+  onReserveMixTask: (taskId: string) => MixTaskReserveResult
+  onUnreserveMixTask: (taskId: string) => boolean
 }
 
 function todayIso(): string {
@@ -44,6 +48,8 @@ export function MixTaskTechnologistPanel({
   operatorName,
   onCreateMixTask,
   onCancelMixTask,
+  onReserveMixTask,
+  onUnreserveMixTask,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -80,7 +86,7 @@ export function MixTaskTechnologistPanel({
   const [lineId, setLineId] = useState('')
   const [brigade, setBrigade] = useState('')
   const [note, setNote] = useState('')
-  const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
+  const [notice, setNotice] = useState<{ type: 'error' | 'success' | 'info'; message: string } | null>(null)
 
   const recipe = recipes.find((r) => r.id === recipeId)
   const baseVolume = recipe ? String(Math.round(recipeTotalBatchKg(recipe))) : '1000'
@@ -92,7 +98,17 @@ export function MixTaskTechnologistPanel({
       createdByName: operatorName,
     })
     if (res.ok && res.task) {
-      setNotice({ type: 'success', message: tf(successKey, { task: res.task.taskNumber }) })
+      const base = tf(successKey, { task: res.task.taskNumber })
+      const reserveNote =
+        res.reserve?.ok
+          ? ` · ${t('mixer.reserve.ok')}`
+          : res.reserve?.messageKey === 'mixer.reserve.nothing' ||
+              res.reserve?.messageKey === 'mixer.reserve.already'
+            ? ''
+            : res.reserve
+              ? ` · ${t(res.reserve.messageKey ?? 'mixer.reserve.nothing')}`
+              : ''
+      setNotice({ type: 'success', message: `${base}${reserveNote}` })
     } else {
       setNotice({ type: 'error', message: t('mixer.task.createError') })
     }
@@ -146,6 +162,22 @@ export function MixTaskTechnologistPanel({
       danger: true,
     })
     if (ok) onCancelMixTask(task.id)
+  }
+
+  function handleReserve(task: FormulationMixTask) {
+    const res = onReserveMixTask(task.id)
+    setNotice({
+      type: res.ok ? 'success' : 'info',
+      message: t(res.messageKey ?? (res.ok ? 'mixer.reserve.ok' : 'mixer.reserve.nothing')),
+    })
+  }
+
+  function handleUnreserve(task: FormulationMixTask) {
+    const ok = onUnreserveMixTask(task.id)
+    setNotice({
+      type: 'info',
+      message: ok ? t('mixer.reserve.cleared') : t('mixer.reserve.nothing'),
+    })
   }
 
   return (
@@ -284,9 +316,17 @@ export function MixTaskTechnologistPanel({
                     </td>
                     <td className="text-right">
                       {task.status === 'open' && (
-                        <Button variant="secondary" size="sm" onClick={() => handleCancel(task)}>
-                          {t('common.cancel')}
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <Button size="sm" variant="secondary" onClick={() => handleReserve(task)}>
+                            {t('mixer.reserve.do')}
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleUnreserve(task)}>
+                            {t('mixer.reserve.undo')}
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={() => handleCancel(task)}>
+                            {t('common.cancel')}
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>

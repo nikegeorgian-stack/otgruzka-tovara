@@ -13,6 +13,14 @@ export function mergeBrigadeIntoSheet(
     sheet.rows.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1
   let order = startOrder
 
+  // После админской очистки — только пустой слот, без людей из HR.
+  if (sheet.resetAt) {
+    return {
+      ...sheet,
+      rows: [...sheet.rows, createEmptyBrigadeRow(brigade, order)],
+    }
+  }
+
   const inBrigade = employees
     .filter((e) => employeeActiveInMonth(e, sheet.month) && e.brigade === brigade)
     .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber, 'ru', { numeric: true }))
@@ -107,7 +115,13 @@ export function renameBrigadeInStore(
     brigadeUnits = unitId ? { ...rest, [trimmed]: unitId } : rest
   }
 
-  return { ...store, brigades, employees, months, brigadeUnits }
+  let brigadeHasBrigadier = store.brigadeHasBrigadier
+  if (brigadeHasBrigadier && oldName in brigadeHasBrigadier && trimmed !== oldName) {
+    const { [oldName]: flag, ...rest } = brigadeHasBrigadier
+    brigadeHasBrigadier = { ...rest, [trimmed]: flag }
+  }
+
+  return { ...store, brigades, employees, months, brigadeUnits, brigadeHasBrigadier }
 }
 
 export function removeBrigadeFromStore(store: AppStore, name: string): AppStore {
@@ -170,10 +184,22 @@ export function removeBrigadeFromStore(store: AppStore, name: string): AppStore 
   )
 
   const { [name]: _removedKa, ...brigadeNamesKa } = store.brigadeNamesKa
+  const { [name]: _removedEn, ...brigadeNamesEn } = store.brigadeNamesEn ?? {}
   const { [name]: _removedBrigadier, ...brigadiers } = store.brigadiers
   const { [name]: _removedUnit, ...brigadeUnits } = store.brigadeUnits ?? {}
+  const { [name]: _removedHas, ...brigadeHasBrigadier } = store.brigadeHasBrigadier ?? {}
 
-  return { ...store, brigades, brigadeNamesKa, brigadiers, brigadeUnits, employees, months }
+  return {
+    ...store,
+    brigades,
+    brigadeNamesKa,
+    brigadeNamesEn,
+    brigadiers,
+    brigadeUnits,
+    brigadeHasBrigadier,
+    employees,
+    months,
+  }
 }
 
 export function brigadeEmployeeCount(store: AppStore, name: string): number {

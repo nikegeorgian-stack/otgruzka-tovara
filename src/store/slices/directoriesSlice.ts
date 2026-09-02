@@ -1,11 +1,13 @@
 import { normalizeCounterparty, normalizeCounterpartyStore } from '@/lib/counterparties/init'
 import type { Counterparty } from '@/lib/counterparties/types'
 import { appendAudit } from '@/lib/audit'
+import { withSuggestedLocalizedNames } from '@/lib/i18n/localizedNames'
 import {
   normalizeFinishedProduct,
   normalizeFinishedProductStore,
 } from '@/lib/finishedProducts/init'
-import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import { withRegisteredFinishedCatalog } from '@/lib/finishedProducts/catalog'
+import type { FinishedProduct, FinishedProductStore } from '@/lib/finishedProducts/types'
 import { withRegisteredGrammage } from '@/lib/formulations/grammages'
 import {
   normalizeFormulationRecipe,
@@ -13,13 +15,17 @@ import {
 } from '@/lib/formulations/init'
 import type { FormulationRecipe } from '@/lib/formulations/types'
 import {
+  normalizeBoxRecipe,
   normalizePackagingRecipe,
   normalizePackagingRecipeStore,
 } from '@/lib/packaging/init'
-import type { PackagingRecipe } from '@/lib/packaging/types'
+import type { BoxRecipe, PackagingRecipe } from '@/lib/packaging/types'
+import { actorAuditFields } from './actorAuditFields'
 import type { StoreSliceDeps } from '../storeApi'
 
-export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
+export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
+  const who = () => actorAuditFields(getActor)
+
   return {
     upsertCounterparty(entry: Counterparty) {
       const normalized = normalizeCounterparty({
@@ -40,6 +46,7 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
         next = appendAudit(next, {
           action: 'counterparty_upsert',
           detail: `${exists ? 'Изменён' : 'Создан'}: ${normalized.name} (${normalized.code})`,
+          ...who(),
         })
         return next
       })
@@ -78,6 +85,7 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
           next = appendAudit(next, {
             action: 'counterparty_remove',
             detail: `${cp.name} (${cp.code})`,
+            ...who(),
           })
         }
         return next
@@ -85,27 +93,73 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
     },
 
     upsertFinishedProduct(entry: FinishedProduct) {
-      const normalized = normalizeFinishedProduct({
-        ...entry,
-        updatedAt: new Date().toISOString(),
-        createdAt: entry.createdAt || new Date().toISOString(),
-      })
+      const withNames = withSuggestedLocalizedNames(
+        {
+          ...entry,
+          updatedAt: new Date().toISOString(),
+          createdAt: entry.createdAt || new Date().toISOString(),
+        },
+        undefined,
+        'product',
+      )
+      const normalized = normalizeFinishedProduct(withNames)
       setStore((s) => {
         const exists = s.finishedProducts.items.some((p) => p.id === normalized.id)
         const items = exists
           ? s.finishedProducts.items.map((p) => (p.id === normalized.id ? normalized : p))
           : [...s.finishedProducts.items, normalized]
         const nextCode = exists ? s.finishedProducts.nextCode : s.finishedProducts.nextCode + 1
+        const withCatalog = withRegisteredFinishedCatalog(
+          {
+            ...s.finishedProducts,
+            items,
+            nextCode,
+          },
+          normalized,
+        )
         let next = {
           ...s,
-          finishedProducts: normalizeFinishedProductStore({ items, nextCode }),
+          finishedProducts: normalizeFinishedProductStore(withCatalog),
         }
         next = appendAudit(next, {
           action: 'finished_product_upsert',
           detail: `${exists ? 'Изменена' : 'Создана'} ГП: ${normalized.name} (${normalized.code})`,
+          ...who(),
         })
         return next
       })
+    },
+
+    patchFinishedProductCatalog(
+      patch: Partial<
+        Pick<
+          FinishedProductStore,
+          'productTypeRegistry' | 'grammageRegistry' | 'rollWidthRegistry' | 'meshCellRegistry'
+        >
+      >,
+    ) {
+      setStore((s) => ({
+        ...s,
+        finishedProducts: normalizeFinishedProductStore({
+          ...s.finishedProducts,
+          productTypeRegistry: [
+            ...(s.finishedProducts.productTypeRegistry ?? []),
+            ...(patch.productTypeRegistry ?? []),
+          ],
+          grammageRegistry: [
+            ...(s.finishedProducts.grammageRegistry ?? []),
+            ...(patch.grammageRegistry ?? []),
+          ],
+          rollWidthRegistry: [
+            ...(s.finishedProducts.rollWidthRegistry ?? []),
+            ...(patch.rollWidthRegistry ?? []),
+          ],
+          meshCellRegistry: [
+            ...(s.finishedProducts.meshCellRegistry ?? []),
+            ...(patch.meshCellRegistry ?? []),
+          ],
+        }),
+      }))
     },
 
     removeFinishedProduct(id: string) {
@@ -133,6 +187,7 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
           next = appendAudit(next, {
             action: 'finished_product_remove',
             detail: `${fp.name} (${fp.code})`,
+            ...who(),
           })
         }
         return next
@@ -155,8 +210,80 @@ export function createDirectoriesSlice({ setStore }: StoreSliceDeps) {
           : s.packagingRecipes.nextCode + 1
         return {
           ...s,
-          packagingRecipes: normalizePackagingRecipeStore({ items, nextCode }),
+          packagingRecipes: normalizePackagingRecipeStore({
+            ...s.packagingRecipes,
+            items,
+            nextCode,
+          }),
         }
+      })
+    },
+
+    upsertBoxRecipe(entry: BoxRecipe) {
+      const normalized = normalizeBoxRecipe({
+        ...entry,
+        updatedAt: new Date().toISOString(),
+        createdAt: entry.createdAt || new Date().toISOString(),
+      })
+      setStore((s) => {
+        const boxes = s.packagingRecipes.boxes ?? []
+        const exists = boxes.some((i) => i.id === normalized.id)
+        const nextBoxes = exists
+          ? boxes.map((i) => (i.id === normalized.id ? normalized : i))
+          : [...boxes, normalized]
+        const nextBoxCode = exists
+          ? (s.packagingRecipes.nextBoxCode ?? 1)
+          : (s.packagingRecipes.nextBoxCode ?? 1) + 1
+        let next = {
+          ...s,
+          packagingRecipes: normalizePackagingRecipeStore({
+            ...s.packagingRecipes,
+            boxes: nextBoxes,
+            nextBoxCode,
+          }),
+        }
+        next = appendAudit(next, {
+          action: 'directory_change',
+          detail: `${exists ? 'Изменён' : 'Создан'} рецепт коробки: ${normalized.name} (${normalized.code})`,
+          ...who(),
+        })
+        return next
+      })
+    },
+
+    removeBoxRecipe(id: string) {
+      setStore((s) => {
+        const removed = (s.packagingRecipes.boxes ?? []).find((i) => i.id === id)
+        let next = {
+          ...s,
+          packagingRecipes: normalizePackagingRecipeStore({
+            ...s.packagingRecipes,
+            boxes: (s.packagingRecipes.boxes ?? []).filter((i) => i.id !== id),
+          }),
+          finishedProducts: {
+            ...s.finishedProducts,
+            items: s.finishedProducts.items.map((p) =>
+              p.defaultBoxRecipeId === id ? { ...p, defaultBoxRecipeId: undefined } : p,
+            ),
+          },
+          production: {
+            ...s.production,
+            planner: {
+              ...s.production.planner,
+              orders: s.production.planner.orders.map((o) =>
+                o.boxRecipeId === id ? { ...o, boxRecipeId: undefined } : o,
+              ),
+            },
+          },
+        }
+        if (removed) {
+          next = appendAudit(next, {
+            action: 'directory_change',
+            detail: `Удалён рецепт коробки: ${removed.name} (${removed.code})`,
+            ...who(),
+          })
+        }
+        return next
       })
     },
 

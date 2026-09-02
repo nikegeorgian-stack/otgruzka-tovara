@@ -1,11 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useI18n } from '@/context/I18nContext'
 import { brigadeLabel } from '@/lib/brigadeText'
 import {
   activeStructuralUnits,
   allBrigadesSelected,
   allStructuralUnitsSelected,
-  brigadeMatchesSearch,
+  BRIGADE_UNIT_FILTER_ALL,
+  filterAndSortBrigadeList,
   NO_STRUCTURAL_UNIT_ID,
   unitMatchesSearch,
   type MonthGroupMode,
@@ -16,10 +17,14 @@ import type { HrStructuralUnit } from '@/lib/types'
 type Props = {
   brigades: string[]
   brigadeNamesKa: Record<string, string>
+  /** Привязка бригада → id подразделения (для фильтра списка). */
+  brigadeUnits?: Record<string, string>
   brigadeSearch: string
   selectedBrigades: Set<string>
   /** Бригады мастера цеха — по умолчанию и для быстрого выбора. */
   primaryBrigades?: string[]
+  /** Жёсткая область: нельзя выбрать бригады вне списка / «весь завод». */
+  lockBrigadeScope?: boolean
   structuralUnits: HrStructuralUnit[]
   unitSearch: string
   selectedUnits: Set<string>
@@ -71,9 +76,11 @@ function Check({
 export function MonthDisplayBar({
   brigades,
   brigadeNamesKa,
+  brigadeUnits,
   brigadeSearch,
   selectedBrigades,
   primaryBrigades,
+  lockBrigadeScope = false,
   structuralUnits,
   unitSearch,
   selectedUnits,
@@ -91,13 +98,25 @@ export function MonthDisplayBar({
   onDisplay,
 }: Props) {
   const { t, locale } = useI18n()
+  const [brigadeUnitFilter, setBrigadeUnitFilter] = useState(BRIGADE_UNIT_FILTER_ALL)
+
+  const brigadeUnitOptions = useMemo(() => {
+    const units = activeStructuralUnits(structuralUnits)
+    const hasUnassigned = brigades.some((b) => !brigadeUnits?.[b]?.trim())
+    return { units, hasUnassigned }
+  }, [brigadeUnits, brigades, structuralUnits])
 
   const visibleBrigadeList = useMemo(
     () =>
-      brigades.filter((b) =>
-        brigadeMatchesSearch(b, brigadeNamesKa, brigadeSearch),
-      ),
-    [brigadeNamesKa, brigadeSearch, brigades],
+      filterAndSortBrigadeList({
+        brigades,
+        namesKa: brigadeNamesKa,
+        locale,
+        search: brigadeSearch,
+        brigadeUnits,
+        unitFilter: brigadeUnitFilter,
+      }),
+    [brigadeNamesKa, brigadeSearch, brigadeUnitFilter, brigadeUnits, brigades, locale],
   )
 
   const unitFilterItems = useMemo(() => {
@@ -192,6 +211,25 @@ export function MonthDisplayBar({
           value={brigadeSearch}
           onChange={(e) => onBrigadeSearch(e.target.value)}
         />
+        {brigadeUnitOptions.units.length > 0 || brigadeUnitOptions.hasUnassigned ? (
+          <select
+            className="min-w-[9rem] rounded-sm border border-grid bg-white px-2 py-1.5 text-sm text-stone-700"
+            value={brigadeUnitFilter}
+            onChange={(e) => setBrigadeUnitFilter(e.target.value)}
+            title={t('month.brigadeUnitFilterHint')}
+            aria-label={t('month.brigadeUnitFilter')}
+          >
+            <option value={BRIGADE_UNIT_FILTER_ALL}>{t('month.brigadeUnitFilterAll')}</option>
+            {brigadeUnitOptions.units.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+            {brigadeUnitOptions.hasUnassigned ? (
+              <option value={NO_STRUCTURAL_UNIT_ID}>{t('month.brigadeUnitFilterNone')}</option>
+            ) : null}
+          </select>
+        ) : null}
         <div className="flex items-center gap-1">
           {primaryBrigades && primaryBrigades.length > 0 ? (
             <>
@@ -203,14 +241,16 @@ export function MonthDisplayBar({
               >
                 {t('month.masterBrigadesOnly')}
               </button>
-              <button
-                type="button"
-                className="rounded-sm border border-grid px-2 py-1 text-[11px] font-medium text-stone-600 hover:bg-paper-dark disabled:opacity-40"
-                onClick={() => onSelectedBrigades(new Set(brigades))}
-                disabled={allBrigadesOn}
-              >
-                {t('month.masterBrigadesAll')}
-              </button>
+              {!lockBrigadeScope ? (
+                <button
+                  type="button"
+                  className="rounded-sm border border-grid px-2 py-1 text-[11px] font-medium text-stone-600 hover:bg-paper-dark disabled:opacity-40"
+                  onClick={() => onSelectedBrigades(new Set(brigades))}
+                  disabled={allBrigadesOn}
+                >
+                  {t('month.masterBrigadesAll')}
+                </button>
+              ) : null}
               <span className="mx-0.5 text-stone-300">|</span>
             </>
           ) : null}
@@ -219,6 +259,7 @@ export function MonthDisplayBar({
             className="rounded-sm border border-grid px-2 py-1 text-[11px] font-medium text-stone-600 hover:bg-paper-dark disabled:opacity-40"
             onClick={() => onSelectedBrigades(new Set(brigades))}
             disabled={allBrigadesOn}
+            title={lockBrigadeScope ? t('month.scopeBrigadesOnly') : undefined}
           >
             {t('month.brigadesSelectAll')}
           </button>
@@ -322,26 +363,6 @@ export function MonthDisplayBar({
             <span className="mx-1 text-stone-300">|</span>
           </>
         )}
-        <Check
-          checked={display.showTab}
-          onChange={(v) => onDisplay({ showTab: v })}
-          label={t('table.colTab')}
-        />
-        <Check
-          checked={display.showPosition}
-          onChange={(v) => onDisplay({ showPosition: v })}
-          label={t('table.colPosition')}
-        />
-        <Check
-          checked={display.showUnit}
-          onChange={(v) => onDisplay({ showUnit: v })}
-          label={t('table.colUnit')}
-        />
-        <Check
-          checked={display.showSchedule}
-          onChange={(v) => onDisplay({ showSchedule: v })}
-          label={t('table.colSchedule')}
-        />
         <Check
           checked={display.showTotals}
           onChange={(v) => onDisplay({ showTotals: v })}

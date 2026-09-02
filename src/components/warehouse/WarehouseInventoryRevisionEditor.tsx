@@ -112,6 +112,7 @@ ref,
 
   const isDirty = useCallback(() => {
     if (!editable) return false
+    flushFocusedCountedLine(linesRef)
     const base = baselineRef.current
     if (date !== base.date || number !== base.number || comment !== base.comment) return true
     const lines = linesRef.current
@@ -283,6 +284,7 @@ ref,
   }
 
   const saveDraft = useCallback(() => {
+    flushFocusedCountedLine(linesRef)
     const docLines = buildDocumentLines()
     if (docLines.length === 0) {
       setError(t('warehouse.inventory.revisionEmpty'))
@@ -568,6 +570,23 @@ ref,
     </div>
   )
 })
+
+function flushFocusedCountedLine(linesRef: { current: Record<string, LineDraft> }) {
+  const el = document.activeElement
+  if (!(el instanceof HTMLInputElement) || !el.hasAttribute('data-inventory-counted')) return
+  const itemId = el.getAttribute('data-inventory-item-id')
+  if (!itemId) return
+  const existing = linesRef.current[itemId]
+  linesRef.current = {
+    ...linesRef.current,
+    [itemId]: {
+      itemId,
+      counted: el.value,
+      touched: true,
+      doubtful: existing?.doubtful ?? false,
+    },
+  }
+}
 
 function cloneLines(lines: Record<string, LineDraft>): Record<string, LineDraft> {
   return JSON.parse(JSON.stringify(lines)) as Record<string, LineDraft>

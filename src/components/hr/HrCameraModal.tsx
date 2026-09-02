@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useModalScope } from '@/hooks/useModalScope'
 import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { autoCropDocumentCanvas, fileToDataUrl } from '@/lib/hr/files'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 
 type Props = {
   mode: 'photo' | 'document'
@@ -71,7 +72,7 @@ export function HrCameraModal({ mode, onCapture, onClose }: Props) {
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center bg-black/60 p-4"
+      className={`${CHROME_BACKDROP_CLASS} bg-black/60`}
       style={{ zIndex }}
     >
       <div ref={panelRef} className="w-full max-w-lg rounded-sm bg-white p-4 shadow-sm">

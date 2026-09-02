@@ -47,12 +47,6 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
               <dd>{model.contractNumber}</dd>
             </div>
           ) : null}
-          {model.invoiceKey ? (
-            <div>
-              <dt>{t('warehouse.doc.invoiceKey')}</dt>
-              <dd>{model.invoiceKey}</dd>
-            </div>
-          ) : null}
           {model.keeperName ? (
             <div>
               <dt>{t('warehouse.doc.keeper')}</dt>

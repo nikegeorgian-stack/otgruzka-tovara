@@ -3,6 +3,7 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
 import { WAREHOUSE_LOCATION_KINDS } from '@/lib/warehouse/locationKinds'
+import { nextFreeCategoryCode, nextFreeLocationCode, warehouseLocationLabel } from '@/lib/warehouse/locationCodes'
 import type { WarehouseCategory, WarehouseLocation, WarehouseLocationKind, WarehouseStore } from '@/lib/warehouse/types'
 
 type Props = {
@@ -28,12 +29,16 @@ export function WarehouseMetaDirectoryPanel({
   const { confirm } = useConfirm()
   const [newCat, setNewCat] = useState('')
   const [newLoc, setNewLoc] = useState('')
-  const [newLocKind, setNewLocKind] = useState<WarehouseLocationKind>('raw')
+  const [newLocKind, setNewLocKind] = useState<WarehouseLocationKind>('other')
   const [notice, setNotice] = useState<string | null>(null)
   const [editCatId, setEditCatId] = useState<string | null>(null)
   const [editCatName, setEditCatName] = useState('')
   const [editLocId, setEditLocId] = useState<string | null>(null)
   const [editLocName, setEditLocName] = useState('')
+  const [editLocCode, setEditLocCode] = useState('')
+  const [editCatCode, setEditCatCode] = useState('')
+  const [newCatCode, setNewCatCode] = useState('')
+  const [newLocCode, setNewLocCode] = useState('')
 
   const categories = [...warehouse.categories].sort((a, b) => a.sortOrder - b.sortOrder)
   const locations = [...warehouse.locations].sort((a, b) => a.sortOrder - b.sortOrder)
@@ -45,7 +50,12 @@ export function WarehouseMetaDirectoryPanel({
       setNotice(t('directories.err.duplicate'))
       return
     }
-    onUpsertCategory({ ...cat, name })
+    const code = (editCatCode.trim() || cat.code || nextFreeCategoryCode(categories)).toUpperCase()
+    if (categories.some((c) => c.id !== cat.id && c.code?.toUpperCase() === code)) {
+      setNotice(t('directories.err.duplicate'))
+      return
+    }
+    onUpsertCategory({ ...cat, name, code })
     setEditCatId(null)
     setNotice(null)
   }
@@ -57,7 +67,12 @@ export function WarehouseMetaDirectoryPanel({
       setNotice(t('directories.err.duplicate'))
       return
     }
-    onUpsertLocation({ ...loc, name })
+    const code = (editLocCode.trim() || loc.code || nextFreeLocationCode(locations)).toUpperCase()
+    if (locations.some((l) => l.id !== loc.id && l.code?.toUpperCase() === code)) {
+      setNotice(t('directories.err.duplicate'))
+      return
+    }
+    onUpsertLocation({ ...loc, name, code })
     setEditLocId(null)
     setNotice(null)
   }
@@ -97,9 +112,11 @@ export function WarehouseMetaDirectoryPanel({
     onUpsertCategory({
       id: newId(),
       name,
+      code: (newCatCode.trim() || nextFreeCategoryCode(categories)).toUpperCase(),
       sortOrder: categories.length,
     })
     setNewCat('')
+    setNewCatCode('')
     setNotice(null)
   }
 
@@ -114,11 +131,13 @@ export function WarehouseMetaDirectoryPanel({
     onUpsertLocation({
       id: newId(),
       name,
+      code: (newLocCode.trim() || nextFreeLocationCode(locations)).toUpperCase(),
       sortOrder: locations.length,
       kind: newLocKind,
     })
     setNewLoc('')
-    setNewLocKind('raw')
+    setNewLocCode('')
+    setNewLocKind('other')
     setNotice(null)
   }
 
@@ -166,13 +185,19 @@ export function WarehouseMetaDirectoryPanel({
                 </>
               ) : (
                 <>
-                  <span className="flex-1">{c.name}</span>
+                  <span className="flex-1">
+                    <span className="mr-2 font-mono text-[11px] text-teal-800">
+                      {c.code ?? '—'}
+                    </span>
+                    {c.name}
+                  </span>
                   <button
                     type="button"
                     className="text-xs text-stone-400 hover:text-teal-700"
                     onClick={() => {
                       setEditCatId(c.id)
                       setEditCatName(c.name)
+                      setEditCatCode(c.code ?? '')
                     }}
                   >
                     {t('common.edit')}
@@ -246,7 +271,7 @@ export function WarehouseMetaDirectoryPanel({
                 </>
               ) : (
                 <>
-                  <span className="flex-1">{l.name}</span>
+                  <span className="flex-1">{warehouseLocationLabel(l)}</span>
                   {l.kind ? (
                     <span className="text-[11px] text-stone-400">
                       {t(`warehouse.locationKind.${l.kind}`)}
@@ -258,6 +283,7 @@ export function WarehouseMetaDirectoryPanel({
                     onClick={() => {
                       setEditLocId(l.id)
                       setEditLocName(l.name)
+                      setEditLocCode(l.code ?? '')
                     }}
                   >
                     {t('common.edit')}

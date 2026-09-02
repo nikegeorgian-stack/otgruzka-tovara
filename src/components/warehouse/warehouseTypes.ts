@@ -38,6 +38,10 @@ export type WarehousePageProps = {
   /** Облачный кабинет кладовщика — упрощённые вкладки */
   webWarehouseMode?: boolean
   webUserName?: string
+  /** Полный стор для пакетов Balance / шапок бланков */
+  exportStore?: import('@/lib/types').AppStore
+  /** Отметить складские документы выгруженными */
+  onMarkWarehouseDocsExported?: (documentIds: string[], actor?: { id?: string; name?: string }) => void
   printMeta?: {
     site: string
     responsible?: string
@@ -171,6 +175,8 @@ export type WarehousePageProps = {
   onOpenSalesOrder?: (orderId: string) => void
   /** Замесы пропиточного состава, ожидающие подтверждения кладовщиком */
   pendingBatchRuns?: FormulationBatchRun[]
+  /** Задания миксеру — для панели активных резервов сырья */
+  mixTasks?: import('@/lib/formulations/types').FormulationMixTask[]
   onConfirmFormulationBatch?: (
     runId: string,
     keeper?: { id?: string; name?: string },
@@ -205,6 +211,10 @@ export type WarehousePageProps = {
     viewId: K,
     patch: NonNullable<UserViewDefaults[K]>,
   ) => void
+  /** Создание задачи из ERP (приход / расхождение) */
+  access?: import('@/lib/access/types').AccessStore
+  currentUser?: import('@/lib/access/types').AppUser | null
+  onCreateWorkTask?: (draft: import('@/lib/tasks/types').WorkTaskDraft) => string
 }
 
 export type WarehouseTab =
@@ -224,9 +234,9 @@ export const WAREHOUSE_TABS: WarehouseTab[] = [
   'balances',
   'requests',
   'nomenclature',
-  'workwear',
-  'movements',
   'documents',
+  'movements',
+  'workwear',
   'inventory',
   'loading',
   'analytics',

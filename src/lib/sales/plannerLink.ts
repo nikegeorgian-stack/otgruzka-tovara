@@ -20,6 +20,8 @@ export function resolveProductionOrderSalesLink(
         orderNumber: '—',
         customer: '—',
         status: 'draft',
+        commercialStatus: 'draft',
+        fulfillmentStatus: 'unplanned',
         priority: 'normal',
         orderDate: '',
         lines: [],

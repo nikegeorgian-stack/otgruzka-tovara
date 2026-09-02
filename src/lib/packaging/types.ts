@@ -3,6 +3,22 @@ export type RawMaterialKind = 'mesh' | 'membrane' | 'ratl' | 'other'
 
 export type PackagingStackLayer = 'pallet' | 'box'
 
+/** Сколько изделий в одной коробке (сетка и др.) */
+export type BoxRecipe = {
+  id: string
+  /** РК-000001 */
+  code: string
+  name: string
+  productType?: string
+  rollsPerBox: number
+  boxItemId?: string
+  meshCellSize?: string
+  note?: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 /** Рецепт укладки палеты: палета → коробка → … + рулоны сверху */
 export type PackagingRecipe = {
   id: string
@@ -28,6 +44,9 @@ export type PackagingRecipe = {
 export type PackagingRecipeStore = {
   items: PackagingRecipe[]
   nextCode: number
+  /** Рецепты коробок (аддитивно). */
+  boxes?: BoxRecipe[]
+  nextBoxCode?: number
 }
 
 /** Расчёт потребности по заказу / дню */
@@ -56,8 +75,11 @@ export const RAW_MATERIAL_KINDS: {
   { id: 'other', labelRu: 'Другое', labelKa: 'სხვა' },
 ]
 
-export function rawMaterialKindLabel(kind: RawMaterialKind, locale: 'ru' | 'ka'): string {
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
+export function rawMaterialKindLabel(kind: RawMaterialKind, locale: Locale): string {
   const row = RAW_MATERIAL_KINDS.find((k) => k.id === kind)
   if (!row) return kind
-  return locale === 'ka' ? row.labelKa : row.labelRu
+  return labelRuKa(locale, row.labelRu, row.labelKa)
 }

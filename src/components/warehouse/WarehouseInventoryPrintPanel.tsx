@@ -5,6 +5,7 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { WarehouseInventoryPrintSheet } from '@/components/warehouse/WarehouseInventoryPrintSheet'
 import { useI18n } from '@/context/I18nContext'
+import { usePrintFit } from '@/hooks/usePrintFit'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 import {
   buildInventoryPrintPayload,
@@ -98,6 +99,12 @@ export function WarehouseInventoryPrintPanel({
     }
   }, [previewOpen])
 
+  const { runFit } = usePrintFit(printRef, {
+    shrinkOnly: true,
+    enabled: previewOpen,
+    deps: [payload, date, previewOpen, showBookBalance, groupByCategory],
+  })
+
   function toggleWarehouse(id: string) {
     setWarehouseIds((prev) => {
       const next = new Set(prev)
@@ -158,13 +165,15 @@ export function WarehouseInventoryPrintPanel({
   }
 
   function handlePrint() {
-    window.print()
+    runFit()
+    requestAnimationFrame(() => window.print())
   }
 
   async function handlePdf() {
     if (!printRef.current) return
     setPdfBusy(true)
     try {
+      runFit()
       await exportPrintAreaToPdf(printRef.current, `inventory-${date}.pdf`)
     } finally {
       setPdfBusy(false)
@@ -362,7 +371,7 @@ export function WarehouseInventoryPrintPanel({
 
       {previewOpen &&
         createPortal(
-          <div className="print-modal-root fixed inset-0 z-[120] flex flex-col bg-stone-900/70">
+          <div className="print-modal-root fixed inset-0 z-[420] flex flex-col bg-stone-900/70">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 print:hidden">
               <p className="text-sm font-semibold text-white">
                 {t('warehouse.inventory.printPreviewTitle')} — {selectedCount}{' '}

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/ui/icons'
 import { useModalScope } from '@/hooks/useModalScope'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 import { getModalPortalRoot } from '@/lib/ui/modalScope'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import {
   formatIssueShortages,
   formatQty,
@@ -166,7 +168,7 @@ export function WarehousePickModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center bg-black/50 p-3 sm:p-6"
+      className={CHROME_BACKDROP_CLASS}
       style={{ zIndex }}
       role="presentation"
       onMouseDown={(e) => {
@@ -269,7 +271,7 @@ export function WarehousePickModal({
                           onDoubleClick={() => addItem(item)}
                         >
                           <td className="px-3 py-2">
-                            <div className="font-medium leading-snug">{item.name}</div>
+                            <div className="font-medium leading-snug">{warehouseItemDisplayName(item)}</div>
                             <div className="text-[11px] text-stone-400">
                               {categoryNames.get(item.categoryId)}
                               {item.sku ? ` · ${item.sku}` : ''}
@@ -337,7 +339,7 @@ export function WarehousePickModal({
                       return (
                         <tr key={row.key} className="border-t border-grid/50">
                           <td className="px-3 py-2">
-                            <div className="font-medium leading-snug">{item.name}</div>
+                            <div className="font-medium leading-snug">{warehouseItemDisplayName(item)}</div>
                             {overIssue && (
                               <div className="text-[11px] text-red-600">{t('warehouse.pick.overIssue')}</div>
                             )}

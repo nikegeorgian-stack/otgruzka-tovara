@@ -16,11 +16,20 @@ export type AiChatEntry = {
   view: string
   role: AiChatRole
   content: string
-  /** Распознанная область/тема вопроса (для аналитики), если определена. */
+  /** Распознанная область/тема вопроса (если определена). */
   topic?: string
 }
 
-/** Предложение от сотрудника (коллектива). Неудаляемое — для разбора администратором. */
+/** Тип обращения к администратору. */
+export type FeedbackKind = 'bug' | 'idea'
+
+/** Статус в журнале администратора. */
+export type FeedbackStatus = 'new' | 'seen' | 'done'
+
+/**
+ * Предложение / сообщение об ошибке.
+ * Неудаляемое — для разбора системным администратором.
+ */
 export type SuggestionEntry = {
   id: string
   ts: number
@@ -29,6 +38,24 @@ export type SuggestionEntry = {
   roleId: string
   view: string
   text: string
+  /** bug = ошибка, idea = предложение (по умолчанию idea — старые записи). */
+  kind: FeedbackKind
+  /** new → уведомление админу; seen / done — в журнале. */
+  status: FeedbackStatus
+  /** Короткий заголовок (опционально). */
+  title?: string
+  /**
+   * Логин/email отправителя (для уведомления и «Мои обращения»).
+   * Важнее userId: id может быть Firebase uid или id из access.
+   */
+  userLogin?: string
+  /** Когда админ сменил статус. */
+  statusUpdatedAt?: number
+  statusUpdatedBy?: string
+  /** Ответ администратора (тема обработана). */
+  adminReply?: string
+  adminReplyAt?: number
+  adminReplyBy?: string
 }
 
 export type AiChatStore = {

@@ -5,6 +5,7 @@ import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { createPortal } from 'react-dom'
 import { formatMonthTitle } from '@/lib/dates'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 import {
   activeStructuralUnits,
   NO_STRUCTURAL_UNIT_ID,
@@ -16,6 +17,12 @@ import type { AppStore, Locale } from '@/lib/types'
 import { defaultSelectedBrigades, getBrigadesForPrint } from '@/lib/printBrigades'
 import type { MonthSheet } from '@/lib/types'
 import type { PrintConfig } from './PrintPreviewModal'
+import {
+  loadTimesheetPrintPrefs,
+  saveTimesheetPrintPrefs,
+  TIMESHEET_PRINT_PRESETS,
+  type TimesheetPrintPresetId,
+} from '@/lib/print/timesheetPrintPrefs'
 
 type Props = {
   sheet: MonthSheet
@@ -45,6 +52,7 @@ export function PrintSetupModal({
   const { t, locale: uiLocale } = useI18n()
   const { alert } = useConfirm()
   const filled = brigadesInfo.filter((b) => b.hasEmployees)
+  const savedPrefs = useMemo(() => loadTimesheetPrintPrefs(), [])
 
   const timesheetUnits = useMemo(
     () => timesheetStructuralUnits(store.hrStructuralUnits, workshopMasterMode),
@@ -73,20 +81,42 @@ export function PrintSetupModal({
     if (workshopMasterMode && primaryBrigades?.length) {
       return new Set(primaryBrigades.filter((b) => brigades.includes(b)))
     }
+    const fromPrefs = savedPrefs?.brigades?.filter((b) =>
+      brigadesInfo.some((x) => x.name === b && x.hasEmployees),
+    )
+    if (fromPrefs?.length) return new Set(fromPrefs)
     return new Set(defaultSelectedBrigades(sheet, brigades))
   })
   const [selectedUnits, setSelectedUnits] = useState<Set<string>>(
     () => new Set(initialConfig?.structuralUnitIds ?? unitKeys),
   )
   const [groupMode, setGroupMode] = useState<MonthGroupMode>(
-    initialConfig?.groupMode ?? 'brigade',
+    initialConfig?.groupMode ?? savedPrefs?.groupMode ?? 'brigade',
   )
   const [variant, setVariant] = useState<PrintConfig['variant']>(
-    initialConfig?.variant ?? 'plan',
+    initialConfig?.variant ?? savedPrefs?.variant ?? 'plan',
   )
-  const [fitOnePage, setFitOnePage] = useState(initialConfig?.fitOnePage ?? true)
+  const [fitOnePage, setFitOnePage] = useState(
+    initialConfig?.fitOnePage ?? savedPrefs?.fitOnePage ?? true,
+  )
+  const [showHours, setShowHours] = useState(() => {
+    if (initialConfig?.showHours != null) return initialConfig.showHours
+    if (savedPrefs) return savedPrefs.showHours
+    return (initialConfig?.variant ?? 'plan') !== 'plan'
+  })
+  const [oneBrigadePerPage, setOneBrigadePerPage] = useState(
+    initialConfig?.oneBrigadePerPage ?? savedPrefs?.oneBrigadePerPage ?? true,
+  )
+  const [georgiaOfficialHeader, setGeorgiaOfficialHeader] = useState(
+    initialConfig?.georgiaOfficialHeader ??
+      savedPrefs?.georgiaOfficialHeader ??
+      (initialConfig?.printLocale ?? savedPrefs?.printLocale ?? uiLocale) === 'ka',
+  )
   const [printLocale, setPrintLocale] = useState<Locale>(
-    initialConfig?.printLocale ?? uiLocale,
+    initialConfig?.printLocale ?? savedPrefs?.printLocale ?? uiLocale,
+  )
+  const [activePreset, setActivePreset] = useState<TimesheetPrintPresetId | null>(
+    () => savedPrefs?.lastPreset ?? null,
   )
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -117,38 +147,64 @@ export function PrintSetupModal({
     setSelected(new Set())
   }
 
+  function applyPreset(id: TimesheetPrintPresetId) {
+    const def = TIMESHEET_PRINT_PRESETS.find((p) => p.id === id)
+    if (!def) return
+    setActivePreset(id)
+    setVariant(def.patch.variant)
+    setShowHours(def.patch.showHours)
+    setFitOnePage(def.patch.fitOnePage)
+    setOneBrigadePerPage(def.patch.oneBrigadePerPage)
+    if (!workshopMasterMode) setGroupMode(def.patch.groupMode)
+  }
+
   async function handleContinue() {
     if (selected.size === 0) {
       await alert({ message: t('print.selectBrigade') })
       return
     }
-    onConfirm({
-      variant,
-      brigades: [...selected],
+    const selectedFilled = [...selected].filter((name) =>
+      brigadesInfo.some((b) => b.name === name && b.hasEmployees),
+    )
+    if (selectedFilled.length === 0) {
+      await alert({ message: t('print.noEmployees') })
+      return
+    }
+    const config: PrintConfig = {
+      variant: workshopMasterMode && variant !== 'summary' ? 'plan' : variant,
+      brigades: selectedFilled,
       fitOnePage,
+      showHours,
+      oneBrigadePerPage,
       printLocale,
+      georgiaOfficialHeader: workshopMasterMode ? false : georgiaOfficialHeader,
       groupMode: workshopMasterMode ? 'brigade' : groupMode,
       structuralUnitIds:
         !workshopMasterMode && selectedUnits.size < unitKeys.length
           ? [...selectedUnits]
           : undefined,
+      workshopMasterMode,
+    }
+    saveTimesheetPrintPrefs(config, {
+      lastPreset: activePreset ?? undefined,
     })
+    onConfirm(config)
   }
 
   const content = (
     <div
       ref={panelRef}
-      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
+      className={CHROME_BACKDROP_CLASS}
       style={{ zIndex }}
       role="dialog"
       aria-labelledby="print-setup-title"
       aria-modal="true"
     >
-      <div className="w-full max-w-lg rounded-sm bg-white shadow-sm">
-        <div className="flex items-center gap-4 border-b border-grid px-6 py-4">
+      <div className="app-dialog-panel flex w-full max-w-lg flex-col overflow-hidden rounded-t-sm bg-white shadow-sm sm:rounded-sm">
+        <div className="flex shrink-0 items-center gap-4 border-b border-grid bg-stone-50 px-4 py-3 sm:px-6 sm:py-4">
           <FiberCellBrand variant="page" className="shrink-0" />
-          <div>
-            <h2 id="print-setup-title" className="text-lg font-bold text-ink">
+          <div className="min-w-0">
+            <h2 id="print-setup-title" className="text-base font-bold text-ink sm:text-lg">
               {t('print.setup')}
             </h2>
             <p className="mt-1 text-sm text-stone-500 capitalize">
@@ -157,7 +213,33 @@ export function PrintSetupModal({
           </div>
         </div>
 
-        <div className="space-y-4 px-6 py-4">
+        <div className="app-dialog-body space-y-4 px-4 py-4 sm:px-6">
+          {!workshopMasterMode ? (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                {t('print.presets')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {TIMESHEET_PRINT_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    title={t(p.hintKey)}
+                    className={`rounded-sm border px-3 py-1.5 text-sm font-medium ${
+                      activePreset === p.id
+                        ? 'border-accent bg-accent text-white'
+                        : 'border-grid bg-white text-stone-700 hover:bg-paper-dark'
+                    }`}
+                    onClick={() => applyPreset(p.id)}
+                  >
+                    {t(p.labelKey)}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-stone-500">{t('print.presetsHint')}</p>
+            </div>
+          ) : null}
+
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
               {t('print.language')}
@@ -168,6 +250,7 @@ export function PrintSetupModal({
                 [
                   ['ru', t('locale.ru')],
                   ['ka', t('locale.ka')],
+                  ['en', t('locale.en')],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -178,7 +261,10 @@ export function PrintSetupModal({
                       ? 'border-accent bg-accent text-white'
                       : 'border-grid bg-white text-stone-700 hover:bg-paper-dark'
                   }`}
-                  onClick={() => setPrintLocale(id)}
+                  onClick={() => {
+                    setPrintLocale(id)
+                    if (id === 'ka') setGeorgiaOfficialHeader(true)
+                  }}
                 >
                   {label}
                 </button>
@@ -186,17 +272,39 @@ export function PrintSetupModal({
             </div>
           </div>
 
+          {!workshopMasterMode ? (
+            <label className="flex cursor-pointer items-start gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2.5 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded text-accent focus:ring-accent"
+                checked={georgiaOfficialHeader}
+                onChange={(e) => setGeorgiaOfficialHeader(e.target.checked)}
+              />
+              <span>
+                <strong>{t('print.georgiaOfficialHeader')}</strong>
+                <span className="block text-xs font-normal text-stone-500">
+                  {t('print.georgiaOfficialHeaderHint')}
+                </span>
+              </span>
+            </label>
+          ) : null}
+
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
               {t('print.what')}
             </p>
             <div className="flex flex-wrap gap-2">
               {(
-                [
-                  ['plan', t('print.plan')],
-                  ['fact', t('print.fact')],
-                  ['both', t('print.both')],
-                ] as const
+                (
+                  workshopMasterMode
+                    ? ([['plan', t('print.plan')]] as const)
+                    : ([
+                        ['plan', t('print.plan')],
+                        ['fact', t('print.fact')],
+                        ['both', t('print.both')],
+                        ['summary', t('print.summary')],
+                      ] as const)
+                )
               ).map(([id, label]) => (
                 <button
                   key={id}
@@ -206,7 +314,10 @@ export function PrintSetupModal({
                       ? 'border-accent bg-accent text-white'
                       : 'border-grid bg-white text-stone-700 hover:bg-paper-dark'
                   }`}
-                  onClick={() => setVariant(id)}
+                  onClick={() => {
+                    setVariant(id)
+                    setActivePreset(null)
+                  }}
                 >
                   {label}
                 </button>
@@ -358,12 +469,57 @@ export function PrintSetupModal({
             )}
           </div>
 
+          <label
+            data-coach="print:oneBrigadePerPage"
+            className="flex cursor-pointer items-center gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2.5 text-sm"
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded text-accent focus:ring-accent"
+              checked={oneBrigadePerPage}
+              onChange={(e) => {
+                setOneBrigadePerPage(e.target.checked)
+                setActivePreset(null)
+              }}
+            />
+            <span>
+              <strong>{t('print.oneBrigadePerPage')}</strong>
+              <span className="block text-xs font-normal text-stone-500">
+                {t('print.oneBrigadePerPageHint')}
+              </span>
+            </span>
+          </label>
+
+          <label
+            data-coach="print:showHours"
+            className="flex cursor-pointer items-center gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2.5 text-sm"
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded text-accent focus:ring-accent"
+              checked={showHours}
+              onChange={(e) => {
+                setShowHours(e.target.checked)
+                setActivePreset(null)
+              }}
+            />
+            <span>
+              <strong>{t('print.showHours')}</strong>
+              <span className="block text-xs font-normal text-stone-500">
+                {t('print.showHoursHint')}
+              </span>
+            </span>
+          </label>
+
           <label className="flex cursor-pointer items-center gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2.5 text-sm">
             <input
               type="checkbox"
               className="h-4 w-4 rounded text-accent focus:ring-accent"
               checked={fitOnePage}
-              onChange={(e) => setFitOnePage(e.target.checked)}
+              onChange={(e) => {
+                setFitOnePage(e.target.checked)
+                setActivePreset(null)
+              }}
             />
             <span>
               <strong>{t('print.fitOnePage')}</strong>
@@ -373,17 +529,23 @@ export function PrintSetupModal({
             </span>
           </label>
 
+          <p className="rounded-sm bg-stone-100 px-3 py-2 text-xs text-stone-600">
+            {t('print.prefsRemembered')}
+          </p>
+
           <p className="rounded-sm bg-sky-50 px-3 py-2 text-xs text-sky-900">
             {t('print.marginsHint')}
           </p>
 
-          <p className="text-xs text-stone-400">{t('print.pagesHint')}</p>
+          <p className="text-xs text-stone-400">
+            {variant === 'summary' ? t('print.pagesHintSummary') : t('print.pagesHint')}
+          </p>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-grid px-6 py-4">
+        <div className="app-dialog-footer flex shrink-0 justify-end gap-2 border-t border-grid bg-stone-50 px-4 pt-3 sm:px-6">
           <button
             type="button"
-            className="rounded-sm border border-grid px-4 py-2 text-sm font-medium hover:bg-stone-50"
+            className="rounded-sm border border-grid bg-white px-4 py-2 text-sm font-medium hover:bg-stone-50"
             onClick={onClose}
           >
             {t('common.cancel')}

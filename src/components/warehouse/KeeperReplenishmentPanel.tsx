@@ -12,6 +12,7 @@ import { filterConsumableItems } from '@/lib/warehouse/locationKindFilter'
 import { formatQty } from '@/lib/warehouse/stock'
 import { unitLabel } from '@/lib/warehouse/units'
 import type { KeeperReplenishmentRequest, WarehouseStore } from '@/lib/warehouse/types'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 
 type Props = {
   warehouse: WarehouseStore
@@ -272,7 +273,7 @@ export function KeeperReplenishmentPanel({
       </Card>
 
       {receiveRequest && (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-stone-900/50 p-4 sm:items-center">
+        <div className={`${CHROME_BACKDROP_CLASS} z-[120] bg-stone-900/50`}>
           <div className="w-full max-w-lg rounded-sm border border-grid bg-white p-5 shadow-sm">
             <h3 className="text-lg font-bold text-ink">
               {t('warehouse.replenishment.receiveTitle')} {receiveRequest.number}
