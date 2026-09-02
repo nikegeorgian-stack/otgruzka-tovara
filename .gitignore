@@ -54,3 +54,6 @@ live-index.html
 
 # graphify knowledge graph (regenerated via: graphify update .)
 graphify-out/
+
+# Cursor chain-agent brief (regenerated via: npm run agent:chain-brief)
+.cursor/context/CHAIN_BRIEF.md

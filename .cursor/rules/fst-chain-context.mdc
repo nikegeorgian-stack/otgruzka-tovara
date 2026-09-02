@@ -1,0 +1,16 @@
+---
+description: CHAIN BRIEF before business-logic / cross-module edits
+globs: src/**/*,fst-web/**/*
+alwaysApply: false
+---
+
+# FST — агент цепочек
+
+Перед правкой логики/UI в `src/` или `fst-web/` (кроме опечатки):
+
+1. Скил **`fst-chain-context`**
+2. `npm run agent:chain-brief -- "<тема>"` или `graphify query`
+3. Блок **CHAIN BRIEF** (topic / nodes / path / risks / touch / verify)
+4. Для store/SQL/ролей/склада/ЗП/производства — subagent **`project-guardian`** (read-only)
+
+Вывод: `.cursor/context/CHAIN_BRIEF.md`

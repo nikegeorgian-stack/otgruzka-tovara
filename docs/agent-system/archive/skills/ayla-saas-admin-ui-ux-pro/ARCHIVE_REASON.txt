@@ -1,0 +1,3 @@
+Archived: 2026-09-02
+From: cursor
+Reason: Unused SaaS kit; Otgruzka uses Tailwind fc-* design

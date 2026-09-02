@@ -1,0 +1,40 @@
+---
+description: Otgruzka skill router — which SKILL.md to read (always-on, short)
+alwaysApply: true
+---
+
+# FST / Otgruzka — роутер скилов
+
+Полный гид: **`docs/OTGRUZKA-SKILLS-GUIDE.md`**
+
+## Быстрый выбор
+
+| Тема | Скил |
+|------|------|
+| Перед правкой / цепочки | `fst-chain-context` · subagent `project-guardian` |
+| Модули / ViewId | `fst-architecture` |
+| Табель / ЗП | `fst-payroll-georgia` |
+| Склад | `fst-warehouse-stock` |
+| Закупки | `fst-procurement` |
+| UI (фактический дизайн) | `fst-design-system`, `frontend-ui-engineering` |
+| Бизнес-инварианты | `fst-domain-invariants` |
+| Журналы | `fst-action-journals` |
+| Печать / Excel | `fst-print-layout`, `print-forms` |
+| SQL Connect | `firebase-data-connect` |
+| Баг / прод | `otgruzka-browser-verify` |
+| Деплой (по просьбе) | `otgruzka-deploy-auditor` |
+| React perf | `vercel-react-best-practices`, `vercel-composition-patterns` |
+| E2E (тест-среда) | `fst-e2e-critical-flows` |
+| Проверка diff | subagent `product-verifier` |
+
+## Spec Kit (только крупная новая фича)
+
+`speckit-constitution` → `specify` → `clarify?` → `plan` → `tasks` → `analyze` → `implement` → **`converge`**
+
+Мелкий багфикс — **без** Spec Kit.
+
+## Workflow
+
+`interview-me` (размыто) → `project-guardian` / chain brief → `incremental-implementation` → `product-verifier` → `otgruzka-browser-verify` (UI)
+
+Политика данных / деплоя: **`fst-core-policy.mdc`**, **`fst-data-integrity.mdc`**.

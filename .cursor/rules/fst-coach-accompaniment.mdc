@@ -1,0 +1,13 @@
+---
+description: Coach guides for new user-facing controls (scoped)
+globs: src/components/**/*,src/pages/**/*,src/lib/coach/**/*
+alwaysApply: false
+---
+
+# Инструктор — сопровождение
+
+Новая кнопка / вкладка / сценарий → гид в `catalog.ts` / `extraGuides.ts` + `data-coach` + i18n.
+
+Движок: клик по подсветке, не кнопка «Далее». Портал `#coach-root`.
+
+См. также **`fst-coach-sync.mdc`**.

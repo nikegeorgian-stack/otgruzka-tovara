@@ -1,0 +1,3 @@
+Archived: 2026-09-02
+From: agents
+Reason: Duplicate; canonical path .cursor/skills/firebase-firestore

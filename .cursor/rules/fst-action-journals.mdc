@@ -1,0 +1,24 @@
+---
+description: Audit journals on every store mutation (scoped)
+globs: src/store/**/*,src/lib/cloud/**/*,src/lib/journals/**/*
+alwaysApply: false
+---
+
+# Журналы действий
+
+Скил: **`fst-action-journals`**. Аудит дыр: `.cursor/context/JOURNALS_AUDIT.md`.
+
+## Dual-log
+
+| Слой | Где |
+|------|-----|
+| Событие | `appendAudit` → `store.auditLog` |
+| История сущности | доменные журналы (`itemHistories`, `hrJournal`, warehouse doc…) |
+
+## При мутации в `store/slices/*`
+
+1. `appendAudit` или доменный журнал
+2. Кто, что, было→стало при переименовании
+3. Новый `AuditEntry.action` → union в `types.ts`, `classifyAudit.ts`
+
+Не логировать навигацию/черновик фокуса. Не `console.log` вместо audit.

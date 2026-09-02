@@ -1,0 +1,29 @@
+---
+description: Otgruzka — данные и настройки не откатывать к сиду; анти-wipe; SQL побеждает
+alwaysApply: true
+---
+
+# Данные и настройки Otgruzka
+
+Правда = **SQL Connect** (`otgruzka-tovara-service`), UI-канон = https://otgruzka-tovara.vercel.app<br>
+Локаль / seed / `createDefaultStore()` / localStorage — черновик, не прод.
+
+## Нельзя (даже «чтобы починить / синхронизировать»)
+
+- Заливать локальный JSON, seed или пустой стор в SQL/Firestore
+- `clear:*`, `import:cloud*`, `clean:cloud-store:apply`, `migrate:sql-connect`, `migrate:cloud-store` без **отдельной** явной просьбы
+- Перезаписывать `access.users`, `roleViews`, `webViews`, табель-права «как в DEFAULT_ROLE_VIEWS»
+- Создавать общую SQL-базу из `createDefaultStore()`
+- Менять `.env` на чужой Firebase
+- Если на вебе «пусто/старое» — искать сбой pull, не чинить сидом
+
+Новые роли и поля схемы — **только добавить**. Уже заведённое в облаке не откатывать.
+
+## Код
+
+Сохранение в облако проходит `assertNoMassStoreWipe` (`src/lib/cloud/refuseStoreWipe.ts`):
+сотрудники, учётки, табель, журнал, склад, финансы, продажи, закупки, договоры, `roleViews`/`webViews`.
+Builtin-учётки — **add-only** (`ensureBuiltinWebUsers`).<br>
+Деплой UI: `.cursor/rules/fst-deploy-otgruzka.mdc`. Хук: `.cursor/hooks/otgruzka-deploy-guard.mjs`.
+
+Конфликт локаль ↔ облако → **побеждает SQL**.

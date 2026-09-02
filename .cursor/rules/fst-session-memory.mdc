@@ -1,0 +1,27 @@
+---
+description: Otgruzka session index — read CURRENT_STATE.md at chat start (always-on, short)
+alwaysApply: true
+---
+
+# Otgruzka — память между чатами
+
+**Первым делом прочитай:** [`.cursor/context/CURRENT_STATE.md`](../context/CURRENT_STATE.md)
+
+Там: текущая задача, последний bundle, открытые проблемы, следующий шаг, затронутые модули.
+
+## Статика (не дублировать в чатах)
+
+| | |
+|--|--|
+| Продукт | FST / Otgruzka — табель, HR, склад, закупки, производство, финансы |
+| Стек | React + TS + Vite + Tailwind; `src/` + `fst-web/` |
+| Прод UI | https://otgruzka-tovara.vercel.app |
+| Данные | SQL Connect `otgruzka-tovara-service` — см. `OTGRUZKA.md` |
+| Скилы | `.cursor/skills/` · гид `docs/OTGRUZKA-SKILLS-GUIDE.md` |
+| Chain brief | `npm run agent:chain-brief -- "тема"` → `.cursor/context/CHAIN_BRIEF.md` |
+
+## Обновление памяти (агент)
+
+После значимой сессии (фича, багфикс, деплой): **обнови `CURRENT_STATE.md`**, не раздувай это правило.
+
+Историю >2–3 сессий сжимай. Деплой — одна строка в `docs/DEPLOY.md`.
