@@ -228,6 +228,10 @@ export function conservativeMergeForSave(
       result.version = 6
       continue
     }
+    // PHASE T1: months are applied only via granular cell/structural ops in cloudSavePipeline.
+    if (key === 'months') {
+      continue
+    }
     const bv = (baseline as Record<string, unknown>)[key]
     const lv = (local as Record<string, unknown>)[key]
     const baseRv = (remote as Record<string, unknown>)[key]

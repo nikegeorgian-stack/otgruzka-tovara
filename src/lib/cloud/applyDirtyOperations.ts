@@ -1,9 +1,9 @@
 /**
- * Legacy fine-grained applier — superseded by conservativeMergeForSave.
- * Kept as a thin adapter so older tests compile; prefer conservativeMergeForSave.
+ * Legacy fine-grained applier — superseded by buildCloudSavePayload / mergeStoreForCloudSave.
+ * Kept as a thin adapter so older tests compile; prefer buildCloudSavePayload.
  */
 import type { AppStore } from '@/lib/types'
-import { conservativeMergeForSave } from './conservativeMerge'
+import { mergeStoreForCloudSave } from './cloudSavePipeline'
 import type { DirtyOperation, EntityConflict } from './dirtyOperations'
 
 export type ApplyDirtyOperationsResult = {
@@ -20,22 +20,15 @@ export function applyDirtyOperationsToRemote(
   remoteRevision: number,
 ): ApplyDirtyOperationsResult {
   void remoteRevision
-  const explicitDeletes = operations.filter((op) => op.type === 'delete' && op.explicit)
-  const { store, conflicts, completedDeleteOperationIds } = conservativeMergeForSave(
-    baseline,
+  const merged = mergeStoreForCloudSave({
     remote,
     local,
-    explicitDeletes,
-  )
-  const completed = new Set(completedDeleteOperationIds)
-  const appliedOperationIds = operations
-    .filter((op) => {
-      if (op.origin !== 'user') return false
-      if (op.type === 'delete' && op.explicit) return completed.has(op.operationId)
-      return !conflicts.some(
-        (c) => c.domain === op.domain && (c.entityId === op.entityId || c.entityId === '*'),
-      )
-    })
-    .map((op) => op.operationId)
-  return { store, appliedOperationIds, conflicts }
+    baseline,
+    operations,
+  })
+  return {
+    store: merged.store,
+    appliedOperationIds: merged.appliedOperationIds,
+    conflicts: merged.conflicts,
+  }
 }

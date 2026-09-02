@@ -27,6 +27,13 @@ import {
   canCloudWriteNow,
   needsPullBeforeWrite,
 } from '@/lib/cloud/cloudSavePipeline'
+import { formatTimesheetConflictDetail } from '@/lib/cloud/timesheetCellOps'
+import {
+  createIndexedDbDurableJournalAdapter,
+  getDurableJournalController,
+  shouldWarnBeforeUnloadT2,
+  shouldAttemptBlindUnloadSqlWrite,
+} from '@/lib/cloud/durableJournal'
 import {
   clearBulkStoreOverwrite,
   getBulkPreviewUserMessage,
@@ -73,7 +80,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
-type SyncStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'pulling' | 'updated'
+type SyncStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'pulling' | 'updated' | 'error' | 'conflict'
 
 function parsePayloadJson(payload: unknown): AppStore | null {
   try {
@@ -104,8 +111,17 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
   const [conflictCount, setConflictCount] = useState(0)
   const [conflictDetails, setConflictDetails] = useState<string[]>([])
   const [status, setStatus] = useState<SyncStatus>('idle')
+  const [pendingCount, setPendingCount] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
   const [bulkMessage, setBulkMessage] = useState<string | null>(null)
+  const [recoveryBanner, setRecoveryBanner] = useState<{
+    count: number
+    showDetails: boolean
+    unsupported: boolean
+  } | null>(null)
+  const [journalDegraded, setJournalDegraded] = useState(false)
+  const [journalUnconfirmed, setJournalUnconfirmed] = useState(0)
+  const [recoveryHold, setRecoveryHold] = useState(false)
 
   const storeRef = useRef(store)
   const skipSave = useRef(true)
@@ -136,6 +152,42 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
   }, [t])
 
   useEffect(() => subscribeBulkOverwrite(() => setBulkMessage(getBulkPreviewUserMessage())), [])
+
+  useEffect(() => {
+    return cloudDirtyTracker.subscribe(() => {
+      setPendingCount(cloudDirtyTracker.getPending().filter((op) => op.origin === 'user').length)
+      const n = cloudDirtyTracker.getConflicts().length
+      setConflictCount(n)
+    })
+  }, [])
+
+  useEffect(() => {
+    const journal = getDurableJournalController()
+    return journal.subscribe(() => {
+      const st = journal.getStatus()
+      setJournalDegraded(st.degraded)
+      setJournalUnconfirmed(st.unconfirmedWrites)
+      setRecoveryHold(st.recoveryHold)
+    })
+  }, [])
+
+  /** PHASE T1/T2: warn before close — no blind unload SQL write. */
+  useEffect(() => {
+    const shouldWarn = shouldWarnBeforeUnloadT2({
+      pendingUserOps: pendingCount,
+      saving: status === 'saving',
+      unresolvedConflicts: conflictCount,
+      unconfirmedJournalWrites: journalUnconfirmed,
+      recoveryHold,
+    })
+    if (!shouldWarn) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [pendingCount, status, conflictCount, journalUnconfirmed, recoveryHold])
 
   const flashStatus = useCallback((next: SyncStatus, ms?: number) => {
     setStatus(next)
@@ -282,6 +334,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
     if (!uid || !ready || skipSave.current) return
     if (!isCloudWriteLifecycleReady()) return
     if (isBulkOverwriteBlockingAutosave()) return
+    if (getDurableJournalController().isRecoveryHoldActive()) return
     if (!cloudDirtyTracker.hasPendingUserOperations()) return
     if (saveInFlight.current) return
 
@@ -329,12 +382,17 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         cloudDirtyTracker.setConflicts(build.conflicts)
         setConflictCount(build.conflicts.length)
         setConflictDetails(
-          build.conflicts.slice(0, 8).map((c) => `${c.domain}/${c.entityId}: ${c.message}`),
+          build.conflicts.slice(0, 8).map((c) => formatTimesheetConflictDetail(c)),
         )
         setRemotePending(true)
-        // Keep pending ops — do not clear.
-        flashStatus('dirty')
-        return
+        // Partial apply: still persist successfully merged ops; keep conflicted pending.
+        if (build.appliedOperationIds.length === 0 || !build.payloadJson || build.nextRevision == null) {
+          flashStatus('conflict')
+          return
+        }
+      } else {
+        setConflictCount(0)
+        setConflictDetails([])
       }
 
       if (!build.payloadJson || build.nextRevision == null) return
@@ -357,7 +415,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
           schedulePullRemote(true)
           setRemotePending(true)
           setConflictDetails(['revision_conflict: cloud changed; pending edits kept'])
-          flashStatus('dirty')
+          flashStatus('conflict')
           return
         }
         throw err
@@ -366,6 +424,17 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
       const finalStore = applyAppStoreSeeds(build.store ?? remoteParsed)
       commitSyncedBaseline(finalStore, build.nextRevision, build.fingerprint)
       cloudDirtyTracker.acknowledgePersisted(build.appliedOperationIds)
+      if (build.conflicts.length > 0) {
+        cloudDirtyTracker.setConflicts(build.conflicts)
+        setConflictCount(build.conflicts.length)
+        setRemotePending(true)
+        applyCloud(finalStore)
+        notifyStoreTabsSaved(build.nextRevision, build.fingerprint ?? '')
+        noteCloudPullCompleted(build.nextRevision)
+        flashStatus('conflict')
+        scheduleOutboxRef.current()
+        return
+      }
       cloudDirtyTracker.clearConflicts()
       applyCloud(finalStore)
       notifyStoreTabsSaved(build.nextRevision, build.fingerprint ?? '')
@@ -384,7 +453,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
           ? tRef.current('web.cloud.saveTimeout')
           : sqlConnectErrorMessage(err, tRef.current('web.cloud.loadFailed')),
       )
-      flashStatus('dirty')
+      flashStatus('error')
     } finally {
       saveInFlight.current = false
     }
@@ -404,6 +473,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
     if (!configured || !uid || !ready || skipSave.current) return
     if (!isCloudWriteLifecycleReady()) return
     if (isBulkOverwriteBlockingAutosave()) return
+    if (getDurableJournalController().isRecoveryHoldActive()) return
     if (!cloudDirtyTracker.hasPendingUserOperations()) {
       if (hasPendingOutboxWork(storeRef.current)) {
         scheduleOutboxRef.current()
@@ -515,18 +585,49 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
       // Bootstrap gate for unconfigured/logged-out: sync ready flag with auth props.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync bootstrap
       setReady(!configured)
+      getDurableJournalController().clearScopeMemory()
+      cloudDirtyTracker.setJournalHooks({})
       return
     }
 
     let cancelled = false
     if (!hasLoadedOnce.current) setReady(false)
     setError(null)
+    setRecoveryBanner(null)
     resetSyncLifecycle()
     setSyncLifecyclePhase('booting')
 
     void (async () => {
       setSyncLifecyclePhase('hydrating')
+      const journal = getDurableJournalController()
       try {
+        // Prefer IndexedDB; fall back to degraded in-memory without false "protected" claim.
+        if (journal.getAdapter().kind !== 'memory') {
+          journal.setAdapter(createIndexedDbDurableJournalAdapter())
+        } else if (typeof indexedDB !== 'undefined') {
+          journal.setAdapter(createIndexedDbDurableJournalAdapter())
+        }
+
+        await journal.bindScope({
+          projectId: String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'local-dev'),
+          uid,
+          storeDocId: storeId,
+          appStoreVersion: 6,
+        })
+        cloudDirtyTracker.setJournalHooks({
+          persist: async (ops) => {
+            for (const op of ops) {
+              await journal.persistOperation(op, 'pending')
+            }
+          },
+          acknowledge: async (ids) => {
+            await journal.acknowledge(ids)
+          },
+          discard: async (ids) => {
+            await journal.discardOperationIds(ids)
+          },
+        })
+
         const row = await Promise.race([
           sqlGetFstStore(storeId),
           new Promise<never>((_, reject) => {
@@ -557,8 +658,43 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         const seeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
         storeRef.current = seeded
         const committed = commitSyncedBaseline(seeded, Number(row.revision) || 1)
+        // Pure cloud first — journal recovery must not auto SQL-write.
         applyCloud(committed)
         noteCloudPullCompleted(Number(row.revision) || 1)
+
+        const restored = await journal.restoreAfterCloudLoad(committed.months)
+        if (cancelled) return
+        // sqlWriteCount is always 0 by contract of restoreAfterCloudLoad
+
+        if (restored.unsupported.length > 0) {
+          setRecoveryBanner({
+            count: restored.unsupported.length,
+            showDetails: false,
+            unsupported: true,
+          })
+        } else if (restored.recoverableOps.length > 0 || restored.conflictOps.length > 0) {
+          cloudDirtyTracker.hydratePendingFromRecovery([
+            ...restored.recoverableOps,
+            ...restored.conflictOps,
+          ])
+          if (restored.conflicts.length) {
+            cloudDirtyTracker.setConflicts(restored.conflicts)
+            setConflictCount(restored.conflicts.length)
+            setConflictDetails(
+              restored.conflicts.slice(0, 8).map((c) => formatTimesheetConflictDetail(c)),
+            )
+            setRemotePending(true)
+          }
+          if (restored.recoverableOps.length > 0) {
+            applyCloud({ ...committed, months: restored.previewMonths })
+          }
+          setRecoveryBanner({
+            count: restored.recoverableOps.length + restored.conflictOps.length,
+            showDetails: false,
+            unsupported: false,
+          })
+        }
+
         setReadOnly(false)
         hasLoadedOnce.current = true
         setReady(true)
@@ -622,11 +758,8 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
     if (!configured || !uid || !ready) return
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {
+        // PHASE T2: no blind SQL write on hide — durable journal holds timesheet ops.
         if (saveTimer.current) clearTimeout(saveTimer.current)
-        if (!isCloudWriteLifecycleReady()) return
-        if (!cloudDirtyTracker.hasPendingUserOperations()) return
-        if (isBulkOverwriteBlockingAutosave()) return
-        void flushSave()
       } else {
         schedulePullRemote(true)
       }
@@ -634,10 +767,10 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
     const onFocus = () => schedulePullRemote()
     const onUnload = () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      if (!isCloudWriteLifecycleReady()) return
-      if (!cloudDirtyTracker.hasPendingUserOperations()) return
-      if (isBulkOverwriteBlockingAutosave()) return
-      void flushSave()
+      // No void flushSave / sendBeacon — beforeunload warns only.
+      if (shouldAttemptBlindUnloadSqlWrite()) {
+        // unreachable by T2 contract
+      }
     }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
@@ -647,7 +780,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('pagehide', onUnload)
     }
-  }, [configured, flushSave, ready, schedulePullRemote, uid])
+  }, [configured, ready, schedulePullRemote, uid])
 
   useEffect(() => {
     if (!configured || !uid || !ready) return
@@ -666,6 +799,35 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
     },
     [],
   )
+
+  function continueRecoveredSave() {
+    const journal = getDurableJournalController()
+    journal.releaseRecoveryHold()
+    setRecoveryBanner(null)
+    setStatus('dirty')
+    void flushSave()
+  }
+
+  function keepCloudDiscardRestored() {
+    const journal = getDurableJournalController()
+    if (recoveryBanner?.unsupported) {
+      // Fail-closed: do not delete unsupported journal records.
+      journal.releaseRecoveryHold()
+      setRecoveryBanner(null)
+      return
+    }
+    const ids = journal.getRestoredOperationIds()
+    cloudDirtyTracker.discardPendingByIds(ids)
+    void journal.discardOperationIds(ids)
+    journal.releaseRecoveryHold()
+    const cloud = lastSyncedStore.current
+    if (cloud) applyCloud(cloud)
+    setRecoveryBanner(null)
+    setRemotePending(false)
+    setConflictCount(0)
+    setConflictDetails([])
+    flashStatus('updated', MERGED_HINT_MS)
+  }
 
   function acceptRemote() {
     void (async () => {
@@ -714,6 +876,56 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
 
   return (
     <>
+      {journalDegraded && (
+        <div className="fixed inset-x-0 top-0 z-[446] border-b border-amber-500 bg-amber-100 px-4 py-2 text-sm text-amber-950 shadow-sm print:hidden">
+          <p className="font-semibold">{t('web.cloud.journalDegraded')}</p>
+          <p className="mt-0.5 text-xs">{t('web.cloud.journalDegradedHint')}</p>
+        </div>
+      )}
+      {recoveryBanner && (
+        <div className="fixed bottom-4 left-4 z-[210] max-w-md rounded-sm border border-violet-300 bg-violet-50 px-4 py-3 text-sm text-violet-950 shadow-sm max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:left-[calc(var(--app-sidebar-w,3.5rem)+1rem)] lg:bottom-16">
+          <p className="font-semibold">
+            {recoveryBanner.unsupported
+              ? t('web.cloud.journalUnsupported')
+              : tf('web.cloud.journalRecovered', { count: String(recoveryBanner.count) })}
+          </p>
+          {recoveryBanner.showDetails && conflictDetails.length > 0 && (
+            <ul className="mt-2 max-h-28 list-disc overflow-auto pl-4 text-xs">
+              {conflictDetails.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-xs text-violet-800">{t('web.cloud.journalRecoveredHint')}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-sm border border-violet-400 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100"
+              onClick={() =>
+                setRecoveryBanner((b) => (b ? { ...b, showDetails: !b.showDetails } : b))
+              }
+            >
+              {t('web.cloud.journalReview')}
+            </button>
+            {!recoveryBanner.unsupported && (
+              <button
+                type="button"
+                className="rounded-sm bg-violet-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-900"
+                onClick={continueRecoveredSave}
+              >
+                {t('web.cloud.journalContinueSave')}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded-sm border border-violet-400 px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100"
+              onClick={keepCloudDiscardRestored}
+            >
+              {t('web.cloud.journalKeepCloud')}
+            </button>
+          </div>
+        </div>
+      )}
       {readOnly && (
         <div className="fixed inset-x-0 top-0 z-[440] border-b border-amber-400 bg-amber-100 px-4 py-2.5 text-sm text-amber-950 shadow-sm print:hidden">
           <p className="font-semibold">{t('web.cloud.readOnly')}</p>
@@ -781,7 +993,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
               className="rounded-sm border border-sky-400 px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100"
               onClick={() => void flushSave()}
             >
-              Повторить сохранение
+              {t('web.cloud.retrySave')}
             </button>
             <button
               type="button"
@@ -793,9 +1005,26 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
           </div>
         </div>
       )}
-      {status === 'dirty' && !bulkMessage && (
-        <div className="pointer-events-none fixed bottom-3 right-3 z-[150] rounded-sm border border-amber-200 bg-amber-50/95 px-2 py-1 text-[10px] text-amber-900 print:hidden">
-          Есть несохранённые изменения…
+      {(status === 'dirty' || status === 'saving' || status === 'saved' || status === 'error' || status === 'conflict') &&
+        !bulkMessage && (
+        <div
+          className={`pointer-events-none fixed bottom-3 right-3 z-[150] rounded-sm border px-2 py-1 text-[10px] print:hidden ${
+            status === 'saved'
+              ? 'border-emerald-200 bg-emerald-50/95 text-emerald-900'
+              : status === 'error'
+                ? 'border-rose-200 bg-rose-50/95 text-rose-900'
+                : status === 'conflict'
+                  ? 'border-sky-200 bg-sky-50/95 text-sky-900'
+                  : status === 'saving'
+                    ? 'border-stone-200 bg-stone-50/95 text-stone-800'
+                    : 'border-amber-200 bg-amber-50/95 text-amber-900'
+          }`}
+        >
+          {status === 'dirty' && tf('web.cloud.dirtyCount', { count: String(Math.max(pendingCount, 1)) })}
+          {status === 'saving' && t('web.cloud.savingShort')}
+          {status === 'saved' && t('web.cloud.savedShort')}
+          {status === 'error' && t('web.cloud.saveErrorShort')}
+          {status === 'conflict' && tf('web.cloud.conflictShort', { count: String(Math.max(conflictCount, 1)) })}
         </div>
       )}
     </>

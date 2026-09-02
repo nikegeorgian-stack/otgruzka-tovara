@@ -2,6 +2,7 @@ import type { AppStore } from '@/lib/types'
 import { nextOperationId, type DirtyOperation } from './dirtyOperations'
 import type { StoreMutationOrigin } from './storeMutationOrigin'
 import { STABLE_ID_COLLECTION_PATHS, getPathValue } from './stableIdPaths'
+import { diffMonthsToOperations } from './timesheetCellOps'
 
 type IdEntity = { id: string }
 
@@ -93,16 +94,7 @@ export function diffStoreToOperations(
   }
 
   if (!eqJson(before.months, after.months)) {
-    ops.push({
-      operationId: nextOperationId(),
-      type: 'update',
-      domain: 'months',
-      entityId: '*',
-      fields: ['*'],
-      baseRevision,
-      origin,
-      at: new Date().toISOString(),
-    })
+    ops.push(...diffMonthsToOperations(before.months, after.months, baseRevision, origin))
   }
   if (!eqJson(before.settings, after.settings)) {
     ops.push({

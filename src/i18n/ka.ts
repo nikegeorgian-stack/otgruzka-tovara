@@ -824,6 +824,23 @@ export const ka: Dict = {
   'web.changePassword.alreadyDone': 'პაროლი უკვე შევცვალე — მხოლოდ მოხსნა ბლოკი',
   'web.cloud.saving': 'ღრუბელი · შენახვა…',
   'web.cloud.dirty': 'ღრუბელი · არის ცვლილებები…',
+  'web.cloud.dirtyCount': 'შეუნახავი ცვლილებები: {count}',
+  'web.cloud.savingShort': 'ინახება…',
+  'web.cloud.savedShort': 'შენახულია',
+  'web.cloud.saveErrorShort': 'შენახვის შეცდომა',
+  'web.cloud.conflictShort': 'კონფლიქტი: {count}',
+  'web.cloud.retrySave': 'შენახვის გამეორება',
+  'web.cloud.journalDegraded': 'ლოკალური დაცვა მიუწვდომელია',
+  'web.cloud.journalDegradedHint':
+    'IndexedDB მიუწვდომელია — ცვლილებები მხოლოდ ამ ჩანართის მეხსიერებაშია. არ დახუროთ «შენახულია»-მდე.',
+  'web.cloud.journalRecovered': 'აღდგენილია შეუნახავი ცვლილებები: {count}',
+  'web.cloud.journalRecoveredHint':
+    'ავტოშენახვა პაუზაზეა. SQL-ში ჩაწერა არ მომხდარა. აირჩიეთ ქმედება.',
+  'web.cloud.journalUnsupported':
+    'ნაპოვნია მხარდაუჭერელი ჟურნალის ვერსია — ჩანაწერები არ გამოყენებულა და არ წაშლილა',
+  'web.cloud.journalReview': 'ნახვა',
+  'web.cloud.journalContinueSave': 'შენახვის გაგრძელება',
+  'web.cloud.journalKeepCloud': 'ღრუბლის მონაცემების დატოვება',
   'web.cloud.saveTimeout': 'ღრუბელში შენახვა ძალიან დიდხანს გრძელდება. შეამოწმეთ ქსელი და დააჭირეთ «სინქრონიზაცია».',
   'web.cloud.saved': 'ღრუბელი · შენახულია',
   'web.cloud.pulling': 'ღრუბელი · განახლება…',
@@ -835,7 +852,7 @@ export const ka: Dict = {
   'web.cloud.conflictMany':
     'კოლეგებმა იგივე მონაცემები შეცვალეს ({count} კონფლიქტი). განაახლეთ, რომ ცვლილებები არ დაიკარგოს.',
   'web.cloud.remotePending': 'მონაცემები განახლდა სხვა ჩანართში ან მოწყობილობაზე.',
-  'web.cloud.acceptRemote': 'განახლება ახლა',
+  'web.cloud.acceptRemote': 'ღრუბლის მიღება',
   'web.cloud.syncAll': 'სრული სინქრონიზაცია',
   'web.cloud.later': 'მოგვიანებით',
   'web.cloud.retry': 'კიდევ სცადეთ',

@@ -11,6 +11,12 @@ import {
   isCloudPullStale,
   isCloudWriteLifecycleReady,
 } from './syncLifecycle'
+import {
+  applyMonthsGranularOperations,
+  isLegacyWholeMonthsOp,
+  isStructuralMonthOp,
+  isTimesheetCellOp,
+} from './timesheetCellOps'
 
 export type CloudSaveBuildInput = {
   remote: AppStore
@@ -52,7 +58,87 @@ export function shouldScheduleCloudSave(hasPendingUserOperations: boolean): bool
   return canAttemptCloudWrite({ hasPendingUserOperations })
 }
 
-/** Build payload: fresh remote + conservative user changes + explicit deletes only. */
+function isMonthsGranularOp(op: DirtyOperation): boolean {
+  return isTimesheetCellOp(op) || isStructuralMonthOp(op) || isLegacyWholeMonthsOp(op)
+}
+
+/** Core merge used by save build and legacy apply adapter (no lifecycle gate). */
+export function mergeStoreForCloudSave(input: {
+  remote: AppStore
+  local: AppStore
+  baseline: AppStore
+  operations: DirtyOperation[]
+  actorEmail?: string | null
+}): {
+  store: AppStore
+  conflicts: EntityConflict[]
+  changedDomains: string[]
+  appliedOperationIds: string[]
+  completedDeleteOperationIds: string[]
+} {
+  const userOps = input.operations.filter((op) => op.origin === 'user')
+  const explicitDeletes = userOps.filter(
+    (op) => op.type === 'delete' && op.explicit && !isMonthsGranularOp(op),
+  )
+  const {
+    store: mergedBase,
+    conflicts: domainConflicts,
+    changedDomains,
+    completedDeleteOperationIds,
+  } = conservativeMergeForSave(
+    input.baseline,
+    input.remote,
+    input.local,
+    explicitDeletes,
+  )
+
+  const monthOps = userOps.filter(isMonthsGranularOp)
+  const monthResult = applyMonthsGranularOperations(
+    input.remote.months,
+    input.baseline.months,
+    input.local.months,
+    monthOps,
+  )
+
+  const merged: AppStore = {
+    ...mergedBase,
+    months: monthResult.months,
+  }
+  if (
+    JSON.stringify(monthResult.months ?? {}) !== JSON.stringify(input.remote.months ?? {})
+  ) {
+    changedDomains.push('months')
+  }
+
+  const conflicts: EntityConflict[] = [...domainConflicts, ...monthResult.conflicts]
+  const monthApplied = new Set(monthResult.appliedOperationIds)
+  const completedDeletes = new Set(completedDeleteOperationIds)
+
+  const privilegeSafe = clampClientPrivilegeFields(merged, input.remote, input.actorEmail ?? null)
+  assertNoMassStoreWipe(input.remote, privilegeSafe)
+
+  const appliedOperationIds = userOps
+    .filter((op) => {
+      if (isMonthsGranularOp(op)) return monthApplied.has(op.operationId)
+      if (op.type === 'delete' && op.explicit) return completedDeletes.has(op.operationId)
+      return !conflicts.some(
+        (c) =>
+          c.domain === op.domain &&
+          (op.entityId === '*' || c.entityId === op.entityId || c.entityId === '*'),
+      )
+    })
+    .map((op) => op.operationId)
+
+  return {
+    store: privilegeSafe,
+    conflicts,
+    changedDomains,
+    appliedOperationIds,
+    completedDeleteOperationIds,
+  }
+}
+
+/** Build payload: fresh remote + conservative user changes + granular months ops. */
 export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuildResult {
   const userOps = input.operations.filter((op) => op.origin === 'user')
   const gate = canCloudWriteNow(userOps.length > 0)
@@ -66,47 +152,26 @@ export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuil
     }
   }
 
-  const explicitDeletes = userOps.filter((op) => op.type === 'delete' && op.explicit)
-  const {
-    store: merged,
-    conflicts,
-    changedDomains,
-    completedDeleteOperationIds,
-  } = conservativeMergeForSave(
-    input.baseline,
-    input.remote,
-    input.local,
-    explicitDeletes,
-  )
+  const merged = mergeStoreForCloudSave({
+    remote: input.remote,
+    local: input.local,
+    baseline: input.baseline,
+    operations: input.operations,
+    actorEmail: input.actorEmail,
+  })
 
-  const privilegeSafe = clampClientPrivilegeFields(merged, input.remote, input.actorEmail ?? null)
-  assertNoMassStoreWipe(input.remote, privilegeSafe)
-  const prepared = prepareCloudPayload(sanitizeStoreForExport(privilegeSafe))
-
-  const completedDeletes = new Set(completedDeleteOperationIds)
-  const appliedOperationIds = userOps
-    .filter((op) => {
-      if (op.type === 'delete' && op.explicit) {
-        // Only acknowledge deletes that completed (applied or remote already absent).
-        // Conflicts keep pending local delete — never silent retry-delete of newer remote.
-        return completedDeletes.has(op.operationId)
-      }
-      return !conflicts.some(
-        (c) => c.domain === op.domain && (op.entityId === '*' || c.entityId === op.entityId || c.entityId === '*'),
-      )
-    })
-    .map((op) => op.operationId)
+  const prepared = prepareCloudPayload(sanitizeStoreForExport(merged.store))
 
   return {
     allowed: true,
-    store: privilegeSafe,
+    store: merged.store,
     payloadJson: prepared.json,
     fingerprint: prepared.fingerprint,
     expectedRevision: input.remoteRevision,
     nextRevision: input.remoteRevision + 1,
-    appliedOperationIds,
-    conflicts,
-    changedDomains,
+    appliedOperationIds: merged.appliedOperationIds,
+    conflicts: merged.conflicts,
+    changedDomains: merged.changedDomains,
   }
 }
 

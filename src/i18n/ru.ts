@@ -824,6 +824,23 @@ export const ru: Dict = {
   'web.changePassword.alreadyDone': 'Пароль уже задал — только снять блокировку',
   'web.cloud.saving': 'Облако · сохранение…',
   'web.cloud.dirty': 'Облако · есть изменения…',
+  'web.cloud.dirtyCount': 'Есть несохранённые изменения: {count}',
+  'web.cloud.savingShort': 'Сохраняется…',
+  'web.cloud.savedShort': 'Сохранено',
+  'web.cloud.saveErrorShort': 'Ошибка сохранения',
+  'web.cloud.conflictShort': 'Конфликт: {count}',
+  'web.cloud.retrySave': 'Повторить сохранение',
+  'web.cloud.journalDegraded': 'Локальная защита изменений недоступна',
+  'web.cloud.journalDegradedHint':
+    'IndexedDB недоступен — правки держатся только в памяти этой вкладки. Не закрывайте страницу до «Сохранено».',
+  'web.cloud.journalRecovered': 'Восстановлены несохранённые изменения: {count}',
+  'web.cloud.journalRecoveredHint':
+    'Автосохранение на паузе. SQL не записывался. Выберите действие.',
+  'web.cloud.journalUnsupported':
+    'Найден журнал неподдерживаемой версии — записи не применены и не удалены',
+  'web.cloud.journalReview': 'Просмотреть',
+  'web.cloud.journalContinueSave': 'Продолжить сохранение',
+  'web.cloud.journalKeepCloud': 'Оставить данные из облака',
   'web.cloud.saveTimeout': 'Сохранение в облако слишком долго. Проверьте сеть и нажмите «Синхронизировать».',
   'web.cloud.saved': 'Облако · сохранено',
   'web.cloud.pulling': 'Облако · обновление…',
@@ -835,7 +852,7 @@ export const ru: Dict = {
   'web.cloud.conflictMany':
     'Коллеги изменили те же данные ({count} конфликтов). Обновите, чтобы не потерять правки.',
   'web.cloud.remotePending': 'Данные обновились в другой вкладке или на другом устройстве.',
-  'web.cloud.acceptRemote': 'Обновить сейчас',
+  'web.cloud.acceptRemote': 'Принять облако',
   'web.cloud.syncAll': 'Синхронизировать всё',
   'web.cloud.later': 'Позже',
   'web.cloud.retry': 'Повторить',
