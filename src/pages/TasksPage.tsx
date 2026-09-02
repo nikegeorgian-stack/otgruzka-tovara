@@ -194,7 +194,8 @@ export function TasksPage({
         access={store.access}
         currentUser={currentUser}
         comments={tasksStore.comments}
-        attachments={tasksStore.attachments}
+        attachments={tasksStore.attachments}
+        externalEffects={store.externalEffects}
         onAddTaskAttachmentMeta={onAddTaskAttachmentMeta}
         onBeginTaskAttachmentDelete={onBeginTaskAttachmentDelete}
         onRemoveTaskAttachmentMeta={onRemoveTaskAttachmentMeta}

@@ -36,6 +36,7 @@ import { estimatedOrderedRolls } from '@/lib/planner/rolls'
 import { actorAuditFields } from './actorAuditFields'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 import type { AppStore } from '@/lib/types'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 
 function historyEntry(
   type: SalesOrderHistoryEntry['type'],
@@ -166,6 +167,7 @@ export function createSalesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeSalesOrder(id: string) {
+      recordSliceExplicitDelete('sales.orders', id, actorFromGetter(getActor))
       patchStore(setStore, (s) => ({
         ...s,
         sales: {

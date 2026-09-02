@@ -17,6 +17,9 @@ import {
 import type { WorkTaskDraft, TaskAttachment } from '@/lib/tasks/types'
 import { autoAssignUserId } from '@/lib/tasks/rules'
 import type { AppStore } from '@/lib/types'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
+import { beginStorageAttachmentDeletion } from '@/lib/cloud/externalEffects/processor'
+import { assertExternalDeletionRuntime } from '@/lib/cloud/externalEffects/runtime'
 import { actorAuditFields } from './actorAuditFields'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
@@ -304,38 +307,28 @@ export function createTasksSlice({ setStore, getStore, getActor }: StoreSliceDep
     },
 
     beginTaskAttachmentDelete(taskId: string, attachmentId: string) {
-      // P: no outbox — drop attachment meta immediately (pre-cloud behavior).
+      // Fail-closed: Phase A only on web (processor lives in FstSqlConnectSync).
+      assertExternalDeletionRuntime()
       const tasks = normalizeTasksStore(getStore().tasks)
       const att = tasks.attachments.find((a) => a.id === attachmentId)
       const existing = tasks.tasks.find((t) => t.id === taskId)
-      if (!att || !existing) return
+      if (!att || !existing || att.pendingDeletion) return
+      const actor = actorFromGetter(getActor)
       patchStore(setStore, (s) => {
         const tasks = normalizeTasksStore(s.tasks)
         const att = tasks.attachments.find((a) => a.id === attachmentId)
-        const existing = tasks.tasks.find((t) => t.id === taskId)
-        if (!att || !existing) return s
-        let next: AppStore = {
-          ...s,
-          tasks: {
-            ...tasks,
-            attachments: tasks.attachments.filter((a) => a.id !== attachmentId),
-            tasks: tasks.tasks.map((t) =>
-              t.id === taskId
-                ? {
-                    ...t,
-                    attachmentIds: (t.attachmentIds ?? []).filter((id) => id !== attachmentId),
-                    updatedAt: new Date().toISOString(),
-                  }
-                : t,
-            ),
-          },
-        }
-        next = appendAudit(next, {
+        if (!att || att.pendingDeletion) return s
+        const begun = beginStorageAttachmentDeletion(s, {
+          attachmentId,
+          storagePath: att.storagePath,
+          requestedBy: actor.actorId,
+          requestedByName: actor.actorName,
+        })
+        return appendAudit(begun.store, {
           action: 'task_attach_remove',
-          detail: `${existing.number ?? existing.title}: ${att.fileName}`,
+          detail: `[pending] ${existing.number ?? existing.title}: ${att.fileName}`,
           ...who(),
         })
-        return next
       })
     },
 
@@ -344,6 +337,7 @@ export function createTasksSlice({ setStore, getStore, getActor }: StoreSliceDep
       const att = tasks.attachments.find((a) => a.id === attachmentId)
       const existing = tasks.tasks.find((t) => t.id === taskId)
       if (!att || !existing) return
+      recordSliceExplicitDelete('tasks.attachments', attachmentId, actorFromGetter(getActor))
       patchStore(setStore, (s) => {
         const tasks = normalizeTasksStore(s.tasks)
         const att = tasks.attachments.find((a) => a.id === attachmentId)

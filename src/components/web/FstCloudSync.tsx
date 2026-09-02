@@ -50,8 +50,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 type CloudStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'pulling' | 'updated'
 
-export function FstCloudSync({ store, replaceStore }: FstCloudSyncProps) {
-  const hydrateStore = replaceStore
+export function FstCloudSync({ store, applyCloudStore, replaceStore }: FstCloudSyncProps) {
+  const hydrateStore = applyCloudStore ?? replaceStore
   const { user, configured } = useFstAuth()
   const { t, tf } = useI18n()
   const [cloudReady, setCloudReady] = useState(!configured)

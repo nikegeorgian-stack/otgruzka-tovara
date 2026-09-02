@@ -13,6 +13,7 @@ import {
   parseWastewaterInternalCodeNum,
 } from '@/lib/wastewater/init'
 import type { WastewaterCube } from '@/lib/wastewater/types'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { type StoreSliceDeps } from '../storeApi'
 
 export function createWastewaterSlice({ setStore }: StoreSliceDeps) {
@@ -122,6 +123,7 @@ export function createWastewaterSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeWastewaterCube(id: string) {
+      recordSliceExplicitDelete('wastewater.cubes', id)
       setStore((s) => ({
         ...s,
         wastewater: {

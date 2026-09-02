@@ -33,6 +33,7 @@ import type {
 } from '@/lib/finance/types'
 import { isMonthClosed } from '@/lib/monthManage'
 import type { AppStore } from '@/lib/types'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type { StoreSliceDeps } from '../storeApi'
 
 export type Actor = { id?: string; name?: string }
@@ -169,6 +170,10 @@ function postPayoutDocumentInternal(
 }
 
 export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
+  const finActor = (actor?: Actor) =>
+    actor?.id || actor?.name
+      ? { actorId: actor.id, actorName: actor.name }
+      : actorFromGetter(getActor)
 
   function patchFinance(
     fn: (
@@ -345,6 +350,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
       const fin = getFinance(getStore())
       const doc = advanceDocumentById(fin, id)
       if (!doc || doc.status !== 'draft') return
+      recordSliceExplicitDelete('finance.advanceDocuments', id, finActor(actor))
       patchFinance( (fin) => {
         const doc = advanceDocumentById(fin, id)
         if (!doc || doc.status !== 'draft') return { finance: fin }
@@ -506,6 +512,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
       const fin = getFinance(getStore())
       const doc = payoutDocumentById(fin, id)
       if (!doc || doc.status !== 'draft') return
+      recordSliceExplicitDelete('finance.payoutDocuments', id, finActor(actor))
       patchFinance( (fin) => {
         const doc = payoutDocumentById(fin, id)
         if (!doc || doc.status !== 'draft') return { finance: fin }
@@ -572,6 +579,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
         const doc = advanceDocumentById(fin, adv.documentId)
         if (doc?.status === 'paid') return
       }
+      recordSliceExplicitDelete('finance.advances', id, finActor(actor))
       patchFinance( (fin, s) => {
         const adv = fin.advances.find((a) => a.id === id)
         if (!adv) return { finance: fin }
@@ -625,6 +633,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
       const adj = fin.adjustments.find((a) => a.id === id)
       if (!adj) return
       if (isMonthClosed(s, adj.month)) return
+      recordSliceExplicitDelete('finance.adjustments', id, finActor(actor))
       patchFinance( (fin, s) => {
         const adj = fin.adjustments.find((a) => a.id === id)
         if (!adj) return { finance: fin }
@@ -675,6 +684,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
         const doc = payoutDocumentById(fin, p.documentId)
         if (doc?.status === 'paid') return
       }
+      recordSliceExplicitDelete('finance.payouts', id, finActor(actor))
       patchFinance( (fin, s) => {
         const p = fin.payouts.find((x) => x.id === id)
         if (!p) return { finance: fin }
@@ -901,6 +911,7 @@ export function createFinanceSlice({ setStore, getStore, getActor }: StoreSliceD
       const fin = getFinance(getStore())
       const doc = advanceAccrualById(fin, id)
       if (!doc || doc.status !== 'draft') return
+      recordSliceExplicitDelete('finance.advanceAccruals', id, finActor(actor))
       patchFinance( (fin) => {
         const doc = advanceAccrualById(fin, id)
         if (!doc || doc.status !== 'draft') return { finance: fin }

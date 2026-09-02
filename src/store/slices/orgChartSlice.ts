@@ -20,6 +20,7 @@ import {
 } from '@/lib/orgChart/validate'
 import type { AppStore } from '@/lib/types'
 import { actorAuditFields } from './actorAuditFields'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
 function patchField<T>(
@@ -50,6 +51,7 @@ export function createOrgChartSlice({ setStore, getActor }: StoreSliceDeps) {
       if (!result.ok) return s
       ok = true
       const actor = who()
+      recordSliceExplicitDelete('orgChart.nodes', id, actorFromGetter(getActor))
       let next: AppStore = {
         ...s,
         orgChart: { ...org, nodes: result.nodes },

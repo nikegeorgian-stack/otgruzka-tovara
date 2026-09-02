@@ -3192,6 +3192,12 @@ export const ru: Dict = {
   'access.userRemoveFailed': 'Ошибка удаления — повторите после синхронизации',
   'access.externalDeleteWebOnly':
     'Удаление доступно только в веб-версии с защищённой синхронизацией',
+  'bulk.blockedPending':
+    'Сначала сохраните, отмените или разрешите текущие изменения',
+  'externalEffects.filePendingDelete': 'Файл ожидает удаления',
+  'externalEffects.fileAwaitFinalSave': 'Файл удалён, ожидается финальное сохранение',
+  'externalEffects.fileDeleteFailed': 'Ошибка удаления файла — повторите',
+  'externalEffects.userPendingBadge': 'Удаление…',
   'access.deleteUserTitle': 'Удалить пользователя?',
   'access.deleteUserConfirm': 'Удалить «{name}» ({email}) из программы и Firebase? Это нельзя отменить.',
   'access.errCannotRemoveSelf': 'Нельзя удалить свою учётную запись',

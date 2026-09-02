@@ -5,11 +5,9 @@ import {
   applyAppStoreSeeds,
   parseStorePayload,
   restoreLocalSecrets,
-  sanitizeStoreForExport,
 } from '@/lib/storage'
 import { mergeCloudStores } from '@/lib/cloud/cloudMerge'
 import { prepareCloudPayload } from '@/lib/cloud/cloudPayload'
-import { clampClientPrivilegeFields } from '@/lib/cloud/privilegeClamp'
 import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
 import {
   listenStoreTabMessages,
@@ -23,7 +21,31 @@ import {
   sqlSubscribeFstStoreMeta,
   sqlUpdateFstStore,
 } from '@/lib/sqlconnect/fstStoreSqlSync'
-import { assertNoMassStoreWipe } from '@/lib/cloud/refuseStoreWipe'
+import { cloudDirtyTracker } from '@/lib/cloud/dirtyOperations'
+import {
+  buildCloudSavePayload,
+  canCloudWriteNow,
+  needsPullBeforeWrite,
+} from '@/lib/cloud/cloudSavePipeline'
+import {
+  clearBulkStoreOverwrite,
+  getBulkPreviewUserMessage,
+  isBulkOverwriteBlockingAutosave,
+  subscribeBulkOverwrite,
+} from '@/lib/cloud/bulkStoreOverwrite'
+import {
+  isCloudWriteLifecycleReady,
+  noteCloudPullCompleted,
+  noteCloudRevision,
+  resetSyncLifecycle,
+  setSyncLifecyclePhase,
+} from '@/lib/cloud/syncLifecycle'
+import {
+  processExternalEffectsOutbox,
+  type ExternalEffectsProcessorContext,
+} from '@/lib/cloud/externalEffects/processor'
+import { hasPendingOutboxWork } from '@/lib/cloud/externalEffects/outbox'
+import { resolveRoleTaskAccessLevel } from '@/lib/tasks/access'
 import type { AppStore } from '@/lib/types'
 import type { FstCloudSyncProps } from './fstCloudTypes'
 
@@ -31,11 +53,9 @@ const SAVE_DEBOUNCE_MS = 2500
 const LOAD_TIMEOUT_MS = 45_000
 const SAVE_TIMEOUT_MS = 60_000
 const REMOTE_PULL_DEBOUNCE_MS = 250
-/** Частый poll: вкладки на vercel.app и web.app — разные origin, BroadcastChannel не связывает. */
 const IDLE_POLL_MS = 10_000
 const SAVED_FLASH_MS = 2500
 const MERGED_HINT_MS = 3000
-const MAX_SAVE_RETRIES = 5
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -71,8 +91,8 @@ function parsePayloadJson(payload: unknown): AppStore | null {
   }
 }
 
-export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
-  const { user, configured } = useFstAuth()
+export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: FstCloudSyncProps) {
+  const { user, configured, profile } = useFstAuth()
   const { t, tf } = useI18n()
   const uid = user?.uid ?? null
   const storeId = FST_SHARED_STORE_DOC_ID
@@ -82,8 +102,10 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
   const [error, setError] = useState<string | null>(null)
   const [remotePending, setRemotePending] = useState(false)
   const [conflictCount, setConflictCount] = useState(0)
+  const [conflictDetails, setConflictDetails] = useState<string[]>([])
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [reloadKey, setReloadKey] = useState(0)
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null)
 
   const storeRef = useRef(store)
   const skipSave = useRef(true)
@@ -96,35 +118,55 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
   const pullTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveInFlight = useRef(false)
-  const pendingSave = useRef(false)
   const pullInFlight = useRef(false)
   const applyingRemote = useRef(false)
   const hasLoadedOnce = useRef(false)
   const remoteStoreRef = useRef<AppStore | null>(null)
   const tRef = useRef(t)
+  const processorInFlight = useRef(false)
+  const outboxTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleSaveRef = useRef<() => void>(() => {})
+  const scheduleOutboxRef = useRef<() => void>(() => {})
 
-  storeRef.current = store
-  tRef.current = t
+  useEffect(() => {
+    storeRef.current = store
+  }, [store])
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
+
+  useEffect(() => subscribeBulkOverwrite(() => setBulkMessage(getBulkPreviewUserMessage())), [])
 
   const flashStatus = useCallback((next: SyncStatus, ms?: number) => {
     setStatus(next)
     if (statusTimer.current) clearTimeout(statusTimer.current)
     if (ms && ms > 0) {
       statusTimer.current = setTimeout(() => {
-        const dirty = editGen.current !== savedGen.current
+        const dirty = cloudDirtyTracker.hasPendingUserOperations()
         setStatus(dirty ? 'dirty' : 'idle')
       }, ms)
     }
   }, [])
 
-  const applyStore = useCallback(
+  const applyCloud = useCallback(
     (next: AppStore) => {
-      startTransition(() => replaceStore(next))
+      // Explicit origin path: applyCloudStore always uses hydration meta (no ambient stack / startTransition race).
+      applyingRemote.current = true
+      try {
+        startTransition(() => {
+          applyCloudStore(next)
+        })
+      } finally {
+        // Flag cleared after paint; save gated by lifecycle + dirty tracker, not only this flag.
+        queueMicrotask(() => {
+          applyingRemote.current = false
+        })
+      }
     },
-    [replaceStore],
+    [applyCloudStore],
   )
 
-  const commitSyncedState = useCallback(
+  const commitSyncedBaseline = useCallback(
     (next: AppStore, revision?: number, fingerprint?: string) => {
       const seeded = applyAppStoreSeeds(next)
       lastSyncedStore.current = seeded
@@ -132,13 +174,12 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
       savedGen.current = editGen.current
       if (typeof revision === 'number' && revision > 0) {
         lastRevision.current = revision
+        cloudDirtyTracker.setBaseRevision(revision)
+        noteCloudRevision(revision)
       }
+      cloudDirtyTracker.setBaselineStore(seeded)
+      // Do NOT clearAll pending ops — only acknowledge after successful save.
       skipSave.current = false
-      setRemotePending(false)
-      setConflictCount(0)
-      remoteStoreRef.current = null
-      if (statusTimer.current) clearTimeout(statusTimer.current)
-      setStatus('idle')
       return seeded
     },
     [],
@@ -153,11 +194,12 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
       const fpBefore = lastFingerprint.current
       const { store: merged, conflictCount: conflicts } = mergeCloudStores(base, remote, local)
       const mergedSeeded = applyAppStoreSeeds(restoreLocalSecrets(local, merged))
-      const localDirty = editGen.current !== savedGen.current
+      const localDirty = cloudDirtyTracker.hasPendingUserOperations()
 
       if (!force && !localDirty) {
-        applyStore(mergedSeeded)
-        commitSyncedState(mergedSeeded, opts?.revision)
+        applyCloud(mergedSeeded)
+        commitSyncedBaseline(mergedSeeded, opts?.revision)
+        noteCloudPullCompleted(opts?.revision)
         const fpAfter = lastFingerprint.current
         if (opts?.silentHint !== false && fpBefore && fpAfter && fpBefore !== fpAfter) {
           flashStatus('updated', MERGED_HINT_MS)
@@ -167,22 +209,24 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
 
       if (!force && localDirty) {
         remoteStoreRef.current = remote
-        setConflictCount(conflicts)
-        if (conflicts > 0) {
+        // Rebase baseline revision upward but keep pending ops.
+        if (typeof opts?.revision === 'number') {
+          lastRevision.current = Math.max(lastRevision.current, opts.revision)
+          cloudDirtyTracker.setBaseRevision(lastRevision.current)
+          noteCloudPullCompleted(opts.revision)
+        }
+        setConflictCount(Math.max(conflicts, cloudDirtyTracker.getConflicts().length))
+        if (conflicts > 0 || cloudDirtyTracker.getConflicts().length > 0) {
           setRemotePending(true)
-          if (typeof opts?.revision === 'number') {
-            lastRevision.current = Math.max(lastRevision.current, opts.revision)
-          }
         }
         return
       }
 
-      applyingRemote.current = true
-      applyStore(mergedSeeded)
-      commitSyncedState(mergedSeeded, opts?.revision)
-      applyingRemote.current = false
+      applyCloud(mergedSeeded)
+      commitSyncedBaseline(mergedSeeded, opts?.revision)
+      noteCloudPullCompleted(opts?.revision)
     },
-    [applyStore, commitSyncedState, flashStatus],
+    [applyCloud, commitSyncedBaseline, flashStatus],
   )
 
   const pullRemote = useCallback(
@@ -209,16 +253,12 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
         if (force) setError(null)
       } catch (err) {
         console.warn('FST SQL pull failed', err)
-        // Idle poll: только лог. Ручной/forced pull — показать пользователю.
         if (force) {
           setError(sqlConnectErrorMessage(err, tRef.current('web.cloud.loadFailed')))
         }
       } finally {
         pullInFlight.current = false
-        if (force) {
-          const dirty = editGen.current !== savedGen.current
-          if (!dirty) setStatus('idle')
-        }
+        if (force && !cloudDirtyTracker.hasPendingUserOperations()) setStatus('idle')
       }
     },
     [applyRemoteStore, flashStatus, storeId],
@@ -240,118 +280,103 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
 
   const flushSave = useCallback(async () => {
     if (!uid || !ready || skipSave.current) return
-    if (saveInFlight.current) {
-      pendingSave.current = true
-      return
-    }
+    if (!isCloudWriteLifecycleReady()) return
+    if (isBulkOverwriteBlockingAutosave()) return
+    if (!cloudDirtyTracker.hasPendingUserOperations()) return
+    if (saveInFlight.current) return
 
     saveInFlight.current = true
     flashStatus('saving')
     setError(null)
 
     try {
-      for (let attempt = 0; attempt < MAX_SAVE_RETRIES; attempt++) {
-        const local = storeRef.current
-        const synced = lastSyncedStore.current
-        if (
-          synced &&
-          synced.employees.length >= 8 &&
-          local.employees.length < Math.ceil(synced.employees.length * 0.85)
-        ) {
-          console.error('FST SQL: refuse save — sparse local employees vs last sync', {
-            local: local.employees.length,
-            synced: synced.employees.length,
-          })
-          setError(
-            'Сохранение остановлено: в браузере неполный список сотрудников. Идёт обновление из SQL…',
-          )
-          schedulePullRemote(true)
-          return
-        }
+      if (needsPullBeforeWrite()) {
+        await pullRemote(false, true)
+      }
 
-        const base = lastSyncedStore.current ?? local
-        const preparedLocal = prepareCloudPayload(sanitizeStoreForExport(local))
-        if (preparedLocal.fingerprint === lastFingerprint.current) {
-          savedGen.current = editGen.current
-          setStatus('idle')
-          return
-        }
+      const local = storeRef.current
+      const baseline = lastSyncedStore.current ?? local
+      const pendingOps = cloudDirtyTracker.getPending()
+      const gate = canCloudWriteNow(pendingOps.length > 0)
+      if (!gate.ok) {
+        setStatus(gate.reason === 'bulk_overwrite_preview' ? 'idle' : 'dirty')
+        return
+      }
 
-        const row = await withTimeout(
-          sqlGetFstStore(storeId),
+      const row = await withTimeout(sqlGetFstStore(storeId), SAVE_TIMEOUT_MS, 'sql_save_timeout')
+      if (!row) throw new Error('sql_shared_store_missing')
+      const expectedRevision = Number(row.revision)
+      if (!Number.isFinite(expectedRevision) || expectedRevision < 1) throw new Error('invalid_revision')
+      const remoteParsed = parsePayloadJson(row.payloadJson)
+      if (!remoteParsed) throw new Error('invalid_payload')
+      noteCloudPullCompleted(expectedRevision)
+
+      const build = buildCloudSavePayload({
+        remote: remoteParsed,
+        remoteRevision: expectedRevision,
+        local,
+        baseline,
+        operations: pendingOps,
+        actorEmail: user?.email ?? null,
+      })
+
+      if (!build.allowed) {
+        setStatus('idle')
+        return
+      }
+
+      if (build.conflicts.length > 0) {
+        cloudDirtyTracker.setConflicts(build.conflicts)
+        setConflictCount(build.conflicts.length)
+        setConflictDetails(
+          build.conflicts.slice(0, 8).map((c) => `${c.domain}/${c.entityId}: ${c.message}`),
+        )
+        setRemotePending(true)
+        // Keep pending ops — do not clear.
+        flashStatus('dirty')
+        return
+      }
+
+      if (!build.payloadJson || build.nextRevision == null) return
+
+      try {
+        await withTimeout(
+          sqlUpdateFstStore(
+            storeId,
+            expectedRevision,
+            build.nextRevision,
+            build.payloadJson,
+            build.fingerprint ?? '',
+            uid,
+          ),
           SAVE_TIMEOUT_MS,
           'sql_save_timeout',
         )
-        if (!row) {
-          // Общая prod-база: никогда не создавать из createDefaultStore()/seed в браузере.
-          throw new Error('sql_shared_store_missing')
+      } catch (err) {
+        if (isSqlRevisionConflict(err)) {
+          schedulePullRemote(true)
+          setRemotePending(true)
+          setConflictDetails(['revision_conflict: cloud changed; pending edits kept'])
+          flashStatus('dirty')
+          return
         }
-
-        const expectedRevision = Number(row.revision)
-        if (!Number.isFinite(expectedRevision) || expectedRevision < 1) {
-          throw new Error('invalid_revision')
-        }
-
-        const remoteParsed = parsePayloadJson(row.payloadJson)
-        if (!remoteParsed) throw new Error('invalid_payload')
-
-        const { store: merged } = mergeCloudStores(base, remoteParsed, local)
-        const privilegeSafe = clampClientPrivilegeFields(merged, remoteParsed, user?.email ?? null)
-        assertNoMassStoreWipe(remoteParsed, privilegeSafe)
-        const cloudSafe = sanitizeStoreForExport(privilegeSafe)
-        const prepared = prepareCloudPayload(cloudSafe)
-        const nextRevision = expectedRevision + 1
-
-        try {
-          await withTimeout(
-            sqlUpdateFstStore(
-              storeId,
-              expectedRevision,
-              nextRevision,
-              prepared.json,
-              prepared.fingerprint,
-              uid,
-            ),
-            SAVE_TIMEOUT_MS,
-            'sql_save_timeout',
-          )
-        } catch (err) {
-          if (isSqlRevisionConflict(err) && attempt < MAX_SAVE_RETRIES - 1) {
-            // Тихий retry: кто-то успел записать раньше — читаем свежее и пробуем снова.
-            await new Promise((r) => setTimeout(r, 80 * (attempt + 1)))
-            continue
-          }
-          throw err
-        }
-
-        const current = storeRef.current
-        const { store: reconciled } = mergeCloudStores(base, applyAppStoreSeeds(privilegeSafe), current)
-        const finalStore = applyAppStoreSeeds(reconciled)
-        const finalPrepared = prepareCloudPayload(finalStore)
-        commitSyncedState(finalStore, nextRevision, finalPrepared.fingerprint)
-        if (finalPrepared.fingerprint !== prepareCloudPayload(current).fingerprint) {
-          applyStore(finalStore)
-        }
-        notifyStoreTabsSaved(nextRevision, finalPrepared.fingerprint)
-        flashStatus('saved', SAVED_FLASH_MS)
-        return
+        throw err
       }
-      // Исчерпали retry по revision — подтянуть и один отложенный повтор, без вечного цикла.
-      schedulePullRemote(true)
-      flashStatus('dirty')
-      window.setTimeout(() => {
-        if (editGen.current !== savedGen.current) void flushSave()
-      }, 1500)
+
+      const finalStore = applyAppStoreSeeds(build.store ?? remoteParsed)
+      commitSyncedBaseline(finalStore, build.nextRevision, build.fingerprint)
+      cloudDirtyTracker.acknowledgePersisted(build.appliedOperationIds)
+      cloudDirtyTracker.clearConflicts()
+      applyCloud(finalStore)
+      notifyStoreTabsSaved(build.nextRevision, build.fingerprint ?? '')
+      noteCloudPullCompleted(build.nextRevision)
+      setRemotePending(false)
+      setConflictCount(0)
+      setConflictDetails([])
+      flashStatus('saved', SAVED_FLASH_MS)
+      scheduleOutboxRef.current()
     } catch (err) {
       console.error('FST SQL save failed', err)
-      if (isSqlRevisionConflict(err)) {
-        schedulePullRemote(true)
-        flashStatus('dirty')
-        window.setTimeout(() => {
-          if (editGen.current !== savedGen.current) void flushSave()
-        }, 1500)
-        return
-      }
       const timedOut =
         err instanceof Error && (err.message === 'sql_save_timeout' || err.message === 'cloud_save_timeout')
       setError(
@@ -359,38 +384,136 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
           ? tRef.current('web.cloud.saveTimeout')
           : sqlConnectErrorMessage(err, tRef.current('web.cloud.loadFailed')),
       )
-      const dirty = editGen.current !== savedGen.current
-      setStatus(dirty ? 'dirty' : 'idle')
+      flashStatus('dirty')
     } finally {
       saveInFlight.current = false
-      if (pendingSave.current) {
-        pendingSave.current = false
-        window.setTimeout(() => {
-          void flushSave()
-        }, 200)
-      }
     }
-  }, [applyStore, commitSyncedState, flashStatus, ready, schedulePullRemote, storeId, uid, user?.email])
+  }, [
+    applyCloud,
+    commitSyncedBaseline,
+    flashStatus,
+    pullRemote,
+    ready,
+    schedulePullRemote,
+    storeId,
+    uid,
+    user?.email,
+  ])
 
-  const markDirty = useCallback(() => {
-    if (skipSave.current || applyingRemote.current) return
-    editGen.current += 1
-    const dirty = editGen.current !== savedGen.current
-    if (dirty && status !== 'saving' && status !== 'pulling') {
-      setStatus('dirty')
+  const scheduleSaveFromDirtyOps = useCallback(() => {
+    if (!configured || !uid || !ready || skipSave.current) return
+    if (!isCloudWriteLifecycleReady()) return
+    if (isBulkOverwriteBlockingAutosave()) return
+    if (!cloudDirtyTracker.hasPendingUserOperations()) {
+      if (hasPendingOutboxWork(storeRef.current)) {
+        scheduleOutboxRef.current()
+      } else {
+        setStatus('idle')
+      }
+      return
     }
-  }, [status])
+    editGen.current += 1
+    setStatus('dirty')
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      void flushSave()
+    }, SAVE_DEBOUNCE_MS)
+  }, [configured, flushSave, ready, uid])
+
+  const runOutboxProcessor = useCallback(async () => {
+    if (!patchUserStore || processorInFlight.current) return
+    if (!isCloudWriteLifecycleReady()) return
+    if (isBulkOverwriteBlockingAutosave()) return
+    if (saveInFlight.current) return
+    if (!hasPendingOutboxWork(storeRef.current)) return
+
+    processorInFlight.current = true
+    try {
+      const ctx: ExternalEffectsProcessorContext = {
+        getStore: () => storeRef.current,
+        getBaselineStore: () => lastSyncedStore.current,
+        getPendingOps: () => cloudDirtyTracker.getPending(),
+        applyStore: (fn, origin) => {
+          if (origin === 'user') {
+            patchUserStore(fn)
+          } else {
+            const next = fn(storeRef.current)
+            storeRef.current = next
+            applyingRemote.current = true
+            try {
+              startTransition(() => {
+                applyCloudStore(next)
+              })
+            } finally {
+              queueMicrotask(() => {
+                applyingRemote.current = false
+              })
+            }
+          }
+        },
+        scheduleSave: () => scheduleSaveRef.current(),
+        isSysAdmin: profile?.roleId === 'sysadmin',
+        canManageTasks:
+          profile?.roleId === 'sysadmin' ||
+          resolveRoleTaskAccessLevel(storeRef.current.access, profile?.roleId ?? 'employee') ===
+            'manage',
+        actor: profile
+          ? { id: profile.uid, name: profile.displayName }
+          : user?.email
+            ? { id: user.uid, name: user.email }
+            : undefined,
+      }
+      let loops = 0
+      while (loops < 3) {
+        loops += 1
+        const did = await processExternalEffectsOutbox(ctx)
+        if (!did) break
+        if (cloudDirtyTracker.hasPendingUserOperations()) break
+      }
+    } finally {
+      processorInFlight.current = false
+    }
+  }, [applyCloudStore, patchUserStore, profile, user?.email, user?.uid])
+
+  const scheduleOutboxProcessor = useCallback(() => {
+    if (!patchUserStore || !configured || !uid || !ready) return
+    if (outboxTimer.current) clearTimeout(outboxTimer.current)
+    outboxTimer.current = setTimeout(() => {
+      void runOutboxProcessor()
+    }, 400)
+  }, [configured, patchUserStore, ready, runOutboxProcessor, uid])
+
+  useEffect(() => {
+    scheduleOutboxRef.current = scheduleOutboxProcessor
+    scheduleSaveRef.current = scheduleSaveFromDirtyOps
+  }, [scheduleOutboxProcessor, scheduleSaveFromDirtyOps])
+
+  useEffect(() => {
+    if (!configured || !uid || !ready) return
+    if (!hasPendingOutboxWork(store)) return
+    scheduleOutboxProcessor()
+  }, [configured, ready, scheduleOutboxProcessor, store.externalEffects?.outbox, uid])
 
   const retryLoad = useCallback(() => {
     setError(null)
     setRemotePending(false)
     setConflictCount(0)
+    setConflictDetails([])
     setReady(false)
     setReloadKey((k) => k + 1)
+    resetSyncLifecycle()
   }, [])
+
+  const cancelBulkAndReload = useCallback(() => {
+    // Cancel preview only — never discard unrelated pending/conflicts/outbox.
+    clearBulkStoreOverwrite()
+    schedulePullRemote(true)
+  }, [schedulePullRemote])
 
   useEffect(() => {
     if (!configured || !uid) {
+      // Bootstrap gate for unconfigured/logged-out: sync ready flag with auth props.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync bootstrap
       setReady(!configured)
       return
     }
@@ -398,8 +521,11 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
     let cancelled = false
     if (!hasLoadedOnce.current) setReady(false)
     setError(null)
+    resetSyncLifecycle()
+    setSyncLifecyclePhase('booting')
 
     void (async () => {
+      setSyncLifecyclePhase('hydrating')
       try {
         const row = await Promise.race([
           sqlGetFstStore(storeId),
@@ -410,7 +536,6 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
         if (cancelled) return
 
         if (!row) {
-          // Пустой SQL ≠ «создать из seed»: seed затрёт живые журналы/табель.
           setError(
             sqlConnectErrorMessage(
               new Error('sql_shared_store_missing'),
@@ -427,32 +552,23 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
         const parsed = parsePayloadJson(row.payloadJson)
         if (!parsed) throw new Error('invalid_payload')
 
-        // Стартовый store — seed. Пока React не применил SQL, storeRef ещё seed;
-        // без sync-записи flushSave мог уйти в SQL и стереть людей/журналы.
-        applyingRemote.current = true
-        try {
-          const local = storeRef.current
-          const seeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
-          storeRef.current = seeded
-          const committed = commitSyncedState(seeded, Number(row.revision) || 1)
-          applyStore(committed)
-          setReadOnly(false)
-          hasLoadedOnce.current = true
-          setReady(true)
-        } finally {
-          applyingRemote.current = false
-        }
+        setSyncLifecyclePhase('stabilizing')
+        const local = storeRef.current
+        const seeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
+        storeRef.current = seeded
+        const committed = commitSyncedBaseline(seeded, Number(row.revision) || 1)
+        applyCloud(committed)
+        noteCloudPullCompleted(Number(row.revision) || 1)
+        setReadOnly(false)
+        hasLoadedOnce.current = true
+        setReady(true)
+        requestAnimationFrame(() => {
+          if (!cancelled) setSyncLifecyclePhase('ready')
+        })
       } catch (err) {
         console.error('FST SQL load failed', err)
         if (cancelled) return
         hasLoadedOnce.current = true
-        if (err instanceof Error && err.message === 'invalid_payload') {
-          setError(tRef.current('web.cloud.loadFailed') + ' (invalid_payload)')
-          setReadOnly(true)
-          skipSave.current = true
-          setReady(true)
-          return
-        }
         const msg =
           err instanceof Error && err.message === 'cloud_load_timeout'
             ? tRef.current('web.cloud.loadTimeout')
@@ -467,7 +583,7 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
     return () => {
       cancelled = true
     }
-  }, [applyStore, commitSyncedState, configured, reloadKey, storeId, uid])
+  }, [applyCloud, commitSyncedBaseline, configured, reloadKey, storeId, uid])
 
   useEffect(() => {
     if (!configured || !uid || !ready) return
@@ -490,9 +606,7 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
         if (msg.fingerprint && msg.fingerprint === lastFingerprint.current) return
         schedulePullRemote()
       }
-      if (msg.type === 'request-refresh') {
-        schedulePullRemote(true)
-      }
+      if (msg.type === 'request-refresh') schedulePullRemote(true)
     })
 
     return () => {
@@ -502,34 +616,27 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
     }
   }, [configured, ready, schedulePullRemote, storeId, uid])
 
-  useEffect(() => {
-    markDirty()
-    if (!configured || !uid || !ready || skipSave.current || applyingRemote.current) return
-
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      void flushSave()
-    }, SAVE_DEBOUNCE_MS)
-
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-    }
-  }, [store, configured, flushSave, markDirty, ready, uid])
+  useEffect(() => cloudDirtyTracker.subscribe(() => scheduleSaveFromDirtyOps()), [scheduleSaveFromDirtyOps])
 
   useEffect(() => {
     if (!configured || !uid || !ready) return
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {
         if (saveTimer.current) clearTimeout(saveTimer.current)
+        if (!isCloudWriteLifecycleReady()) return
+        if (!cloudDirtyTracker.hasPendingUserOperations()) return
+        if (isBulkOverwriteBlockingAutosave()) return
         void flushSave()
       } else {
-        // Вернулись на вкладку (часто другой CDN/устройство писал в SQL) — сразу подтянуть.
         schedulePullRemote(true)
       }
     }
     const onFocus = () => schedulePullRemote()
     const onUnload = () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
+      if (!isCloudWriteLifecycleReady()) return
+      if (!cloudDirtyTracker.hasPendingUserOperations()) return
+      if (isBulkOverwriteBlockingAutosave()) return
       void flushSave()
     }
     document.addEventListener('visibilitychange', onVisibility)
@@ -545,7 +652,7 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
   useEffect(() => {
     if (!configured || !uid || !ready) return
     const id = setInterval(() => {
-      if (editGen.current !== savedGen.current) return
+      if (cloudDirtyTracker.hasPendingUserOperations()) return
       if (saveInFlight.current || pullInFlight.current) return
       void pullRemote(false)
     }, IDLE_POLL_MS)
@@ -571,20 +678,20 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
           schedulePullRemote(true)
           return
         }
-        applyingRemote.current = true
-        const seeded = commitSyncedState(
+        const seeded = commitSyncedBaseline(
           applyAppStoreSeeds(restoreLocalSecrets(storeRef.current, remote)),
           row ? Number(row.revision) || undefined : undefined,
         )
-        applyStore(seeded)
+        // Accept cloud: drop only conflicting pending deletes/ops; keep unrelated pending.
+        cloudDirtyTracker.discardConflictingPending()
+        applyCloud(seeded)
         setRemotePending(false)
         setConflictCount(0)
+        setConflictDetails([])
         flashStatus('updated', MERGED_HINT_MS)
       } catch (err) {
         setError(sqlConnectErrorMessage(err, t('web.cloud.loadFailed')))
         schedulePullRemote(true)
-      } finally {
-        applyingRemote.current = false
       }
     })()
   }
@@ -613,6 +720,19 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
           <p className="mt-0.5 text-xs text-amber-900/90">{t('web.cloud.readOnlyHint')}</p>
         </div>
       )}
+      {bulkMessage && (
+        <div className="fixed inset-x-0 top-0 z-[445] border-b border-rose-400 bg-rose-50 px-4 py-2.5 text-sm text-rose-950 shadow-sm print:hidden">
+          <p className="font-semibold">{bulkMessage}</p>
+          <p className="mt-0.5 text-xs">Обычный autosave заблокирован. Отмените предпросмотр, чтобы снова загрузить облако.</p>
+          <button
+            type="button"
+            className="mt-2 rounded-sm bg-rose-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-900"
+            onClick={cancelBulkAndReload}
+          >
+            Отменить предпросмотр и загрузить облако
+          </button>
+        </div>
+      )}
       {error && (
         <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-sm border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))]">
           <p>{error}</p>
@@ -628,6 +748,16 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
       {remotePending && (
         <div className="fixed bottom-4 left-4 z-[200] max-w-md rounded-sm border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-950 shadow-sm max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:left-[calc(var(--app-sidebar-w,3.5rem)+1rem)] lg:bottom-16">
           <p>{conflictCount > 0 ? conflictMessage : t('web.cloud.remotePending')}</p>
+          {conflictDetails.length > 0 && (
+            <ul className="mt-2 max-h-28 list-disc overflow-auto pl-4 text-xs text-sky-900/90">
+              {conflictDetails.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-xs text-sky-800">
+            Несохранённые правки удерживаются локально, пока вы не примете облако или не повторите сохранение.
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
@@ -648,12 +778,24 @@ export function FstSqlConnectSync({ store, replaceStore }: FstCloudSyncProps) {
             </button>
             <button
               type="button"
+              className="rounded-sm border border-sky-400 px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100"
+              onClick={() => void flushSave()}
+            >
+              Повторить сохранение
+            </button>
+            <button
+              type="button"
               className="text-xs text-sky-700 underline"
               onClick={() => setRemotePending(false)}
             >
               {t('web.cloud.later')}
             </button>
           </div>
+        </div>
+      )}
+      {status === 'dirty' && !bulkMessage && (
+        <div className="pointer-events-none fixed bottom-3 right-3 z-[150] rounded-sm border border-amber-200 bg-amber-50/95 px-2 py-1 text-[10px] text-amber-900 print:hidden">
+          Есть несохранённые изменения…
         </div>
       )}
     </>

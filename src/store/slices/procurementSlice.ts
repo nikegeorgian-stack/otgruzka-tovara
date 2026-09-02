@@ -10,6 +10,7 @@ import type {
   ShipmentMilestone,
 } from '@/lib/procurement/types'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 
 function patchProcurement(
   setStore: StoreSliceDeps['setStore'],
@@ -21,7 +22,7 @@ function patchProcurement(
   }))
 }
 
-export function createProcurementSlice({ setStore }: StoreSliceDeps) {
+export function createProcurementSlice({ setStore, getActor }: StoreSliceDeps) {
   return {
     upsertPurchaseOrder(order: PurchaseOrder, statusNote?: string) {
       patchProcurement(setStore, (p) => {
@@ -85,6 +86,7 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
     },
 
     removePurchaseOrder(id: string) {
+      recordSliceExplicitDelete('procurement.orders', id, actorFromGetter(getActor))
       patchProcurement(setStore, (p) => ({
         ...p,
         orders: p.orders.filter((o) => o.id !== id),
@@ -162,6 +164,7 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
         ok = true
         return { ...p, categories: p.categories.filter((c) => c.id !== id) }
       })
+      if (ok) recordSliceExplicitDelete('procurement.categories', id, actorFromGetter(getActor))
       return ok
     },
 
@@ -187,6 +190,7 @@ export function createProcurementSlice({ setStore }: StoreSliceDeps) {
         ok = true
         return { ...p, routePoints: p.routePoints.filter((r) => r.id !== id) }
       })
+      if (ok) recordSliceExplicitDelete('procurement.routePoints', id, actorFromGetter(getActor))
       return ok
     },
   }

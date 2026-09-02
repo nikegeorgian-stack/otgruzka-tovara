@@ -21,6 +21,7 @@ import {
 } from '@/lib/packaging/init'
 import type { BoxRecipe, PackagingRecipe } from '@/lib/packaging/types'
 import { actorAuditFields } from './actorAuditFields'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type { StoreSliceDeps } from '../storeApi'
 
 export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
@@ -53,6 +54,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeCounterparty(id: string) {
+      recordSliceExplicitDelete('counterparties.items', id, actorFromGetter(getActor))
       setStore((s) => {
         const cp = s.counterparties.items.find((c) => c.id === id)
         let next = {
@@ -163,6 +165,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeFinishedProduct(id: string) {
+      recordSliceExplicitDelete('finishedProducts.items', id, actorFromGetter(getActor))
       setStore((s) => {
         const fp = s.finishedProducts.items.find((p) => p.id === id)
         let next = {
@@ -252,6 +255,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeBoxRecipe(id: string) {
+      recordSliceExplicitDelete('packagingRecipes.boxes', id, actorFromGetter(getActor))
       setStore((s) => {
         const removed = (s.packagingRecipes.boxes ?? []).find((i) => i.id === id)
         let next = {
@@ -288,6 +292,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removePackagingRecipe(id: string) {
+      recordSliceExplicitDelete('packagingRecipes.items', id, actorFromGetter(getActor))
       setStore((s) => ({
         ...s,
         packagingRecipes: {
@@ -335,6 +340,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeFormulationRecipe(id: string) {
+      recordSliceExplicitDelete('formulations.recipes', id, actorFromGetter(getActor))
       setStore((s) => ({
         ...s,
         formulations: {

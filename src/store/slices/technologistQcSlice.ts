@@ -14,6 +14,7 @@ import type {
   ShiftHandoffRecord,
   ShiftHandoffUrgency,
 } from '@/lib/technologist/types'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { type StoreSliceDeps } from '../storeApi'
 
 export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
@@ -44,6 +45,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeEadCalculation(id: string) {
+      recordSliceExplicitDelete('technologistQc.eadCalculations', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -70,6 +72,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeEadControl(id: string) {
+      recordSliceExplicitDelete('technologistQc.eadControls', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -112,6 +115,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeIncomingControl(id: string) {
+      recordSliceExplicitDelete('technologistQc.incomingControls', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -146,6 +150,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeImpregnationQc(id: string) {
+      recordSliceExplicitDelete('technologistQc.impregnationQc', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -173,6 +178,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeRoomClimateReading(id: string) {
+      recordSliceExplicitDelete('technologistQc.roomClimateLog', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -269,6 +275,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeShiftHandoff(id: string) {
+      recordSliceExplicitDelete('technologistQc.shiftHandoffs', id)
       setStore((s) => ({
         ...s,
         technologistQc: {

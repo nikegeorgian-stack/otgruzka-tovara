@@ -1,4 +1,5 @@
 import { appendAudit } from '@/lib/audit'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { clearPersonnelFromStore } from '@/lib/hr/clearPersonnel'
 import { absencesChanged, syncAbsencesToTimesheetFact } from '@/lib/hr/absenceTimesheet'
 import { lockEmployeeNumber } from '@/lib/hr/employeeNumber'
@@ -80,6 +81,7 @@ export function createHrSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeEmployee(id: string) {
+      recordSliceExplicitDelete('employees', id, actorFromGetter(getActor))
       setStore((s) => {
         const emp = s.employees.find((e) => e.id === id)
         let next = trashEmployee(s, id)
@@ -121,6 +123,7 @@ export function createHrSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeHrPosition(id: string) {
+      recordSliceExplicitDelete('hrPositions', id, actorFromGetter(getActor))
       setStore((s) => {
         const prev = s.hrPositions.find((p) => p.id === id)
         return appendAudit(
@@ -164,6 +167,7 @@ export function createHrSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeHrStructuralUnit(id: string) {
+      recordSliceExplicitDelete('hrStructuralUnits', id, actorFromGetter(getActor))
       setStore((s) => {
         const prev = s.hrStructuralUnits.find((u) => u.id === id)
         return appendAudit(

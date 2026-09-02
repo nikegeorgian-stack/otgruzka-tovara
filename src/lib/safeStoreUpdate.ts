@@ -1,5 +1,6 @@
 import type { AppStore } from '@/lib/types'
-import type { SetStore, StoreUpdateMeta } from '@/store/storeApi'
+import type { SetStore } from '@/store/storeApi'
+import type { StoreUpdateMeta } from '@/lib/cloud/storeMutationOrigin'
 
 /** Применяет изменение store; ошибки из updater пробрасываются наружу (для try/catch в UI). */
 export function applyStoreUpdate(

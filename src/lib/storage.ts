@@ -7,6 +7,7 @@ import {
   AI_PROVIDER_PRESETS,
   normalizeAiProvider,
 } from './ai/providers'
+import { normalizeExternalEffectsStore } from './cloud/externalEffects/init'
 import { normalizePayrollAccrualRules } from './finance/payrollAccrualRules'
 import { normalizeStaffRate } from './payrollRates'
 import { DEFAULT_SHIFT_TEMPLATES } from './shiftTemplates'
@@ -488,6 +489,7 @@ function normalizeV6Store(raw: Record<string, unknown>): AppStore {
     ),
     access: normalizeAccessStore(raw.access as AppStore['access']),
     finance: normalizeFinanceStore(raw.finance),
+    externalEffects: normalizeExternalEffectsStore(raw.externalEffects),
     settings: normalizeSettings(raw.settings as AppStore['settings']),
   }
 
@@ -586,6 +588,7 @@ function migrateToV6(raw: Record<string, unknown>): AppStore {
     ),
     access: normalizeAccessStore(raw.access as AppStore['access']),
     finance: normalizeFinanceStore(raw.finance),
+    externalEffects: normalizeExternalEffectsStore(raw.externalEffects),
     settings: normalizeSettings(raw.settings as AppStore['settings']),
   }
 

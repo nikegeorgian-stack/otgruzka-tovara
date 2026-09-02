@@ -4,6 +4,7 @@ import { candidateToEmployee } from '@/lib/hr/candidates'
 import { syncMonthRosterFromHrInStore } from '@/lib/monthArchive'
 import { syncPlanRow } from '@/lib/monthSheet'
 import { trashCandidate } from '@/lib/trash'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type { Candidate } from '@/lib/types'
 import { actorAuditFields } from './actorAuditFields'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
@@ -27,6 +28,7 @@ export function createCandidatesSlice({ setStore, getActor }: StoreSliceDeps) {
     },
 
     removeCandidate(id: string) {
+      recordSliceExplicitDelete('candidates', id, actorFromGetter(getActor))
       patchStore(setStore, (s) => {
         let next = trashCandidate(s, id)
         next = appendAudit(next, {

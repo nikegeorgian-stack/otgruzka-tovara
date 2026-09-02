@@ -363,7 +363,9 @@ function normalizeUser(u: AppUser): AppUser {
       ? [...new Set(u.taskBoards.filter((id) => typeof id === 'string' && id.trim()))]
       : undefined,
     mustChangePassword: u.mustChangePassword === true,
-    active: u.active !== false,
+    pendingDeletion: u.pendingDeletion === true,
+    externalEffectOperationId: u.externalEffectOperationId?.trim() || undefined,
+    active: u.pendingDeletion === true ? false : u.active !== false,
     createdAt: u.createdAt || new Date().toISOString(),
     updatedAt: u.updatedAt || new Date().toISOString(),
   }

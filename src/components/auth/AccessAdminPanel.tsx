@@ -28,9 +28,12 @@ import { resolveRoleTaskAccessLevel } from '@/lib/tasks/access'
 import type { TaskAccessLevel } from '@/lib/tasks/types'
 import type { Employee, ViewId } from '@/lib/types'
 import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
+import { findOutboxItem } from '@/lib/cloud/externalEffects/outbox'
+import type { AppStore } from '@/lib/types'
 
 type Props = {
   access: AccessStore
+  externalEffects?: AppStore['externalEffects']
   employees: Employee[]
   brigades: string[]
   currentUser: AppUser
@@ -115,6 +118,7 @@ const VIEW_GROUPS: { id: string; labelKey: string; views: ViewId[] }[] = [
 
 export function AccessAdminPanel({
   access,
+  externalEffects,
   employees,
   brigades,
   currentUser,
@@ -194,6 +198,8 @@ export function AccessAdminPanel({
       firebaseDisabled: false,
       needsImport: false,
       inStore: true,
+      pendingDeletion: u.pendingDeletion,
+      externalEffectOperationId: u.externalEffectOperationId,
     })) satisfies WebUserListRow[]
   }, [access, firebaseUsers, webMode])
 
@@ -780,7 +786,23 @@ export function AccessAdminPanel({
                               <td className="px-4 py-3 text-xs text-stone-600">{viewCount}</td>
                             ) : null}
                             <td className="px-4 py-3">
-                              {!row.active || row.firebaseDisabled ? (
+                              {row.pendingDeletion ? (
+                                <span className="rounded-sm bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
+                                  {(() => {
+                                    const item = row.externalEffectOperationId
+                                      ? findOutboxItem(
+                                          { externalEffects } as AppStore,
+                                          row.externalEffectOperationId,
+                                        )
+                                      : undefined
+                                    if (item?.status === 'failed') return t('access.userRemoveFailed')
+                                    if (item?.step === 'await_external' || item?.status === 'processing') {
+                                      return t('access.userRemoveExecuting')
+                                    }
+                                    return t('access.userRemovePending')
+                                  })()}
+                                </span>
+                              ) : !row.active || row.firebaseDisabled ? (
                                 <span className="rounded-sm bg-stone-100 px-1.5 py-0.5 text-[11px] font-medium text-stone-500">
                                   {t('access.inactive')}
                                 </span>
@@ -808,7 +830,7 @@ export function AccessAdminPanel({
                                 >
                                   {row.needsImport ? t('access.linkUser') : t('counterparty.open')}
                                 </button>
-                                {canDeleteRow(row) ? (
+                                {canDeleteRow(row) && !row.pendingDeletion ? (
                                   <button
                                     type="button"
                                     className="text-sm text-red-600 hover:underline"

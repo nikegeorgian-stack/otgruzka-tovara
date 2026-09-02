@@ -19,6 +19,12 @@ import { ensureMonthReady } from '@/lib/monthReady'
 import { prepareArchiveMonthInStore, syncMonthRosterFromHrInStore } from '@/lib/monthArchive'
 import { trashMonth } from '@/lib/trash'
 import { applyStoreUpdate } from '@/lib/safeStoreUpdate'
+import {
+  clearBulkStoreOverwrite,
+  tryBeginBulkStoreOverwrite,
+  type BulkOverwriteKind,
+  type BulkStartResult,
+} from '@/lib/cloud/bulkStoreOverwrite'
 import type { AppStore } from '@/lib/types'
 import { STORAGE_KEY } from '@/lib/types'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
@@ -39,7 +45,7 @@ export type SettingsSliceExtras = {
 }
 
 export function createSettingsSlice(
-  { setStore, getActor }: StoreSliceDeps,
+  { setStore, getStore, getActor }: StoreSliceDeps,
   { getActiveMonth, setActiveMonth }: SettingsSliceExtras,
 ) {
   return {
@@ -53,30 +59,50 @@ export function createSettingsSlice(
      */
     applyCloudStore(next: AppStore) {
       const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
-      setStore(ensureMonthReady(seeded, getActiveMonth()))
+      setStore(ensureMonthReady(seeded, getActiveMonth()), { origin: 'hydration' })
     },
 
     /** Import / restore / reset preview only — blocks autosave until cancel. */
-    replaceStoreForBulk(next: AppStore, _kind: string = 'import') {
+    replaceStoreForBulk(
+      next: AppStore,
+      kind: BulkOverwriteKind = 'import',
+    ): BulkStartResult {
+      const started = tryBeginBulkStoreOverwrite(
+        kind,
+        { employees: next.employees?.length ?? 0 },
+        getStore(),
+      )
+      if (!started.ok) return started
       const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
-      setStore(ensureMonthReady(seeded, getActiveMonth()))
-      return { ok: true as const }
+      setStore(ensureMonthReady(seeded, getActiveMonth()), { origin: kind })
+      return { ok: true }
     },
 
-    replaceStore(next: AppStore) {
+    /** @deprecated Prefer replaceStoreForBulk; kept for Settings import wiring. */
+    replaceStore(next: AppStore): BulkStartResult {
+      const started = tryBeginBulkStoreOverwrite(
+        'import',
+        { employees: next.employees?.length ?? 0 },
+        getStore(),
+      )
+      if (!started.ok) return started
       const seeded = applyAppStoreSeeds(purgeExpiredTrash(next))
-      setStore(ensureMonthReady(seeded, getActiveMonth()))
+      setStore(ensureMonthReady(seeded, getActiveMonth()), { origin: 'import' })
+      return { ok: true }
     },
 
     cancelBulkPreview() {
-      // no-op in P
+      clearBulkStoreOverwrite()
     },
 
-    resetStore() {
+    resetStore(): BulkStartResult {
+      const started = tryBeginBulkStoreOverwrite('reset', undefined, getStore())
+      if (!started.ok) return started
       for (const key of LEGACY_STORAGE_KEYS) {
         localStorage.removeItem(key)
       }
-      setStore(createDefaultStore())
+      setStore(createDefaultStore(), { origin: 'reset' })
+      return { ok: true }
     },
 
     addMonth(month: string) {
@@ -106,19 +132,29 @@ export function createSettingsSlice(
      * Preview-only: очистить месяцы до beforeMonth — блокирует autosave до Cancel.
      * Refuses when pending ops / conflicts / active outbox / other bulk preview exist.
      */
-    clearMonthsBefore(beforeMonth: string) {
-      applyStoreUpdate(setStore, (s) => {
-        const { store: clearedStore, cleared } = clearMonthsBeforeInStore(s, beforeMonth)
-        if (!cleared.length) return s
-        const a = getActor?.() ?? null
-        return appendAudit(clearedStore, {
-          action: 'month_clear',
-          month: beforeMonth,
-          by: a?.id,
-          byName: a?.name,
-          detail: `Очищены месяцы до ${beforeMonth}: ${cleared.join(', ')}${a?.name ? ` · ${a.name}` : ''}`,
-        })
+    clearMonthsBefore(beforeMonth: string): BulkStartResult | { ok: true; cleared: string[] } {
+      const current = getStore()
+      const { store: clearedStore, cleared } = clearMonthsBeforeInStore(current, beforeMonth)
+      if (!cleared.length) return { ok: true, cleared: [] }
+      const started = tryBeginBulkStoreOverwrite(
+        'clear_months',
+        {
+          months: cleared.length,
+          monthKeys: cleared.length,
+        },
+        current,
+      )
+      if (!started.ok) return started
+      const a = getActor?.() ?? null
+      const preview = appendAudit(clearedStore, {
+        action: 'month_clear',
+        month: beforeMonth,
+        by: a?.id,
+        byName: a?.name,
+        detail: `Предпросмотр: очищены месяцы до ${beforeMonth}: ${cleared.join(', ')}${a?.name ? ` · ${a.name}` : ''}`,
       })
+      setStore(ensureMonthReady(preview, getActiveMonth()), { origin: 'clear_months' })
+      return { ok: true, cleared }
     },
 
     removeMonth(month: string) {

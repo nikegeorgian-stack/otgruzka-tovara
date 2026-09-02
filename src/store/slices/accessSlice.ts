@@ -14,9 +14,10 @@ import { appendAudit } from '@/lib/audit'
 import {
   clearMustChangePasswordClaim,
   createFirebaseWebUser,
-  deleteFirebaseWebUser,
   updateFirebaseWebUser,
 } from '@/lib/cloud/webUserAdmin'
+import { beginAuthUserDeletion } from '@/lib/cloud/externalEffects/processor'
+import { assertExternalDeletionRuntime } from '@/lib/cloud/externalEffects/runtime'
 import { syncWebAccessAllowlistFromStore } from '@/lib/cloud/webAccessConfig'
 import { isKnownWebFirebaseEmail } from '@/lib/cloud/fstWebUsers'
 import { getFirebaseAuth } from '@/lib/cloud/firebase'
@@ -25,6 +26,7 @@ import type { UserViewDefaults } from '@/lib/viewDefaults/types'
 import { mergeUserViewDefaults } from '@/lib/viewDefaults/types'
 import type { AppStore, ViewId } from '@/lib/types'
 import type { StoreSliceDeps } from '../storeApi'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { actorAuditFields } from './actorAuditFields'
 
 export type UpsertAppUserInput = {
@@ -59,50 +61,36 @@ export function createAccessSlice({ setStore, getStore, getActor }: StoreSliceDe
     const login = input.login.trim().toLowerCase()
     if (!login) throw new Error('login_required')
 
-    if (isWebApp) {
-      const deleted = await deleteFirebaseWebUser(login)
-      if (!deleted.ok && deleted.error !== 'user_not_found') {
-        throw new Error(
-          deleted.error === 'cannot_delete_self' ? 'cannot_delete_self' : 'firebase_delete_failed',
-        )
-      }
-    }
-
     if (input.inStore && !input.id.startsWith('import-')) {
+      // Fail-closed: Phase A only on web (processor lives in FstSqlConnectSync).
+      assertExternalDeletionRuntime()
       if (input.id === SYSTEM_ADMIN_USER_ID) throw new Error('cannot_remove_sysadmin')
       const access = normalizeAccessStore(getStore().access)
       const target = access.users.find((u) => u.id === input.id)
       if (!target) throw new Error('user_not_found')
+      if (target.pendingDeletion) return
       if (target.roleId === 'sysadmin') {
         const admins = access.users.filter(
-          (u) => u.roleId === 'sysadmin' && u.active && u.id !== input.id,
+          (u) => u.roleId === 'sysadmin' && u.active && u.id !== input.id && !u.pendingDeletion,
         )
         if (admins.length === 0) throw new Error('last_sysadmin')
       }
+      const actor = who()
       setStore((s) => {
         const acc = normalizeAccessStore(s.access)
         const t = acc.users.find((u) => u.id === input.id)
-        if (!t) return s
-        return appendAudit(
-          {
-            ...s,
-            access: {
-              ...acc,
-              users: acc.users.filter((u) => u.id !== input.id),
-            },
-          },
-          {
-            action: 'user_remove',
-            detail: `${t.displayName} (${t.login}) · ${t.roleId}`,
-            ...who(),
-          },
-        )
-      })
-    }
-
-    if (isWebApp) {
-      await syncWebAccessAllowlistFromStore(getStore().access).catch((err) => {
-        console.error('FST: sync web access allowlist failed', err)
+        if (!t || t.pendingDeletion) return s
+        const begun = beginAuthUserDeletion(s, {
+          userId: input.id,
+          email: login,
+          requestedBy: actor.by,
+          requestedByName: actor.byName,
+        })
+        return appendAudit(begun.store, {
+          action: 'user_remove',
+          detail: `[pending] ${t.displayName} (${t.login}) · ${t.roleId}`,
+          ...actor,
+        })
       })
     }
   }
@@ -917,6 +905,7 @@ export function createAccessSlice({ setStore, getStore, getActor }: StoreSliceDe
       const access = normalizeAccessStore(getStore().access)
       const prev = access.userGroups?.find((g) => g.id === id)
       if (!prev) return
+      recordSliceExplicitDelete('access.userGroups', id, actorFromGetter(getActor))
       const af = who()
       setStore((s) => {
         const access = normalizeAccessStore(s.access)

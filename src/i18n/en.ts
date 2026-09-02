@@ -2955,6 +2955,12 @@ export const en: Dict = {
   'access.userRemoveFailed': 'Deletion error — retry after sync',
   'access.externalDeleteWebOnly':
     'Deletion is available only in the web version with protected sync',
+  'bulk.blockedPending':
+    'Save, cancel, or resolve current changes first',
+  'externalEffects.filePendingDelete': 'File pending deletion',
+  'externalEffects.fileAwaitFinalSave': 'File removed, awaiting final save',
+  'externalEffects.fileDeleteFailed': 'File deletion error — retry',
+  'externalEffects.userPendingBadge': 'Deleting…',
   'access.deleteUserTitle': 'Delete user?',
   'access.deleteUserConfirm': 'Delete "{name}" ({email}) from app and Firebase? This cannot be undone.',
   'access.errCannotRemoveSelf': 'Cannot delete your own account',

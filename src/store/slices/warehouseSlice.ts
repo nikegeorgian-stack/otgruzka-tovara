@@ -70,6 +70,7 @@ import type {
   WarehouseStore,
 } from '@/lib/warehouse/types'
 import { patchWarehouse, type StoreSliceDeps } from '../storeApi'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { syncSalesOrderLoadingInStore, markSalesOrderShippedIfFullyLoaded } from '@/lib/sales/loadingLink'
 
 export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
@@ -135,6 +136,9 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
           items: w.items.filter((i) => i.id !== id),
         }
       })
+      if (removed) {
+        recordSliceExplicitDelete('warehouse.items', id, actorFromGetter(getActor))
+      }
       return removed
     },
 
@@ -169,6 +173,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         removed = true
         return { ...w, categories: w.categories.filter((c) => c.id !== id) }
       })
+      if (removed) recordSliceExplicitDelete('warehouse.categories', id, actorFromGetter(getActor))
       return removed
     },
 
@@ -183,6 +188,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         removed = true
         return { ...w, locations: w.locations.filter((l) => l.id !== id) }
       })
+      if (removed) recordSliceExplicitDelete('warehouse.locations', id, actorFromGetter(getActor))
       return removed
     },
 
@@ -232,6 +238,9 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         })
         return next
       })
+      if (deleted) {
+        recordSliceExplicitDelete('warehouse.movements', id, actorFromGetter(getActor))
+      }
       return deleted
     },
 
@@ -296,6 +305,12 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         result = out.result
         return out.store
       })
+      if (result.ok) {
+        recordSliceExplicitDelete('warehouse.documents', documentId, {
+          actorId: actor?.actorId ?? getActor?.()?.id,
+          actorName: actor?.actorName ?? getActor?.()?.name,
+        })
+      }
       return result
     },
 
@@ -554,7 +569,12 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     },
 
     removeLoadingShipment(shipmentId: string) {
+      const before = getStore().warehouse.loadingShipments ?? []
+      const existed = before.some((s) => s.id === shipmentId && s.status !== 'posted')
       patchWarehouse(setStore, (w) => removeLoadingShipment(w, shipmentId))
+      if (existed) {
+        recordSliceExplicitDelete('warehouse.loadingShipments', shipmentId, actorFromGetter(getActor))
+      }
     },
 
     markWarehouseDocsExported(

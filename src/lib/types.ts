@@ -605,6 +605,7 @@ export type AppStore = {
   /** Финансовый отдел: авансы, премии/штрафы, выплаты, больничные, снимки расчёта. Добавлено аддитивно. */
   finance?: FinanceStore
   /** Outbox отложенных Auth/Storage side-effects (SQL-first). Аддитивно. */
+  externalEffects?: import('./cloud/externalEffects/types').ExternalEffectsStore
   settings: {
     responsible: string
     site: string

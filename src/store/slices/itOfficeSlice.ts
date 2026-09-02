@@ -10,6 +10,7 @@ import {
 import { postConsumableIssue, setConsumableBalance, type IssueConsumableInput } from '@/lib/itOffice/consumables'
 import { upsertItMaintenance, removeItMaintenance } from '@/lib/itOffice/maintenance'
 import type { ItAsset, ItAssetCatalogItem, ItConsumableSpec, ItMaintenanceRecord } from '@/lib/itOffice/types'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
 export function createItOfficeSlice({ setStore }: StoreSliceDeps) {
@@ -22,6 +23,7 @@ export function createItOfficeSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeItAsset(assetId: string) {
+      recordSliceExplicitDelete('itOffice.assets', assetId)
       patchStore(setStore, (s) => ({ ...s, itOffice: removeItAsset(s.itOffice, assetId) }))
     },
 
@@ -54,6 +56,7 @@ export function createItOfficeSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeItHandoverActDraft(actId: string) {
+      recordSliceExplicitDelete('itOffice.acts', actId)
       patchStore(setStore, (s) => ({
         ...s,
         itOffice: removeItHandoverActDraft(s.itOffice, actId),
@@ -68,6 +71,7 @@ export function createItOfficeSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeItMaintenance(id: string) {
+      recordSliceExplicitDelete('itOffice.maintenance', id)
       patchStore(setStore, (s) => ({
         ...s,
         itOffice: removeItMaintenance(s.itOffice, id),

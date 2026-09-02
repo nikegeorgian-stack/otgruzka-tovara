@@ -95,6 +95,7 @@ export type TaskAttachment = {
   uploadedBy: string
   uploadedAt: string
   /** Двухфазное удаление — файл в outbox, Storage delete после SQL ack. */
+  pendingDeletion?: boolean
   externalEffectOperationId?: string
 }
 

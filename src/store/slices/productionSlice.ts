@@ -25,9 +25,10 @@ import { normalizeProductionRequest } from '@/lib/production/init'
 import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehouse'
 import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type { StoreSliceDeps } from '../storeApi'
 
-export function createProductionSlice({ setStore }: StoreSliceDeps) {
+export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
   return {
     upsertProductionRequest(entry: ProductionRequest) {
       const normalized = normalizeProductionRequest({
@@ -131,6 +132,7 @@ export function createProductionSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeProductionOrder(id: string) {
+      recordSliceExplicitDelete('production.planner.orders', id, actorFromGetter(getActor))
       setStore((s) => {
         const order = s.production.planner.orders.find((o) => o.id === id)
         let warehouse = s.warehouse
@@ -242,6 +244,7 @@ export function createProductionSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeProductionRequest(id: string) {
+      recordSliceExplicitDelete('production.requests', id, actorFromGetter(getActor))
       setStore((s) => ({
         ...s,
         production: {

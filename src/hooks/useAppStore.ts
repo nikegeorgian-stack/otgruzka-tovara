@@ -39,6 +39,7 @@ import {
   restoreTrashEmployee,
   restoreTrashMonth,
 } from '@/lib/trash'
+import { recordSliceExplicitDelete, actorFromGetter } from '@/lib/cloud/explicitDeleteHelper'
 import type { AppStore, Locale, ViewId } from '@/lib/types'
 import {
   isLocale,
@@ -48,7 +49,8 @@ import {
 import type { WorkspacePane } from '@/lib/workspace/types'
 import { popVoiceUndo, pushVoiceUndo, type VoiceUndoEntry } from '@/lib/voiceUndo'
 import { ensureMonthReady } from '@/lib/monthReady'
-import { type SetStore } from '@/store/storeApi'
+import { isBulkOverwriteBlockingAutosave } from '@/lib/cloud/bulkStoreOverwrite'
+import { applyTrackedStoreUpdate, type SetStore } from '@/store/storeApi'
 import {
   createDirectoriesSlice,
   createFormulationBatchSlice,
@@ -87,9 +89,15 @@ export function useAppStore() {
   const [store, setStoreInner] = useState<AppStore>(() =>
     applyAppStoreSeeds(purgeExpiredTrash(initialLoad.current.store)),
   )
-  const setStore = useCallback<SetStore>((action, _meta) => {
+  const setStore = useCallback<SetStore>((action, meta) => {
+    const origin = meta?.origin ?? 'user'
     setStoreInner((prev) => {
+      // Bulk preview: isolate — reject ordinary user edits (no dirty ops, no store change).
+      if (origin === 'user' && isBulkOverwriteBlockingAutosave()) {
+        return prev
+      }
       const next = typeof action === 'function' ? action(prev) : action
+      applyTrackedStoreUpdate(prev, next, origin)
       return next
     })
   }, [])
@@ -616,18 +624,21 @@ export function useAppStore() {
     purgeTrashEmployee: (at: string) => {
       const item = getStore().trash?.employees?.find((t) => t.deletedAt === at)
       if (item) {
+        recordSliceExplicitDelete('trash.employees', at, actorFromGetter(getActor), item)
       }
       setStore((s) => permanentlyDeleteTrashEmployee(s, at))
     },
     purgeTrashMonth: (at: string) => {
       const item = getStore().trash?.months?.find((t) => t.deletedAt === at)
       if (item) {
+        recordSliceExplicitDelete('trash.months', at, actorFromGetter(getActor), item)
       }
       setStore((s) => permanentlyDeleteTrashMonth(s, at))
     },
     purgeTrashCandidate: (at: string) => {
       const item = getStore().trash?.candidates?.find((t) => t.deletedAt === at)
       if (item) {
+        recordSliceExplicitDelete('trash.candidates', at, actorFromGetter(getActor), item)
       }
       setStore((s) => permanentlyDeleteTrashCandidate(s, at))
     },

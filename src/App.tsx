@@ -26,6 +26,7 @@ import {
 import type { ViewId } from '@/lib/types'
 import { useAppStore } from '@/hooks/useAppStore'
 import { restoreDailyBackup } from '@/lib/backup'
+import { BULK_BLOCKED_MESSAGE } from '@/lib/cloud/bulkStoreOverwrite'
 import { buildProcurementPageProps } from '@/lib/app/procurementProps'
 import { buildWarehousePageProps } from '@/lib/app/warehouseProps'
 import { isSqlConnectPersistence } from '@/lib/sqlconnect/config'
@@ -388,7 +389,11 @@ export default function App() {
       return
     }
     try {
-      app.replaceStore(await importFromJson(file))
+      const result = app.replaceStore(await importFromJson(file))
+      if (result && 'ok' in result && !result.ok) {
+        setImportNotice(result.message ?? translate(app.uiLocale, 'bulk.blockedPending'))
+        return
+      }
       setImportNotice(null)
     } catch {
       setImportNotice(translate(app.uiLocale, 'app.importError'))
@@ -401,7 +406,11 @@ export default function App() {
     }
     const restored = restoreDailyBackup(date)
     if (restored) {
-      app.replaceStore(restored)
+      const result = app.replaceStoreForBulk(restored, 'restore')
+      if (result && 'ok' in result && !result.ok) {
+        setImportNotice(result.message ?? BULK_BLOCKED_MESSAGE)
+        return
+      }
       app.dismissLoadWarning()
     }
   }
@@ -1700,9 +1709,17 @@ export default function App() {
         {isFstWeb && (
           <Suspense fallback={null}>
             {useSqlConnect ? (
-              <FstSqlConnectSync store={app.store} replaceStore={app.replaceStore} />
+              <FstSqlConnectSync
+                store={app.store}
+                applyCloudStore={app.applyCloudStore}
+                patchUserStore={app.patch}
+              />
             ) : (
-              <FstCloudSync store={app.store} replaceStore={app.replaceStore} />
+              <FstCloudSync
+                store={app.store}
+                applyCloudStore={app.applyCloudStore}
+                replaceStore={app.applyCloudStore}
+              />
             )}
           </Suspense>
         )}

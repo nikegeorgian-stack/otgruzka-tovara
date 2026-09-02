@@ -77,6 +77,10 @@ export type AppUser = {
   timesheetEditBrigades?: string[]
   /** После сброса пароля админом — пользователь задаёт свой при входе */
   mustChangePassword?: boolean
+  /** Двухфазное удаление — доступ отключён, Auth delete в outbox. */
+  pendingDeletion?: boolean
+  /** Связь с externalEffects.outbox operationId. */
+  externalEffectOperationId?: string
   createdAt: string
   updatedAt: string
 }

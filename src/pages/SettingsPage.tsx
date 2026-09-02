@@ -245,6 +245,7 @@ export function SettingsPage({
         <div data-coach="settings:access">
         <AccessAdminPanel
           access={store.access}
+          externalEffects={store.externalEffects}
           employees={store.employees}
           brigades={store.brigades}
           webMode={isWeb}

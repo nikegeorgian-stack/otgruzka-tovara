@@ -13,6 +13,9 @@ import {
   taskAttachmentDownloadUrl,
   uploadTaskAttachmentFile,
 } from '@/lib/tasks/taskAttachmentStorage'
+import { findOutboxItem } from '@/lib/cloud/externalEffects/outbox'
+import { isExternalDeletionRuntimeEnabled } from '@/lib/cloud/externalEffects/runtime'
+import type { AppStore } from '@/lib/types'
 import type { TaskAttachment, TaskComment, TaskPriority, TasksStore, WorkTask } from '@/lib/tasks/types'
 
 type Props = {
@@ -22,7 +25,8 @@ type Props = {
   access: AccessStore
   currentUser: AppUser | null
   comments: TaskComment[]
-  attachments: TaskAttachment[]
+  attachments: TaskAttachment[]
+  externalEffects?: AppStore['externalEffects']
   onAddTaskAttachmentMeta: (attachment: TaskAttachment) => void
   onBeginTaskAttachmentDelete: (taskId: string, attachmentId: string) => void
   onRemoveTaskAttachmentMeta: (taskId: string, attachmentId: string) => void
@@ -56,7 +60,8 @@ export function TaskCardModal({
   access,
   currentUser,
   comments,
-  attachments,
+  attachments,
+  externalEffects,
   onAddTaskAttachmentMeta,
   onBeginTaskAttachmentDelete,
   onClose,
@@ -70,7 +75,7 @@ export function TaskCardModal({
 }: Props) {
   const { t, tf } = useI18n()
   const isNew = !task?.id
-  const canHardDeleteAttachments = true
+  const canHardDeleteAttachments = isExternalDeletionRuntimeEnabled()
   const boardId = task?.boardId ?? ''
   const canEdit =
     task && currentUser
@@ -332,14 +337,23 @@ export function TaskCardModal({
             <div className="font-medium text-stone-700">{t('tasks.card.attachments')}</div>
             <ul className="space-y-1 text-xs">
               {taskAttachments.map((a) => {
-                const pendingLabel = null
+                const outbox = a.externalEffectOperationId
+                  ? findOutboxItem({ externalEffects } as AppStore, a.externalEffectOperationId)
+                  : undefined
+                const pendingLabel = a.pendingDeletion
+                  ? outbox?.status === 'failed'
+                    ? t('externalEffects.fileDeleteFailed')
+                    : outbox?.step === 'await_final_sql'
+                      ? t('externalEffects.fileAwaitFinalSave')
+                      : t('externalEffects.filePendingDelete')
+                  : null
                 return (
                 <li key={a.id} className="flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <button
                       type="button"
                       className="truncate text-sky-700 hover:underline"
-                      disabled={false}
+                      disabled={a.pendingDeletion}
                       onClick={() => void taskAttachmentDownloadUrl(a.storagePath).then((url) => {
                         if (url) window.open(url, '_blank', 'noopener')
                       })}
@@ -350,7 +364,7 @@ export function TaskCardModal({
                       <div className="text-[10px] text-amber-700">{pendingLabel}</div>
                     ) : null}
                   </div>
-                  {canEdit && canHardDeleteAttachments ? (
+                  {canEdit && canHardDeleteAttachments && !a.pendingDeletion ? (
                     <button
                       type="button"
                       className="text-stone-400 hover:text-rose-600"
@@ -364,7 +378,9 @@ export function TaskCardModal({
                 </li>
               )})}
             </ul>
-            
+            {canEdit && !canHardDeleteAttachments ? (
+              <p className="text-[11px] text-amber-800">{t('access.externalDeleteWebOnly')}</p>
+            ) : null}
             {canEdit ? (
               <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-stone-600">
                 <input

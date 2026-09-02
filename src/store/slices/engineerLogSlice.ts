@@ -1,5 +1,6 @@
 import { buildEngineerLogEntry, normalizeEngineerLogStore, type EngineerLogDraft } from '@/lib/engineerLog/init'
 import type { EngineerLogEntry } from '@/lib/engineerLog/types'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
 export function createEngineerLogSlice({ setStore }: StoreSliceDeps) {
@@ -27,6 +28,7 @@ export function createEngineerLogSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeEngineerLogEntry(id: string) {
+      recordSliceExplicitDelete('engineerLog.entries', id)
       patchStore(setStore, (s) => {
         const log = normalizeEngineerLogStore(s.engineerLog)
         return {

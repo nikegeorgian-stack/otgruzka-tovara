@@ -3,6 +3,7 @@ import {
   computeAlkaliVerdict,
   computeLabTestVerdict,
 } from '@/lib/otc/calc'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type {
   OtcAlkaliSeries,
   OtcDefectCase,
@@ -24,6 +25,7 @@ export function createOtcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeOtcNorm(id: string) {
+      recordSliceExplicitDelete('otc.norms', id)
       setStore((s) => ({
         ...s,
         otc: { ...s.otc, norms: s.otc.norms.filter((r) => r.id !== id) },
@@ -58,6 +60,7 @@ export function createOtcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeOtcLabTest(id: string) {
+      recordSliceExplicitDelete('otc.labTests', id)
       setStore((s) => ({
         ...s,
         otc: { ...s.otc, labTests: s.otc.labTests.filter((r) => r.id !== id) },
@@ -103,6 +106,7 @@ export function createOtcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeOtcAlkaliSeries(id: string) {
+      recordSliceExplicitDelete('otc.alkaliSeries', id)
       setStore((s) => ({
         ...s,
         otc: { ...s.otc, alkaliSeries: s.otc.alkaliSeries.filter((r) => r.id !== id) },
@@ -127,6 +131,7 @@ export function createOtcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeOtcSorting(id: string) {
+      recordSliceExplicitDelete('otc.sorting', id)
       setStore((s) => ({
         ...s,
         otc: { ...s.otc, sorting: s.otc.sorting.filter((r) => r.id !== id) },
@@ -155,6 +160,7 @@ export function createOtcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeOtcDefect(id: string) {
+      recordSliceExplicitDelete('otc.defects', id)
       setStore((s) => ({
         ...s,
         otc: { ...s.otc, defects: s.otc.defects.filter((r) => r.id !== id) },

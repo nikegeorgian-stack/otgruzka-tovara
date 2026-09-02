@@ -30,6 +30,8 @@ export type WebUserListRow = {
   needsImport: boolean
   /** Запись из store.access */
   inStore: boolean
+  pendingDeletion?: boolean
+  externalEffectOperationId?: string
 }
 
 function defaultWebViews(roleId: AccessRoleId): ViewId[] {
@@ -84,6 +86,8 @@ export function buildWebUserListRows(
         ...firebase,
         needsImport: false,
         inStore: true,
+        pendingDeletion: stored.pendingDeletion,
+        externalEffectOperationId: stored.externalEffectOperationId,
       })
       continue
     }
