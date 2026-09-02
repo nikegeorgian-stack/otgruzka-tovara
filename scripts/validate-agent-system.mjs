@@ -154,6 +154,21 @@ for (const rel of [
   if (!fs.existsSync(path.join(root, rel))) errors.push(`Broken required path: ${rel}`)
 }
 
+// CURRENT_STATE baseline semantics (no eternal live HEAD)
+const statePath = path.join(root, '.cursor/context/CURRENT_STATE.md')
+if (fs.existsSync(statePath)) {
+  const stateText = fs.readFileSync(statePath, 'utf8')
+  if (!/Product baseline/i.test(stateText) || !/Agent-system baseline/i.test(stateText)) {
+    errors.push('CURRENT_STATE.md: missing Product baseline or Agent-system baseline')
+  }
+  if (/Git\s+`HEAD`\s*\(короткий\)/i.test(stateText)) {
+    errors.push('CURRENT_STATE.md: must not store Git HEAD (короткий) as permanent truth')
+  }
+  if (!/не\s+хранит\s+live\s+HEAD|Live HEAD/i.test(stateText)) {
+    warnings.push('CURRENT_STATE.md: consider explicit note that live HEAD is not stored here')
+  }
+}
+
 console.log(JSON.stringify({
   cursorSkillCount: cursorSkills.length,
   agentsSkillCount: agentsSkills.length,

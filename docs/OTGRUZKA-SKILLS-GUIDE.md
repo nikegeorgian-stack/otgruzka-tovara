@@ -134,7 +134,7 @@ Legacy: `docs/agent-system/archive/agents/`
 
 После значимой сессии агент обновляет:
 
-- дату, commit, bundle (если деплой)
+- дату, **именованные baseline/checkpoint** (не live HEAD — его даёт `sessionStart`), bundle (если деплой)
 - текущую задачу / выполнено / открытые проблемы
 - следующий безопасный шаг, модули, docs to sync
 
