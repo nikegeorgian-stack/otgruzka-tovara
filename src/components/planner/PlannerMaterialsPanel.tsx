@@ -18,16 +18,23 @@ import {
 } from '@/lib/planner/materialStock'
 import type { ProductionOrder } from '@/lib/planner/types'
 import { formatQty } from '@/lib/warehouse/stock'
-import type { StockMovement, WarehouseAccountingState, WarehouseItem } from '@/lib/warehouse/types'
+import type { StockMovement, WarehouseAccountingState, WarehouseDocument, WarehouseItem } from '@/lib/warehouse/types'
+import {
+  computeOrderProvisioningStatus,
+  isLegacyBareReserveMovement,
+  listReservationDocumentsForOrder,
+} from '@/lib/warehouse/productionReservations'
 
 type Props = {
   orders: ProductionOrder[]
   warehouseItems: WarehouseItem[]
   warehouseMovements: StockMovement[]
+  warehouseDocuments?: WarehouseDocument[]
   warehouseAccounting?: WarehouseAccountingState[]
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
   onSelectOrder?: (orderId: string) => void
+  onOpenWarehouseDocument?: (documentId: string) => void
   access?: AccessStore
   currentUser?: AppUser | null
   onCreateWorkTask?: (draft: WorkTaskDraft) => string
@@ -82,10 +89,12 @@ export function PlannerMaterialsPanel({
   orders,
   warehouseItems,
   warehouseMovements,
+  warehouseDocuments = [],
   warehouseAccounting,
   onReserveOrder,
   onUnreserveOrder,
   onSelectOrder,
+  onOpenWarehouseDocument,
   access,
   currentUser,
   onCreateWorkTask,
@@ -98,9 +107,10 @@ export function PlannerMaterialsPanel({
     () => ({
       items: warehouseItems,
       movements: warehouseMovements,
+      documents: warehouseDocuments,
       accountingByWarehouse: warehouseAccounting,
     }),
-    [warehouseItems, warehouseMovements, warehouseAccounting],
+    [warehouseItems, warehouseMovements, warehouseDocuments, warehouseAccounting],
   )
 
   const relevantOrders = useMemo(
@@ -264,7 +274,10 @@ export function PlannerMaterialsPanel({
                     {order.orderNumber} · {order.productName}
                   </button>
                   <p className="text-xs text-stone-500">
-                    {t(`planner.status.${order.status}`)} · {formatQty(order.totalQtyMp)} п.м
+                    {t(`planner.status.${order.status}`)} · {formatQty(order.totalQtyMp)} п.м ·{' '}
+                    {t(
+                      `planner.material.provisioning.${computeOrderProvisioningStatus(order, warehouse)}`,
+                    )}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -302,6 +315,36 @@ export function PlannerMaterialsPanel({
                   ) : null}
                 </div>
               </div>
+              {(() => {
+                const docs = listReservationDocumentsForOrder(
+                  { documents: warehouseDocuments },
+                  order.id,
+                )
+                const legacy = warehouseMovements.some(
+                  (m) =>
+                    m.productionOrderId === order.id && isLegacyBareReserveMovement(m),
+                )
+                if (!docs.length && !legacy) return null
+                return (
+                  <div className="border-b border-grid bg-amber-50/40 px-4 py-2 text-xs text-stone-700">
+                    <span className="font-semibold">{t('planner.material.docsTitle')}: </span>
+                    {docs.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className="mr-2 underline hover:text-accent"
+                        onClick={() => onOpenWarehouseDocument?.(d.id)}
+                      >
+                        {d.number}
+                        {d.reservationReason ? ` (${d.reservationReason})` : ''}
+                      </button>
+                    ))}
+                    {legacy ? (
+                      <span className="text-amber-800">{t('planner.material.legacyBare')}</span>
+                    ) : null}
+                  </div>
+                )
+              })()}
               <table className="min-w-full text-sm">
                 <thead className="text-left text-xs uppercase text-stone-400">
                   <tr>

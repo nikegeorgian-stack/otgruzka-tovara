@@ -197,6 +197,10 @@ export function WarehouseDocumentsTab({
 
   function handlePrint(doc: WarehouseDocument) {
     if (!printMeta) return
+    if (doc.type === 'reservation') {
+      setJournalNotice(t('warehouse.doc.reservationPrintNotice'))
+      return
+    }
     if (doc.type === 'receipt') {
       const model = buildReceiptPrintModelFromDocument(warehouse, doc, printMeta, {
         productionRequests,
@@ -275,6 +279,7 @@ export function WarehouseDocumentsTab({
 
   function docTypeLabel(type: WarehouseDocument['type']) {
     if (type === 'inventory') return t('warehouse.doc.type.inventory')
+    if (type === 'reservation') return t('warehouse.doc.type.reservation')
     if (type === 'receipt') return t('warehouse.receipt')
     return t('warehouse.issue')
   }
@@ -343,6 +348,7 @@ export function WarehouseDocumentsTab({
               <option value="receipt">{t('warehouse.receipt')}</option>
               <option value="issue">{t('warehouse.issue')}</option>
               <option value="inventory">{t('warehouse.doc.type.inventory')}</option>
+              <option value="reservation">{t('warehouse.doc.type.reservation')}</option>
             </select>
           </label>
           <label className="text-xs text-stone-500">

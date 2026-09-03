@@ -39,6 +39,11 @@ export type WarehouseDocumentPurpose =
   | 'loading'
   /** PHASE W0.5 — начальная инвентаризация для активации учёта */
   | 'opening_inventory'
+  /** PHASE W3 — документный резерв материалов под производственный заказ */
+  | 'production_reservation'
+  | 'production_reservation_increase'
+  | 'production_reservation_release'
+  | 'production_reservation_reallocation'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -166,9 +171,39 @@ export type WarehouseDocumentLine = {
   expiryDate?: string
   /** Комментарий к строке (opening inventory / ревизия) */
   comment?: string
+  /** PHASE W3 — snapshot потребности / резерва / дефицита */
+  requiredQty?: number
+  reservedQty?: number
+  shortageQty?: number
+  /** Ручная замена партии (причина на документе) */
+  batchOverrideReason?: string
 }
 
-export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory'
+export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory' | 'reservation'
+
+/** PHASE W3 — устойчивый дефицит материалов (не hard-delete) */
+export type MaterialShortageStatus = 'open' | 'partial' | 'resolved'
+
+export type MaterialShortageRecord = {
+  id: string
+  productionOrderId: string
+  /** Стабильный ключ строки потребности (role или line id) */
+  materialLineKey: string
+  itemId: string
+  warehouseId: string
+  requiredDate: string
+  requiredQty: number
+  reservedQty: number
+  shortageQty: number
+  orderPriority: 'normal' | 'urgent' | number
+  status: MaterialShortageStatus
+  createdAt: string
+  updatedAt: string
+  resolvedAt?: string
+  sourceReservationDocumentId?: string
+  /** Детерминированный ключ идемпотентности: order+item+warehouse+line */
+  idempotencyKey: string
+}
 
 export type WarehouseDocument = {
   id: string
@@ -236,6 +271,13 @@ export type WarehouseDocument = {
   idempotencyKey?: string
   /** PHASE W0.5 — документ начальной инвентаризации (активация учёта) */
   isOpeningInventory?: boolean
+  /** PHASE W3 — корректирует предыдущий документ резерва / связанный документ */
+  correctsDocumentId?: string
+  relatedDocumentIds?: string[]
+  /** Причина ручной корректировки / перераспределения */
+  reservationReason?: string
+  /** PHASE W0.6/W3 — cloud atomic group */
+  transactionGroupId?: string
   docRole?:
     | 'batch_issue'
     | 'batch_receipt'
@@ -245,6 +287,8 @@ export type WarehouseDocument = {
     | 'production_receipt'
     | 'production_issue'
     | 'loading_issue'
+    | 'production_reservation'
+    | 'production_reservation_release'
   /** Связь с погрузкой ГП */
   loadingShipmentId?: string
   /** Когда документ выгружен бухгалтеру / в Balance */
@@ -530,6 +574,8 @@ export type WarehouseStore = {
    * Отсутствие записи = uninitialized (legacy).
    */
   accountingByWarehouse?: WarehouseAccountingState[]
+  /** PHASE W3 — дефициты материалов (soft-resolve, без hard delete) */
+  materialShortages?: MaterialShortageRecord[]
 }
 
 /** PHASE W0.5 — состояние подтверждения остатков по складу */

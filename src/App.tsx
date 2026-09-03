@@ -1091,6 +1091,7 @@ export default function App() {
               warehouseItems={app.store.warehouse.items}
               warehouseCategories={app.store.warehouse.categories}
               warehouseMovements={app.store.warehouse.movements}
+              warehouseDocuments={app.store.warehouse.documents}
               warehouseAccounting={app.store.warehouse.accountingByWarehouse}
               activeMonth={app.activeMonth}
               onMonthChange={app.setActiveMonth}

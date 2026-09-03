@@ -200,11 +200,9 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     },
 
     addStockMovement(movement: Omit<StockMovement, 'id' | 'createdAt'>) {
-      // PHASE W1 — balance-changing bare movements require WarehouseDocument.
-      // reserve/unreserve remain (W3 scope) with source IDs; legacy movements stay.
-      const bareAllowed =
-        movement.type === 'reserve' || movement.type === 'unreserve'
-      if (!movement.documentId && !bareAllowed) {
+      // PHASE W1/W3 — all stock effects require WarehouseDocument.
+      // Legacy bare reserve/unreserve movements remain readable; new bare API is fail-closed.
+      if (!movement.documentId) {
         return
       }
       patchWarehouse(setStore, (w) => {

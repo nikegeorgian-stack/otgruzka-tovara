@@ -1,12 +1,10 @@
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
 import { normalizeProductionOrder, normalizePlanner } from '@/lib/planner/init'
 import {
-  applyWarehouseMovements,
-  buildReserveMovements,
-  buildUnreserveMovements,
   historyNoteForReserve,
   historyNoteForUnreserve,
   reserveOrderMaterialsInStore,
+  unreserveOrderMaterialsInStore,
   type MaterialReserveResult,
 } from '@/lib/planner/materialReserve'
 import {
@@ -27,6 +25,12 @@ import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
+import {
+  reallocateProductionReservation,
+  syncReservationAfterOrderChange,
+  type ProductionReservationResult,
+  type ReallocateReservationInput,
+} from '@/lib/warehouse/productionReservations'
 import type { StoreSliceDeps } from '../storeApi'
 
 export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
@@ -71,21 +75,53 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
         updatedAt: new Date().toISOString(),
         createdAt: order.createdAt || new Date().toISOString(),
       })
-      setStore((s) => {
-        const exists = s.production.planner.orders.some((o) => o.id === normalized.id)
-        const orders = exists
-          ? s.production.planner.orders.map((o) =>
-              o.id === normalized.id ? normalized : o,
-            )
-          : [...s.production.planner.orders, normalized]
-        return {
-          ...s,
-          production: {
-            ...s.production,
-            planner: normalizePlanner({ ...s.production.planner, orders }),
-          },
-        }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_reservation_adjustment',
+        sourceId: normalized.id,
+        revision: `upsert:${normalized.updatedAt}`,
       })
+      setStore(
+        (s) => {
+          const prev = s.production.planner.orders.find((o) => o.id === normalized.id)
+          const exists = Boolean(prev)
+          const orders = exists
+            ? s.production.planner.orders.map((o) =>
+                o.id === normalized.id ? normalized : o,
+              )
+            : [...s.production.planner.orders, normalized]
+          let warehouse = s.warehouse
+          if (
+            prev &&
+            (prev.status === 'active' ||
+              prev.status === 'paused' ||
+              normalized.status === 'cancelled')
+          ) {
+            const actor = actorFromGetter(getActor)
+            const synced = syncReservationAfterOrderChange(warehouse, prev, normalized, {
+              actor: actor.actorId
+                ? { id: actor.actorId, name: actor.actorName }
+                : undefined,
+              transactionGroupId: groupId,
+            })
+            warehouse = synced.store
+          }
+          return {
+            ...s,
+            warehouse,
+            production: {
+              ...s.production,
+              planner: normalizePlanner({ ...s.production.planner, orders }),
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation_adjustment',
+          transactionGroupLabel: 'Корректировка резерва производственного заказа',
+        },
+      )
     },
 
     /** Назначить рецептуру пропитки на произв. заказ (технолог) */
@@ -134,30 +170,49 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
 
     removeProductionOrder(id: string) {
       recordSliceExplicitDelete('production.planner.orders', id, actorFromGetter(getActor))
-      setStore((s) => {
-        const order = s.production.planner.orders.find((o) => o.id === id)
-        let warehouse = s.warehouse
-        if (order) {
-          const unreserve = buildUnreserveMovements(order, warehouse)
-          if (unreserve.length) {
-            warehouse = applyWarehouseMovements(warehouse, unreserve)
-          }
-        }
-        return {
-          ...s,
-          warehouse,
-          production: {
-            ...s.production,
-            requests: s.production.requests.map((r) =>
-              r.orderId === id ? { ...r, orderId: undefined } : r,
-            ),
-            planner: {
-              ...s.production.planner,
-              orders: s.production.planner.orders.filter((o) => o.id !== id),
-            },
-          },
-        }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_reservation_release',
+        sourceId: id,
+        revision: 'remove',
       })
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === id)
+          let warehouse = s.warehouse
+          if (order) {
+            const actor = actorFromGetter(getActor)
+            const released = unreserveOrderMaterialsInStore(order, warehouse, {
+              actor: actor.actorId
+                ? { id: actor.actorId, name: actor.actorName }
+                : undefined,
+              transactionGroupId: groupId,
+              reason: 'order_removed',
+            })
+            warehouse = released.store
+          }
+          return {
+            ...s,
+            warehouse,
+            production: {
+              ...s.production,
+              requests: s.production.requests.map((r) =>
+                r.orderId === id ? { ...r, orderId: undefined } : r,
+              ),
+              planner: {
+                ...s.production.planner,
+                orders: s.production.planner.orders.filter((o) => o.id !== id),
+              },
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation_release',
+          transactionGroupLabel: 'Освобождение резерва при удалении заказа',
+        },
+      )
     },
 
     activateProductionOrder(id: string): { ok: boolean; messageKey?: string } {
@@ -165,31 +220,36 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
         ok: false,
         messageKey: 'planner.material.noOrder',
       }
-      setStore((s) => {
-        const order = s.production.planner.orders.find((o) => o.id === id)
-        if (!order) return s
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_reservation',
+        sourceId: id,
+        revision: 'activate',
+      })
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === id)
+          if (!order) return s
 
-        const gate = canActivateProductionOrder(order)
-        if (!gate.ok) {
-          result = { ok: false, messageKey: gate.messageKey }
-          return s
-        }
+          const gate = canActivateProductionOrder(order)
+          if (!gate.ok) {
+            result = { ok: false, messageKey: gate.messageKey }
+            return s
+          }
 
-        const seq = s.production.planner.nextOrderSeq
-        const year = new Date().getFullYear()
-        const orders = s.production.planner.orders.map((o) => {
-          if (o.id !== id) return o
-          const orderNumber = o.orderNumber || formatOrderNumber(year, seq)
-          const base = { ...o, orderNumber, status: 'active' as const }
+          const seq = s.production.planner.nextOrderSeq
+          const year = new Date().getFullYear()
+          const actor = actorFromGetter(getActor)
+          const orderNumber = order.orderNumber || formatOrderNumber(year, seq)
+          const base = { ...order, orderNumber, status: 'active' as const }
           const dayPlans =
             base.planMode === 'even' || !base.dayPlans.length
               ? generateEvenDayPlans(base)
               : base.dayPlans
-          const withPlans = {
+          let activated = normalizeProductionOrder({
             ...base,
             dayPlans,
             history: [
-              ...o.history,
+              ...order.history,
               {
                 id: newId(),
                 at: new Date().toISOString(),
@@ -198,21 +258,69 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
               },
             ],
             updatedAt: new Date().toISOString(),
+          })
+
+          const reserved = reserveOrderMaterialsInStore(activated, s.warehouse, {
+            actor: actor.actorId
+              ? { id: actor.actorId, name: actor.actorName }
+              : undefined,
+            transactionGroupId: groupId,
+          })
+          if (reserved.result.ok && reserved.result.lines.some((l) => l.reserved > 0)) {
+            const note = historyNoteForReserve(reserved.result.lines)
+            activated = normalizeProductionOrder({
+              ...activated,
+              history: [
+                ...activated.history,
+                {
+                  id: newId(),
+                  at: new Date().toISOString(),
+                  type: 'note' as const,
+                  message: note,
+                },
+              ],
+              updatedAt: new Date().toISOString(),
+            })
+          } else if (!reserved.result.ok && reserved.result.messageKey) {
+            activated = normalizeProductionOrder({
+              ...activated,
+              history: [
+                ...activated.history,
+                {
+                  id: newId(),
+                  at: new Date().toISOString(),
+                  type: 'note' as const,
+                  message: `Резерв не выполнен: ${reserved.result.messageKey}`,
+                },
+              ],
+              updatedAt: new Date().toISOString(),
+            })
           }
-          return normalizeProductionOrder(withPlans)
-        })
-        result = { ok: true }
-        return {
-          ...s,
-          production: {
-            ...s.production,
-            planner: {
-              orders,
-              nextOrderSeq: orders.some((o) => o.id === id) ? seq + 1 : seq,
+
+          const orders = s.production.planner.orders.map((o) =>
+            o.id === id ? activated : o,
+          )
+          result = { ok: true }
+          return {
+            ...s,
+            warehouse: reserved.store,
+            production: {
+              ...s.production,
+              planner: {
+                orders,
+                nextOrderSeq: seq + 1,
+              },
             },
-          },
-        }
-      })
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation',
+          transactionGroupLabel: 'Активация заказа + резерв материалов',
+        },
+      )
       return result
     },
 
@@ -372,79 +480,159 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
         lines: [],
         messageKey: 'planner.material.noOrder',
       }
-      setStore((s) => {
-        const order = s.production.planner.orders.find((o) => o.id === orderId)
-        if (!order) return s
-        result = reserveOrderMaterialsInStore(order, s.warehouse)
-        if (!result.ok) return s
-        const { movements } = buildReserveMovements(order, s.warehouse)
-        const warehouse = applyWarehouseMovements(s.warehouse, movements)
-        const orders = s.production.planner.orders.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                history: [
-                  ...o.history,
-                  {
-                    id: newId(),
-                    at: new Date().toISOString(),
-                    type: 'note' as const,
-                    message: historyNoteForReserve(result.lines),
-                  },
-                ],
-                updatedAt: new Date().toISOString(),
-              }
-            : o,
-        )
-        return {
-          ...s,
-          warehouse,
-          production: {
-            ...s.production,
-            planner: { ...s.production.planner, orders },
-          },
-        }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_reservation',
+        sourceId: orderId,
+        revision: 'manual-reserve',
       })
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === orderId)
+          if (!order) return s
+          const actor = actorFromGetter(getActor)
+          const out = reserveOrderMaterialsInStore(order, s.warehouse, {
+            actor: actor ? { id: actor.actorId, name: actor.actorName } : undefined,
+            transactionGroupId: groupId,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          const orders = s.production.planner.orders.map((o) =>
+            o.id === orderId
+              ? {
+                  ...o,
+                  history: [
+                    ...o.history,
+                    {
+                      id: newId(),
+                      at: new Date().toISOString(),
+                      type: 'note' as const,
+                      message: historyNoteForReserve(out.result.lines),
+                    },
+                  ],
+                  updatedAt: new Date().toISOString(),
+                }
+              : o,
+          )
+          return {
+            ...s,
+            warehouse: out.store,
+            production: {
+              ...s.production,
+              planner: { ...s.production.planner, orders },
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation',
+          transactionGroupLabel: 'Резерв материалов производственного заказа',
+        },
+      )
       return result
     },
 
     unreserveProductionOrderMaterials(orderId: string): boolean {
       let done = false
-      setStore((s) => {
-        const order = s.production.planner.orders.find((o) => o.id === orderId)
-        if (!order) return s
-        const movements = buildUnreserveMovements(order, s.warehouse)
-        if (!movements.length) return s
-        done = true
-        const warehouse = applyWarehouseMovements(s.warehouse, movements)
-        const note = historyNoteForUnreserve(order, s.warehouse)
-        const orders = s.production.planner.orders.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                history: [
-                  ...o.history,
-                  {
-                    id: newId(),
-                    at: new Date().toISOString(),
-                    type: 'note' as const,
-                    message: note,
-                  },
-                ],
-                updatedAt: new Date().toISOString(),
-              }
-            : o,
-        )
-        return {
-          ...s,
-          warehouse,
-          production: {
-            ...s.production,
-            planner: { ...s.production.planner, orders },
-          },
-        }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_reservation_release',
+        sourceId: orderId,
+        revision: 'manual-release',
       })
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === orderId)
+          if (!order) return s
+          const actor = actorFromGetter(getActor)
+          const out = unreserveOrderMaterialsInStore(order, s.warehouse, {
+            actor: actor ? { id: actor.actorId, name: actor.actorName } : undefined,
+            transactionGroupId: groupId,
+            reason: 'manual_unreserve',
+          })
+          if (!out.result.ok && !out.result.documentId) return s
+          done = true
+          const note = historyNoteForUnreserve(order)
+          const orders = s.production.planner.orders.map((o) =>
+            o.id === orderId
+              ? {
+                  ...o,
+                  history: [
+                    ...o.history,
+                    {
+                      id: newId(),
+                      at: new Date().toISOString(),
+                      type: 'note' as const,
+                      message: note,
+                    },
+                  ],
+                  updatedAt: new Date().toISOString(),
+                }
+              : o,
+          )
+          return {
+            ...s,
+            warehouse: out.store,
+            production: {
+              ...s.production,
+              planner: { ...s.production.planner, orders },
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation_release',
+          transactionGroupLabel: 'Освобождение резерва производственного заказа',
+        },
+      )
       return done
+    },
+
+    reallocateProductionOrderReservation(
+      input: ReallocateReservationInput,
+    ): ProductionReservationResult {
+      let result: ProductionReservationResult = {
+        ok: false,
+        lines: [],
+        shortages: [],
+        provisioningStatus: 'blocked',
+        error: 'planner.material.noOrder',
+      }
+      const groupId =
+        input.idempotencyKey ||
+        warehouseTransactionGroupId({
+          kind: 'production_reservation_reallocation',
+          sourceId: `${input.sourceProductionOrderId}->${input.targetProductionOrderId}`,
+          revision: '1',
+        })
+      setStore(
+        (s) => {
+          const source = s.production.planner.orders.find(
+            (o) => o.id === input.sourceProductionOrderId,
+          )
+          const target = s.production.planner.orders.find(
+            (o) => o.id === input.targetProductionOrderId,
+          )
+          if (!source || !target) return s
+          const out = reallocateProductionReservation(s.warehouse, source, target, {
+            ...input,
+            idempotencyKey: groupId,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          return { ...s, warehouse: out.store }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_reservation_reallocation',
+          transactionGroupLabel: 'Перераспределение резерва материалов',
+        },
+      )
+      return result
     },
   }
 }

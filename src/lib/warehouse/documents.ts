@@ -35,6 +35,7 @@ export const UNPOST_REMOVED_ERROR = 'warehouse.doc.errUnpostRemoved'
 export function warehouseDocumentKindLabel(type: WarehouseDocument['type']): string {
   if (type === 'receipt') return 'Приход'
   if (type === 'issue') return 'Расход'
+  if (type === 'reservation') return 'Резерв'
   return 'Ревизия'
 }
 
@@ -116,6 +117,47 @@ function buildDocumentMovements(
   const actorId = full.postedBy ?? full.keeperId
   const actorName = full.postedByName ?? full.keeperName
 
+  // PHASE W3 — reservation docs create reserve/unreserve only (balance unchanged).
+  if (full.type === 'reservation') {
+    const purpose = full.purpose
+    const isRelease =
+      purpose === 'production_reservation_release' ||
+      // reallocation reserve side uses production_reservation_reallocation with positive reserve;
+      // release side is also tagged reallocation but movements are unreserve when docRole says so
+      full.docRole === 'production_reservation_release'
+    const movType: StockMovement['type'] = isRelease ? 'unreserve' : 'reserve'
+    // Reallocation pair: release doc has docRole production_reservation_release;
+    // target reserve doc has purpose production_reservation_reallocation + docRole production_reservation.
+    const movements: StockMovement[] = []
+    for (const line of full.lines) {
+      if (!line.itemId || line.quantity <= 0) continue
+      const item = itemMap.get(line.itemId)
+      const qty = item ? toBaseQty(item, line.quantity, line.inputUnit) : line.quantity
+      if (qty <= 0) continue
+      movements.push({
+        id: crypto.randomUUID(),
+        itemId: line.itemId,
+        warehouseId: full.warehouseId,
+        type: movType,
+        quantity: qty,
+        date: full.date,
+        documentId: full.id,
+        documentLineId: line.lineId,
+        documentNo: full.number,
+        productionOrderId: full.productionOrderId,
+        mixTaskId: full.mixTaskId,
+        comment: line.comment ?? full.comment,
+        batchNo: line.batchNo,
+        expiryDate: line.expiryDate,
+        transactionGroupId: full.transactionGroupId,
+        createdAt,
+        createdBy: actorId,
+        createdByName: actorName,
+      })
+    }
+    return movements
+  }
+
   if (full.type === 'inventory') {
     const movements: StockMovement[] = []
     for (const line of full.lines) {
@@ -145,7 +187,10 @@ function buildDocumentMovements(
     return movements
   }
 
+  if (full.type !== 'receipt' && full.type !== 'issue') return []
+
   const isReceipt = full.type === 'receipt'
+  const movementType: StockMovement['type'] = isReceipt ? 'receipt' : 'issue'
   return full.lines.map((line) => {
     const item = itemMap.get(line.itemId)
     const qty = item ? toBaseQty(item, line.quantity, line.inputUnit) : line.quantity
@@ -158,7 +203,7 @@ function buildDocumentMovements(
       id: crypto.randomUUID(),
       itemId: line.itemId,
       warehouseId: full.warehouseId,
-      type: full.type,
+      type: movementType,
       quantity: qty,
       date: full.date,
       documentId: full.id,
@@ -228,6 +273,37 @@ function commitPostedDocument(
       store,
       result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED },
     }
+  }
+
+  // PHASE W3 — trusted reservation requires active accounting (not physical issue).
+  if (full.type === 'reservation') {
+    if (!isWarehouseAccountingActive(store, full.warehouseId)) {
+      return {
+        store,
+        result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED },
+      }
+    }
+    const movements = buildDocumentMovements(store, full)
+    const cleaned = options.replaceExisting
+      ? store.movements.filter((m) => m.documentId !== full.id)
+      : store.movements
+    const documents = options.replaceExisting
+      ? store.documents.map((d) => (d.id === full.id ? full : d))
+      : [...store.documents, full]
+    let next: WarehouseStore = {
+      ...store,
+      documents,
+      movements: [...cleaned, ...movements],
+    }
+    if (!options.skipAudit) {
+      next = appendWarehouseAudit(next, {
+        action: 'document_post',
+        detail: `${warehouseDocumentKindLabel(full.type)} №${full.number} · ${full.lines.length} поз. · остаток физически не перемещён`,
+        actorId: full.keeperId ?? full.postedBy,
+        actorName: full.keeperName ?? full.postedByName,
+      })
+    }
+    return { store: next, result: { ok: true, documentId: full.id } }
   }
 
   if (full.type === 'issue') {

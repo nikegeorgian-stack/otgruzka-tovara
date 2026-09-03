@@ -18,6 +18,10 @@ export type WarehouseTransactionGroupKind =
   | 'batch_mix'
   | 'cancel_transfer_pair'
   | 'document_cancel'
+  | 'production_reservation'
+  | 'production_reservation_adjustment'
+  | 'production_reservation_release'
+  | 'production_reservation_reallocation'
 
 export type TransactionGroupMeta = {
   transactionGroupId: string

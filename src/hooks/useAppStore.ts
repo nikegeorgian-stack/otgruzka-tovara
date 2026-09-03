@@ -714,6 +714,7 @@ export function useAppStore() {
     generatePlannerProductionRequests: production.generatePlannerProductionRequests,
     reserveProductionOrderMaterials: production.reserveProductionOrderMaterials,
     unreserveProductionOrderMaterials: production.unreserveProductionOrderMaterials,
+    reallocateProductionOrderReservation: production.reallocateProductionOrderReservation,
     upsertCounterparty: directories.upsertCounterparty,
     removeCounterparty: directories.removeCounterparty,
     upsertFinishedProduct: directories.upsertFinishedProduct,

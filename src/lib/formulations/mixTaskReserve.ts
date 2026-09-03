@@ -1,4 +1,6 @@
 import { appendWarehouseAudit } from '@/lib/warehouse/audit'
+import { nextDocumentNumber } from '@/lib/warehouse/docNumbering'
+import { postWarehouseDocument } from '@/lib/warehouse/documents'
 import { computeAllBalances } from '@/lib/warehouse/stock'
 import type { StockMovement, WarehouseStore } from '@/lib/warehouse/types'
 import { planFormulationBatch } from './batch'
@@ -131,13 +133,48 @@ export function reserveMixTaskInStore(
       },
     }
   }
-  let store: WarehouseStore = {
-    ...warehouse,
-    movements: [...warehouse.movements, ...movements],
+  const date = todayIso()
+  const now = new Date().toISOString()
+  const warehouseId = movements[0]!.warehouseId
+  const number = nextDocumentNumber(warehouse.documents, 'reservation', date)
+  const posted = postWarehouseDocument(warehouse, {
+    type: 'reservation',
+    number,
+    date,
+    documentDateTime: now,
+    warehouseId,
+    purpose: 'production_reservation',
+    mixTaskId: task.id,
+    comment: `Резерв · ${task.taskNumber}`,
+    idempotencyKey: `mix-reserve::${task.id}::${movements.map((m) => `${m.itemId}:${m.quantity}`).join('|')}`,
+    docRole: 'production_reservation',
+    lines: movements.map((m) => {
+      const item = warehouse.items.find((i) => i.id === m.itemId)
+      return {
+        lineId: crypto.randomUUID(),
+        itemId: m.itemId,
+        quantity: m.quantity,
+        requiredQty: m.quantity,
+        reservedQty: m.quantity,
+        shortageQty: 0,
+        itemCodeSnapshot: item?.internalCode,
+        itemNameSnapshot: item?.name,
+        unitSnapshot: item?.unit,
+      }
+    }),
+    status: 'posted',
+    postedAt: now,
+  })
+  if (!posted.result.ok) {
+    return {
+      store: warehouse,
+      result: { ok: false, lines, messageKey: posted.result.error },
+    }
   }
+  let store = posted.store
   store = appendWarehouseAudit(store, {
-    action: 'movement_add',
-    detail: `Резерв под задание ${task.taskNumber} · ${movements.length} поз.`,
+    action: 'document_post',
+    detail: `Резерв под задание ${task.taskNumber} · док. ${number}`,
   })
   const reservedAny = lines.some((l) => l.reserved > 0)
   return {
@@ -156,13 +193,39 @@ export function unreserveMixTaskInStore(
 ): { store: WarehouseStore; ok: boolean } {
   const movements = buildMixTaskUnreserveMovements(task, warehouse)
   if (!movements.length) return { store: warehouse, ok: false }
-  let store: WarehouseStore = {
-    ...warehouse,
-    movements: [...warehouse.movements, ...movements],
-  }
-  store = appendWarehouseAudit(store, {
-    action: 'movement_add',
-    detail: `Снятие резерва ${task.taskNumber}`,
+  const date = todayIso()
+  const now = new Date().toISOString()
+  const warehouseId = movements[0]!.warehouseId
+  const number = nextDocumentNumber(warehouse.documents, 'reservation', date)
+  const posted = postWarehouseDocument(warehouse, {
+    type: 'reservation',
+    number,
+    date,
+    documentDateTime: now,
+    warehouseId,
+    purpose: 'production_reservation_release',
+    mixTaskId: task.id,
+    comment: `Снятие резерва · ${task.taskNumber}`,
+    idempotencyKey: `mix-unreserve::${task.id}::${movements.map((m) => `${m.itemId}:${m.quantity}`).join('|')}`,
+    docRole: 'production_reservation_release',
+    lines: movements.map((m) => {
+      const item = warehouse.items.find((i) => i.id === m.itemId)
+      return {
+        lineId: crypto.randomUUID(),
+        itemId: m.itemId,
+        quantity: m.quantity,
+        itemCodeSnapshot: item?.internalCode,
+        itemNameSnapshot: item?.name,
+        unitSnapshot: item?.unit,
+      }
+    }),
+    status: 'posted',
+    postedAt: now,
+  })
+  if (!posted.result.ok) return { store: warehouse, ok: false }
+  const store = appendWarehouseAudit(posted.store, {
+    action: 'document_post',
+    detail: `Снятие резерва ${task.taskNumber} · док. ${number}`,
   })
   return { store, ok: true }
 }

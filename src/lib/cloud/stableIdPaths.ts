@@ -12,6 +12,7 @@ export const STABLE_ID_COLLECTION_PATHS = [
   'warehouse.accountingByWarehouse',
   'warehouse.auditLog',
   'warehouse.loadingShipments',
+  'warehouse.materialShortages',
   'sales.orders',
   'procurement.orders',
   'procurement.categories',

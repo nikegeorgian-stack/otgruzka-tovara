@@ -218,6 +218,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     itemRenameRequests: Array.isArray(raw.itemRenameRequests) ? raw.itemRenameRequests : [],
     replenishmentRequests: Array.isArray(raw.replenishmentRequests) ? raw.replenishmentRequests : [],
     loadingShipments: Array.isArray(raw.loadingShipments) ? raw.loadingShipments : [],
+    materialShortages: Array.isArray(raw.materialShortages) ? raw.materialShortages : [],
   }
 
   if (needsCatalogMigration(store)) {

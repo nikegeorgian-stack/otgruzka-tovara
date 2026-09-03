@@ -6,7 +6,7 @@ import type { WarehouseDocument, WarehouseDocumentPurpose, WarehouseStore } from
 import { buildDocumentJournalRows, type DocumentJournalRow } from './documentJournal'
 
 export type JournalStatusFilter = 'all' | 'draft' | 'posted' | 'cancelled'
-export type JournalTypeFilter = 'all' | 'receipt' | 'issue' | 'inventory'
+export type JournalTypeFilter = 'all' | 'receipt' | 'issue' | 'inventory' | 'reservation'
 export type JournalSourceFilter =
   | 'all'
   | 'manual'
@@ -47,9 +47,12 @@ export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourc
   if (
     doc.docRole === 'production_issue' ||
     doc.docRole === 'production_receipt' ||
+    doc.docRole === 'production_reservation' ||
+    doc.docRole === 'production_reservation_release' ||
     doc.productionRequestId ||
     doc.productionOrderId ||
-    doc.mixTaskId
+    doc.mixTaskId ||
+    doc.type === 'reservation'
   ) {
     return 'production'
   }
