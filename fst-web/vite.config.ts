@@ -18,6 +18,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(repoRoot, 'src'),
+      '@fst/dataconnect-admin-generated': path.resolve(__dirname, 'src/blocked-admin-sdk.ts'),
     },
   },
   define: {

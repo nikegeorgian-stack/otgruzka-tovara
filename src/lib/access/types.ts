@@ -146,6 +146,8 @@ export type AccessStore = {
   roleAllowNegativeStock?: Partial<Record<AccessRoleId, boolean>>
   /** Разрешить сторнирование складских документов */
   roleAllowDocumentCancel?: Partial<Record<AccessRoleId, boolean>>
+  /** Явное право ОТК / директора / технолога на выпуск QC-партии */
+  roleAllowQcRelease?: Partial<Record<AccessRoleId, boolean>>
   /**
    * PHASE P1A/P1B — явное право перераспределения резервов (chief_engineer и др.).
    * Роль сама по себе не даёт право (кроме operations_director).
@@ -179,6 +181,9 @@ export type AccessStore = {
 
 /** Роли, для которых администратор может включить сторно документов */
 export const DOCUMENT_CANCEL_ROLES: AccessRoleId[] = ['warehouse_keeper']
+
+/** Роли, для которых администратор может включить QC release/regrade/reject. */
+export const QC_RELEASE_ROLES: AccessRoleId[] = ['operations_director', 'technologist']
 
 /** Отрицательный остаток отключён глобально. */
 export const NEGATIVE_STOCK_ROLES: AccessRoleId[] = []

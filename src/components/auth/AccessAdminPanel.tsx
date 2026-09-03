@@ -17,7 +17,12 @@ import { generateOneTimePassword } from '@/lib/access/tempPassword'
 import { suggestLoginFromDisplayName } from '@/lib/access/suggestLogin'
 import { AccessUserGroupsPanel } from '@/components/auth/AccessUserGroupsPanel'
 import type { AccessRoleId, AccessStore, AppUser } from '@/lib/access/types'
-import { NEGATIVE_STOCK_ROLES, DOCUMENT_CANCEL_ROLES, RECIPE_APPROVAL_ROLES } from '@/lib/access/types'
+import {
+  NEGATIVE_STOCK_ROLES,
+  DOCUMENT_CANCEL_ROLES,
+  RECIPE_APPROVAL_ROLES,
+  QC_RELEASE_ROLES,
+} from '@/lib/access/types'
 import {
   defaultTimesheetLevel,
   resolveRoleTimesheetLevel,
@@ -48,6 +53,7 @@ type Props = {
   onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleAllowDocumentCancel: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleAllowRecipeApproval: (roleId: AccessRoleId, allowed: boolean) => void
+  onSetRoleAllowQcRelease: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleTimesheetAccess: (roleId: AccessRoleId, level: TimesheetAccessLevel) => void
   onSetRoleTaskAccess: (roleId: AccessRoleId, level: TaskAccessLevel) => void
   onUpsertUserGroup: (input: {
@@ -131,6 +137,7 @@ export function AccessAdminPanel({
   onSetRoleAllowNegativeStock,
   onSetRoleAllowDocumentCancel,
   onSetRoleAllowRecipeApproval,
+  onSetRoleAllowQcRelease,
   onSetRoleTimesheetAccess,
   onSetRoleTaskAccess,
   onUpsertUserGroup,
@@ -1027,6 +1034,16 @@ export function AccessAdminPanel({
                             }
                           />
                           {t('access.col.recipeApproval')}
+                        </label>
+                      )}
+                      {QC_RELEASE_ROLES.includes(role.id) && (
+                        <label className="inline-flex items-center gap-1.5" title={t('access.qcReleaseHint')}>
+                          <input
+                            type="checkbox"
+                            checked={access.roleAllowQcRelease?.[role.id] === true}
+                            onChange={(e) => onSetRoleAllowQcRelease(role.id, e.target.checked)}
+                          />
+                          {t('access.col.qcRelease')}
                         </label>
                       )}
                     </div>

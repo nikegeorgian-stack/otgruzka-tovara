@@ -1,0 +1,181 @@
+# PHASE P1C.3 — admin-only QC writes (NO_ACCESS = Admin SDK only)
+
+mutation UpsertQcPermission(
+  $id: String!
+  $firebaseUid: String!
+  $storeId: String!
+  $active: Boolean!
+  $canView: Boolean!
+  $canUpload: Boolean!
+  $canRelease: Boolean!
+  $canRegrade: Boolean!
+  $canReject: Boolean!
+  $canPostShipment: Boolean!
+  $revision: Int!
+  $createdByUid: String!
+  $updatedByUid: String!
+  $revokedAt: Timestamp
+  $revokedByUid: String
+  $revokeReason: String
+) @auth(level: NO_ACCESS) @transaction {
+  qcPermission_upsert(data: {
+    id: $id
+    firebaseUid: $firebaseUid
+    storeId: $storeId
+    active: $active
+    canView: $canView
+    canUpload: $canUpload
+    canRelease: $canRelease
+    canRegrade: $canRegrade
+    canReject: $canReject
+    canPostShipment: $canPostShipment
+    revision: $revision
+    createdByUid: $createdByUid
+    updatedByUid: $updatedByUid
+    revokedAt: $revokedAt
+    revokedByUid: $revokedByUid
+    revokeReason: $revokeReason
+  })
+}
+
+mutation InsertQcAttachmentRecord(
+  $id: String!
+  $storeId: String!
+  $lotId: String!
+  $documentKind: String!
+  $storagePath: String!
+  $contentType: String!
+  $sizeBytes: Int!
+  $checksum: String!
+  $objectGeneration: String
+  $status: String!
+  $uploadedByUid: String!
+  $revision: Int!
+  $idempotencyKey: String!
+) @auth(level: NO_ACCESS) @transaction {
+  qcAttachmentRecord_insert(data: {
+    id: $id
+    storeId: $storeId
+    lotId: $lotId
+    documentKind: $documentKind
+    storagePath: $storagePath
+    contentType: $contentType
+    sizeBytes: $sizeBytes
+    checksum: $checksum
+    objectGeneration: $objectGeneration
+    status: $status
+    uploadedByUid: $uploadedByUid
+    revision: $revision
+    idempotencyKey: $idempotencyKey
+  })
+}
+
+mutation UpdateQcAttachmentRecord(
+  $id: String!
+  $expectedRevision: Int!
+  $revision: Int!
+  $status: String!
+  $objectGeneration: String
+  $checksum: String!
+  $sizeBytes: Int!
+  $contentType: String!
+  $verifiedAt: Timestamp
+) @auth(level: NO_ACCESS) @transaction {
+  qcAttachmentRecord_updateMany(
+    where: {
+      id: { eq: $id }
+      revision: { eq: $expectedRevision }
+    }
+    data: {
+      revision: $revision
+      status: $status
+      objectGeneration: $objectGeneration
+      checksum: $checksum
+      sizeBytes: $sizeBytes
+      contentType: $contentType
+      verifiedAt: $verifiedAt
+    }
+  ) @check(expr: "this == 1", message: "revision_conflict")
+}
+
+mutation UpsertQcFinishedGoodsLot(
+  $id: String!
+  $storeId: String!
+  $finishedProductId: String!
+  $warehouseItemId: String!
+  $batchNo: String!
+  $quantityProduced: Float!
+  $quantityShipped: Float!
+  $packagingReportId: String!
+  $status: String!
+  $revision: Int!
+  $updatedByUid: String
+) @auth(level: NO_ACCESS) @transaction {
+  qcFinishedGoodsLot_upsert(data: {
+    id: $id
+    storeId: $storeId
+    finishedProductId: $finishedProductId
+    warehouseItemId: $warehouseItemId
+    batchNo: $batchNo
+    quantityProduced: $quantityProduced
+    quantityShipped: $quantityShipped
+    packagingReportId: $packagingReportId
+    status: $status
+    revision: $revision
+    updatedByUid: $updatedByUid
+  })
+}
+
+mutation UpdateQcFinishedGoodsLotShipped(
+  $id: String!
+  $expectedRevision: Int!
+  $revision: Int!
+  $quantityShipped: Float!
+  $updatedByUid: String!
+) @auth(level: NO_ACCESS) @transaction {
+  qcFinishedGoodsLot_updateMany(
+    where: {
+      id: { eq: $id }
+      revision: { eq: $expectedRevision }
+    }
+    data: {
+      revision: $revision
+      quantityShipped: $quantityShipped
+      updatedByUid: $updatedByUid
+    }
+  ) @check(expr: "this == 1", message: "revision_conflict")
+}
+
+mutation InsertQcLotDecision(
+  $id: String!
+  $storeId: String!
+  $lotId: String!
+  $lotRevision: Int!
+  $decisionVersion: Int!
+  $status: String!
+  $passportAttachmentId: String
+  $protocolAttachmentId: String
+  $targetFinishedProductId: String
+  $reason: String
+  $decidedByUid: String!
+  $decidedAt: Timestamp!
+  $revision: Int!
+  $idempotencyKey: String!
+) @auth(level: NO_ACCESS) @transaction {
+  qcLotDecision_insert(data: {
+    id: $id
+    storeId: $storeId
+    lotId: $lotId
+    lotRevision: $lotRevision
+    decisionVersion: $decisionVersion
+    status: $status
+    passportAttachmentId: $passportAttachmentId
+    protocolAttachmentId: $protocolAttachmentId
+    targetFinishedProductId: $targetFinishedProductId
+    reason: $reason
+    decidedByUid: $decidedByUid
+    decidedAt: $decidedAt
+    revision: $revision
+    idempotencyKey: $idempotencyKey
+  })
+}

@@ -186,6 +186,21 @@ export function roleAllowsDocumentCancel(
   return access.roleAllowDocumentCancel?.[roleId] === true
 }
 
+export function canReleaseFinishedGoodsQc(
+  user: AppUser | null | undefined,
+  access?: AccessStore | null,
+): boolean {
+  if (!user?.active) return false
+  if (user.roleId === 'otc') return true
+  if (user.roleId === 'operations_director') {
+    return access?.roleAllowQcRelease?.operations_director === true
+  }
+  if (user.roleId === 'technologist') {
+    return access?.roleAllowQcRelease?.technologist === true
+  }
+  return false
+}
+
 /** Снять проведение (вернуть в черновик) — только системный администратор. */
 export function roleAllowsDocumentUnpost(user: AppUser | null | undefined): boolean {
   return isSysAdmin(accessPersona(user))

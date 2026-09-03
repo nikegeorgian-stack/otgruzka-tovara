@@ -75,6 +75,7 @@
     "build:otgruzka": "node scripts/build-otgruzka-all.mjs"
   },
   "dependencies": {
+    "@fst/dataconnect-admin-generated": "file:api/fst/dataconnect-admin-generated",
     "@fst/dataconnect-generated": "file:../src/lib/dataconnect-sdk",
     "@tanstack/react-virtual": "^3.14.5",
     "@vladmandic/face-api": "^1.7.15",

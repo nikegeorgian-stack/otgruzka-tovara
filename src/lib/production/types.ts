@@ -149,6 +149,12 @@ export type ProductionStore = {
   planner: PlannerStore
   /** PHASE P1B — сменные производственные отчёты */
   shiftReports?: import('./shiftReports').ProductionShiftReport[]
+  /** PHASE P1C — упаковочные отчёты */
+  packagingReports?: import('./packagingReports').ProductionPackagingReport[]
+  /** PHASE P1C — канонические лоты готовой продукции */
+  finishedGoodsLots?: import('./finishedGoodsLots').FinishedGoodsLot[]
+  /** PHASE P1C — метаданные QC-вложений */
+  qcAttachments?: import('./qcAttachments').QcLotAttachment[]
 }
 
 export const PRODUCTION_LINES: {

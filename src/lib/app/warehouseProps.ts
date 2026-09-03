@@ -89,6 +89,7 @@ export function buildWarehousePageProps({
     },
     counterparties: store.counterparties.items.filter((c) => c.active),
     salesOrders: store.sales.orders,
+    finishedGoodsLots: store.production.finishedGoodsLots ?? [],
     ...actions,
   }
 }

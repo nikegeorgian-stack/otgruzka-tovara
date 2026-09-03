@@ -81,6 +81,26 @@ export interface ListJournalEventsVariables {
   limit: number;
 }
 
+export interface QcAttachmentRecord_Key {
+  id: string;
+  __typename?: 'QcAttachmentRecord_Key';
+}
+
+export interface QcFinishedGoodsLot_Key {
+  id: string;
+  __typename?: 'QcFinishedGoodsLot_Key';
+}
+
+export interface QcLotDecision_Key {
+  id: string;
+  __typename?: 'QcLotDecision_Key';
+}
+
+export interface QcPermission_Key {
+  id: string;
+  __typename?: 'QcPermission_Key';
+}
+
 export interface UpdateFstStoreData {
   fstStore_updateMany: number;
 }

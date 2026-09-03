@@ -40,6 +40,7 @@ type Props = {
   onSetRoleAllowNegativeStock: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleAllowDocumentCancel: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleAllowRecipeApproval: (roleId: AccessRoleId, allowed: boolean) => void
+  onSetRoleAllowQcRelease: (roleId: AccessRoleId, allowed: boolean) => void
   onSetRoleTimesheetAccess: (roleId: AccessRoleId, level: 'none' | 'view' | 'edit') => void
   onSetRoleTaskAccess: (
     roleId: AccessRoleId,
@@ -96,6 +97,7 @@ export function SettingsPage({
   onSetRoleAllowNegativeStock,
   onSetRoleAllowDocumentCancel,
   onSetRoleAllowRecipeApproval,
+  onSetRoleAllowQcRelease,
   onSetRoleTimesheetAccess,
   onSetRoleTaskAccess,
   onUpsertUserGroup,
@@ -259,6 +261,7 @@ export function SettingsPage({
           onSetRoleAllowNegativeStock={onSetRoleAllowNegativeStock}
           onSetRoleAllowDocumentCancel={onSetRoleAllowDocumentCancel}
           onSetRoleAllowRecipeApproval={onSetRoleAllowRecipeApproval}
+          onSetRoleAllowQcRelease={onSetRoleAllowQcRelease}
           onSetRoleTimesheetAccess={onSetRoleTimesheetAccess}
           onSetRoleTaskAccess={onSetRoleTaskAccess}
           onUpsertUserGroup={onUpsertUserGroup}

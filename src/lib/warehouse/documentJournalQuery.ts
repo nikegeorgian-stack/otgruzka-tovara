@@ -52,6 +52,11 @@ export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourc
     doc.purpose === 'production_consumption' ||
     doc.purpose === 'production_wip_receipt' ||
     doc.purpose === 'production_waste_transfer' ||
+    doc.purpose === 'production_wip_pack_consumption' ||
+    doc.purpose === 'production_packaging_consumption' ||
+    doc.purpose === 'production_fg_receipt' ||
+    doc.purpose === 'production_fg_regrade_transfer' ||
+    doc.purpose === 'production_fg_reject_transfer' ||
     doc.purpose === 'production_reservation' ||
     doc.purpose === 'production_reservation_increase' ||
     doc.purpose === 'production_reservation_release' ||
@@ -60,6 +65,11 @@ export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourc
     doc.docRole === 'production_wip_receipt' ||
     doc.docRole === 'production_waste_issue' ||
     doc.docRole === 'production_waste_receipt' ||
+    doc.docRole === 'production_wip_pack_consumption' ||
+    doc.docRole === 'production_packaging_consumption' ||
+    doc.docRole === 'production_fg_receipt' ||
+    doc.docRole === 'production_fg_regrade_transfer' ||
+    doc.docRole === 'production_fg_reject_transfer' ||
     doc.productionRequestId ||
     doc.productionOrderId ||
     doc.shiftReportId ||

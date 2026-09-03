@@ -888,6 +888,24 @@ function mergeProduction(
       local.shiftReports ?? [],
       onConflict,
     ),
+    packagingReports: mergeArrayById(
+      base.packagingReports ?? [],
+      remote.packagingReports ?? [],
+      local.packagingReports ?? [],
+      onConflict,
+    ),
+    finishedGoodsLots: mergeArrayById(
+      base.finishedGoodsLots ?? [],
+      remote.finishedGoodsLots ?? [],
+      local.finishedGoodsLots ?? [],
+      onConflict,
+    ),
+    qcAttachments: mergeArrayById(
+      base.qcAttachments ?? [],
+      remote.qcAttachments ?? [],
+      local.qcAttachments ?? [],
+      onConflict,
+    ),
   }
 }
 
@@ -1303,6 +1321,11 @@ export function mergeCloudStores(
         base.access.roleAllowRecipeApproval,
         remote.access.roleAllowRecipeApproval,
         local.access.roleAllowRecipeApproval,
+      ),
+      roleAllowQcRelease: mergeRecords(
+        base.access.roleAllowQcRelease,
+        remote.access.roleAllowQcRelease,
+        local.access.roleAllowQcRelease,
       ),
       userAllowReservationReallocation: pick3(
         base.access.userAllowReservationReallocation,

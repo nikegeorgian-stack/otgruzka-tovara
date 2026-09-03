@@ -6,6 +6,7 @@ import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { WorkwearStore } from '@/lib/workwear/types'
 import type { ImportResult } from '@/lib/warehouse/importExport'
 import type { PostWorkwearIssueResult } from '@/lib/workwear/issue'
+import type { FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
 import type {
   PostDocumentResult,
   CancelDocumentResult,
@@ -181,6 +182,7 @@ export type WarehousePageProps = {
   ) => import('@/lib/warehouse/keeperReplenishment').ReceiveReplenishmentResult
   finishedProducts?: import('@/lib/finishedProducts/types').FinishedProduct[]
   packagingRecipes?: import('@/lib/packaging/types').PackagingRecipe[]
+  finishedGoodsLots?: FinishedGoodsLot[]
   onUpsertFinishedProduct?: (fp: import('@/lib/finishedProducts/types').FinishedProduct) => void
   onUpsertLoadingShipment?: (
     input: import('@/lib/warehouse/loadingShipments').UpsertLoadingShipmentInput,

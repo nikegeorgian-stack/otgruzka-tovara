@@ -26,6 +26,12 @@ export type WarehouseTransactionGroupKind =
   | 'production_material_return'
   | 'production_over_reserve_issue'
   | 'production_shift_report'
+  | 'production_packaging_report'
+  | 'qc_release'
+  | 'qc_regrade'
+  | 'qc_reject_transfer'
+  | 'finished_goods_shipment'
+  | 'finished_goods_shipment_cancel'
 
 export type TransactionGroupMeta = {
   transactionGroupId: string

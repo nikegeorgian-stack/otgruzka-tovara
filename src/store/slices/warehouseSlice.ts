@@ -63,6 +63,7 @@ import {
 } from '@/lib/warehouse/keeperReplenishment'
 import {
   postLoadingShipment,
+  resolveLoadingShipmentLotUsages,
   removeLoadingShipment,
   upsertLoadingShipment,
   type UpsertLoadingShipmentInput,
@@ -88,6 +89,17 @@ import type {
 import { patchWarehouse, type StoreSliceDeps } from '../storeApi'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { syncSalesOrderLoadingInStore, markSalesOrderShippedIfFullyLoaded } from '@/lib/sales/loadingLink'
+import { applyShipmentToLot, reverseShipmentOnLot } from '@/lib/production/shipmentGate'
+
+export function cancelWarehouseDocumentGroupKind(
+  documentId: string,
+  existing?: WarehouseDocument | null,
+  loadingShipmentPostedDocumentId?: string | null,
+): 'finished_goods_shipment_cancel' | 'cancel_transfer_pair' | 'document_cancel' {
+  if (loadingShipmentPostedDocumentId === documentId) return 'finished_goods_shipment_cancel'
+  if (existing?.transferPairId) return 'cancel_transfer_pair'
+  return 'document_cancel'
+}
 
 export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   function actorRoleId(): string | undefined {
@@ -464,34 +476,90 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       args?: { cancelledBy?: string; cancelledByName?: string; reason?: string },
     ): CancelDocumentResult {
       let result: CancelDocumentResult = { ok: false, error: 'unknown' }
-      const existing = getStore().warehouse.documents.find((d) => d.id === documentId)
+      const current = getStore()
+      const existing = current.warehouse.documents.find((d) => d.id === documentId)
+      const loadingShipment = current.warehouse.loadingShipments?.find(
+        (shipment) => shipment.postedDocumentId === documentId,
+      )
       const pairId = existing?.transferPairId
+      const groupKind = cancelWarehouseDocumentGroupKind(
+        documentId,
+        existing,
+        loadingShipment?.postedDocumentId,
+      )
       const groupId = warehouseTransactionGroupId({
-        kind: pairId ? 'cancel_transfer_pair' : 'document_cancel',
-        sourceId: pairId ?? documentId,
+        kind: groupKind,
+        sourceId: groupKind === 'cancel_transfer_pair' ? pairId ?? documentId : documentId,
         revision: 'cancel',
       })
       const groupMeta = {
         origin: 'user' as const,
         atomic: true as const,
         transactionGroupId: groupId,
-        transactionGroupKind: pairId ? 'cancel_transfer_pair' : 'document_cancel',
-        transactionGroupLabel: pairId
-          ? 'Отмена пары перемещения'
-          : 'Сторно складского документа',
+        transactionGroupKind: groupKind,
+        transactionGroupLabel:
+          groupKind === 'finished_goods_shipment_cancel'
+            ? 'Сторно отгрузки ГП'
+            : groupKind === 'cancel_transfer_pair'
+              ? 'Отмена пары перемещения'
+              : 'Сторно складского документа',
       }
-      patchWarehouse(
-        setStore,
-        (w) => {
-          const out = cancelWarehouseDocument(w, documentId, {
-            ...(args ?? {}),
-            transactionGroupId: groupId,
-          })
-          result = out.result
-          return out.store
-        },
-        groupMeta,
-      )
+      setStore((s) => {
+        const out = cancelWarehouseDocument(s.warehouse, documentId, {
+          ...(args ?? {}),
+          transactionGroupId: groupId,
+        })
+        result = out.result
+        if (!out.result.ok) return s
+
+        let next = { ...s, warehouse: out.store }
+        if (loadingShipment) {
+          const usages = resolveLoadingShipmentLotUsages(
+            loadingShipment.lines,
+            next.production.finishedGoodsLots ?? [],
+          )
+          if (!usages.ok) {
+            result = { ok: false, error: usages.error }
+            return s
+          }
+
+          const lotsById = new Map(
+            (next.production.finishedGoodsLots ?? []).map((lot) => [lot.id, lot]),
+          )
+          for (const usage of usages.usages) {
+            const lot = lotsById.get(usage.lotId)
+            if (!lot) continue
+            lotsById.set(usage.lotId, reverseShipmentOnLot(lot, usage.quantity))
+          }
+
+          next = {
+            ...next,
+            production: {
+              ...next.production,
+              finishedGoodsLots: [...lotsById.values()],
+            },
+            warehouse: {
+              ...next.warehouse,
+              loadingShipments: (next.warehouse.loadingShipments ?? []).map((shipment) =>
+                shipment.id === loadingShipment.id
+                  ? {
+                      ...shipment,
+                      status: 'draft',
+                      postedAt: undefined,
+                      postedDocumentId: undefined,
+                    }
+                  : shipment,
+              ),
+            },
+          }
+
+          if (loadingShipment.salesOrderId) {
+            next = syncSalesOrderLoadingInStore(next, loadingShipment.salesOrderId)
+          }
+        }
+
+        return next
+      }, groupMeta)
       return result
     },
 
@@ -728,17 +796,48 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         ok: false,
         error: 'warehouse.loading.errNotFound',
       }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'finished_goods_shipment',
+        sourceId: shipmentId,
+        revision: 'post',
+      })
       setStore((s) => {
-        const out = postLoadingShipment(s.warehouse, shipmentId, args)
+        const out = postLoadingShipment(
+          s.warehouse,
+          shipmentId,
+          args,
+          s.production.finishedGoodsLots ?? [],
+        )
         result = out.result
         if (!out.result.ok) return s
         let next = { ...s, warehouse: out.store }
+        if (out.result.lotUsages?.length) {
+          const lotsById = new Map((next.production.finishedGoodsLots ?? []).map((lot) => [lot.id, lot]))
+          for (const usage of out.result.lotUsages) {
+            const lot = lotsById.get(usage.lotId)
+            if (!lot) continue
+            lotsById.set(usage.lotId, applyShipmentToLot(lot, usage.quantity))
+          }
+          next = {
+            ...next,
+            production: {
+              ...next.production,
+              finishedGoodsLots: [...lotsById.values()],
+            },
+          }
+        }
         const shipment = out.store.loadingShipments?.find((x) => x.id === shipmentId)
         if (shipment?.salesOrderId) {
           next = syncSalesOrderLoadingInStore(next, shipment.salesOrderId)
           next = markSalesOrderShippedIfFullyLoaded(next, shipment.salesOrderId)
         }
         return next
+      }, {
+        origin: 'user',
+        atomic: true,
+        transactionGroupId: groupId,
+        transactionGroupKind: 'finished_goods_shipment',
+        transactionGroupLabel: 'Отгрузка готовой продукции',
       })
       return result
     },

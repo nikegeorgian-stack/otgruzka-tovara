@@ -11,3 +11,4 @@ schema:
         schemaValidation: COMPATIBLE
 connectorDirs:
   - ./fst-connector
+  - ./fst-admin-connector

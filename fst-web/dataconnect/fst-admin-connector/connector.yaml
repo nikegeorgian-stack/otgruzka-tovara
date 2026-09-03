@@ -1,0 +1,7 @@
+connectorId: fst-admin
+generate:
+  adminNodeSdk:
+    # Server-only — must NOT be imported by fst-web frontend bundle
+    outputDir: ../../../api/fst/dataconnect-admin-generated
+    package: "@fst/dataconnect-admin-generated"
+    packageJsonDir: ../../..

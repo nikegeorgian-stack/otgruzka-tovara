@@ -27,3 +27,89 @@ type JournalEvent @table(key: ["id"]) {
   linkRef: String
   storeRevision: Int!
 }
+
+# ---------------------------------------------------------------------------
+# PHASE P1C.3 — server-trusted QC (outside FstStore.payloadJson)
+# Written only via Admin SDK / api/fst. Client UpdateFstStore cannot forge these.
+# ---------------------------------------------------------------------------
+
+"""Explicit QC capability bound to Firebase Auth UID + store scope."""
+type QcPermission @table(key: ["id"]) {
+  id: String!
+  firebaseUid: String!
+  storeId: String!
+  active: Boolean! @default(value: true)
+  canView: Boolean! @default(value: false)
+  canUpload: Boolean! @default(value: false)
+  canRelease: Boolean! @default(value: false)
+  canRegrade: Boolean! @default(value: false)
+  canReject: Boolean! @default(value: false)
+  canPostShipment: Boolean! @default(value: false)
+  revision: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdByUid: String!
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+  revokedAt: Timestamp
+  revokedByUid: String
+  revokeReason: String
+}
+
+"""Server-verified QC attachment metadata (binaries live in Firebase Storage)."""
+type QcAttachmentRecord @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  lotId: String!
+  documentKind: String!
+  storagePath: String!
+  contentType: String!
+  sizeBytes: Int!
+  checksum: String!
+  objectGeneration: String
+  """initiated | uploaded | verified | superseded"""
+  status: String! @default(value: "initiated")
+  uploadedByUid: String!
+  verifiedAt: Timestamp
+  revision: Int! @default(value: 1)
+  idempotencyKey: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Authoritative QC decision for a finished-goods lot."""
+type QcLotDecision @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  lotId: String!
+  lotRevision: Int! @default(value: 1)
+  decisionVersion: Int! @default(value: 1)
+  """pending | released | regrade_pending | rejected | scrap_pending"""
+  status: String! @default(value: "pending")
+  passportAttachmentId: String
+  protocolAttachmentId: String
+  targetFinishedProductId: String
+  reason: String
+  decidedByUid: String
+  decidedAt: Timestamp
+  revision: Int! @default(value: 1)
+  idempotencyKey: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Minimal FG lot projection for QC quantity / shipment checks (not full AppStore)."""
+type QcFinishedGoodsLot @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  finishedProductId: String!
+  warehouseItemId: String!
+  batchNo: String!
+  quantityProduced: Float! @default(value: 0)
+  quantityShipped: Float! @default(value: 0)
+  packagingReportId: String!
+  """active | superseded"""
+  status: String! @default(value: "active")
+  revision: Int! @default(value: 1)
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String
+}

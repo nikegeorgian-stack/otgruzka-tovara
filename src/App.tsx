@@ -1082,6 +1082,8 @@ export default function App() {
               currentUser={app.currentUser}
               appScope={app.store}
               onConfirmShiftReport={app.confirmProductionShiftReport}
+              onConfirmPackagingReport={app.confirmPackagingReport}
+              onConfirmPackagingReportCorrection={app.confirmPackagingReportCorrection}
               onCorrectShiftReport={app.confirmProductionShiftReportCorrection}
             />
           )}
@@ -1315,6 +1317,17 @@ export default function App() {
                 app.store.settings.responsible ??
                 'ОТК'
               }
+              productionStore={app.store.production}
+              warehouse={app.store.warehouse}
+              access={app.store.access}
+              finishedProducts={app.store.finishedProducts.items}
+              currentUser={app.currentUser}
+              onStartQcReview={app.startQcReview}
+              onReleaseFinishedGoodsLot={app.releaseFinishedGoodsLot}
+              onMirrorServerQcRelease={app.mirrorServerQcRelease}
+              onRequestRegrade={app.requestRegrade}
+              onRejectFinishedGoodsLot={app.rejectFinishedGoodsLot}
+              onUpsertQcAttachment={app.upsertQcAttachment}
               onUpsertNorm={app.upsertOtcNorm}
               onRemoveNorm={app.removeOtcNorm}
               onUpsertLabTest={app.upsertOtcLabTest}
@@ -1617,6 +1630,7 @@ export default function App() {
               onSetRoleAllowNegativeStock={app.setRoleAllowNegativeStock}
               onSetRoleAllowDocumentCancel={app.setRoleAllowDocumentCancel}
               onSetRoleAllowRecipeApproval={app.setRoleAllowRecipeApproval}
+              onSetRoleAllowQcRelease={app.setRoleAllowQcRelease}
               onSetRoleTimesheetAccess={app.setRoleTimesheetAccess}
               onSetRoleTaskAccess={app.setRoleTaskAccess}
               onUpsertUserGroup={app.upsertUserGroup}

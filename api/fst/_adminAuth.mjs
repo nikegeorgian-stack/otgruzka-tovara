@@ -11,10 +11,21 @@ export const FST_ADMIN_EMAILS = new Set([
 export function initFirebaseAdmin() {
   if (getApps().length > 0) return
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-  if (!raw?.trim()) {
-    throw new Error('service_account_missing')
+  if (raw?.trim()) {
+    initializeApp({ credential: cert(JSON.parse(raw)) })
+    return
   }
-  initializeApp({ credential: cert(JSON.parse(raw)) })
+  // Local Data Connect emulator only — never use production service account here.
+  const emulatorHost = String(
+    process.env.DATA_CONNECT_EMULATOR_HOST ?? process.env.FIREBASE_DATA_CONNECT_EMULATOR_HOST ?? '',
+  ).trim()
+  if (emulatorHost || process.env.QC_LOCAL_EMULATOR === '1') {
+    initializeApp({
+      projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'otgruzka-tovara',
+    })
+    return
+  }
+  throw new Error('service_account_missing')
 }
 
 export async function verifySysAdminRequest(req) {
@@ -36,7 +47,7 @@ export async function verifySysAdminRequest(req) {
     if (!bootstrapAdmin && !claimAdmin) {
       return { ok: false, status: 403, error: 'forbidden' }
     }
-    return { ok: true, email: email || decoded.uid }
+    return { ok: true, email: email || decoded.uid, uid: decoded.uid, claims: decoded }
   } catch {
     return { ok: false, status: 401, error: 'unauthorized' }
   }
@@ -45,4 +56,9 @@ export async function verifySysAdminRequest(req) {
 export function getAdminAuth() {
   initFirebaseAdmin()
   return getAuth()
+}
+
+export async function verifyIdToken(token) {
+  initFirebaseAdmin()
+  return getAuth().verifyIdToken(token)
 }

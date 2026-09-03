@@ -3,7 +3,7 @@ import { DEFAULT_ROLE_VIEWS } from './roles'
 import { roleNeedsDirectories, sanitizeDirectorySections } from '@/lib/directories/access'
 import { HR_INSPECTOR_LOGIN, HR_INSPECTOR_USER_ID } from '@/lib/hr/inspector'
 import type { AccessRoleId, AccessStore, AppUser } from './types'
-import { SYSTEM_ADMIN_USER_ID } from './types'
+import { QC_RELEASE_ROLES, SYSTEM_ADMIN_USER_ID } from './types'
 import { normalizeWorkshopMasterCoverages } from './workshopMasterCoverage'
 import type {
   FinanceViewDefaults,
@@ -261,6 +261,17 @@ function normalizeRoleAllowDocumentCancel(
   return out
 }
 
+function normalizeRoleAllowQcRelease(
+  raw: Partial<Record<AccessRoleId, boolean>> | undefined,
+): Partial<Record<AccessRoleId, boolean>> {
+  const out: Partial<Record<AccessRoleId, boolean>> = {}
+  if (!raw) return out
+  for (const roleId of QC_RELEASE_ROLES) {
+    if (raw[roleId] === true) out[roleId] = true
+  }
+  return out
+}
+
 function normalizeRoleAllowReservationReallocation(
   raw: Partial<Record<AccessRoleId, boolean>> | undefined,
 ): Partial<Record<AccessRoleId, boolean>> {
@@ -466,6 +477,7 @@ export function normalizeAccessStore(raw: AccessStore | undefined): AccessStore 
     roleTaskBoards: normalizeRoleTaskBoards(raw.roleTaskBoards),
     roleAllowNegativeStock: normalizeRoleAllowNegativeStock(raw.roleAllowNegativeStock),
     roleAllowDocumentCancel: normalizeRoleAllowDocumentCancel(raw.roleAllowDocumentCancel),
+    roleAllowQcRelease: normalizeRoleAllowQcRelease(raw.roleAllowQcRelease),
     roleAllowReservationReallocation: normalizeRoleAllowReservationReallocation(
       raw.roleAllowReservationReallocation,
     ),

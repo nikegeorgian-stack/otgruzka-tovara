@@ -11,6 +11,7 @@ import type { Counterparty } from '@/lib/counterparties/types'
 import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
 import { LoadingPickCounterpartyModal } from '@/components/warehouse/LoadingPickCounterpartyModal'
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import type { FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
 import type { PackagingRecipe } from '@/lib/packaging/types'
 import { LoadingPickProductModal } from '@/components/warehouse/LoadingPickProductModal'
 import { LoadingQuickProductModal } from '@/components/warehouse/LoadingQuickProductModal'
@@ -43,6 +44,7 @@ import {
 import { resolveSalesOrderLink, type SalesOrderLinkInfo } from '@/lib/sales/loadingLink'
 import type { SalesOrder } from '@/lib/sales/types'
 import type { LoadingShipment, LoadingShipmentLine, WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
+import { isLotAvailableForShipment, lotQcBadgeKey } from '@/lib/production/finishedGoodsLots'
 import {
   WarehouseLoadingPrintSheet,
   type LoadingPrintMeta,
@@ -53,6 +55,8 @@ type UiLine = {
   productKey: string
   itemId?: string
   finishedProductId?: string
+  lotId?: string
+  batchNo?: string
   name: string
   note: string
   rollLengthM: string
@@ -113,6 +117,7 @@ type Props = {
   warehouseId: string
   counterparties: Counterparty[]
   finishedProducts: FinishedProduct[]
+  finishedGoodsLots?: FinishedGoodsLot[]
   packagingRecipes: PackagingRecipe[]
   keeperId?: string
   keeperName?: string
@@ -157,6 +162,7 @@ function emptyUiLine(): UiLine {
     boxes: '',
     boxTareKg: '',
     palletPlaces: '',
+    lotId: undefined,
     weightManual: false,
     color: '',
     labelNote: '',
@@ -175,6 +181,8 @@ function shipmentLineToUiLine(l: LoadingShipmentLine): UiLine {
         : '',
     itemId: l.itemId,
     finishedProductId: l.finishedProductId,
+    lotId: l.lotId,
+    batchNo: l.batchNo,
     name: l.name,
     note: l.note,
     rollLengthM: l.rollLengthM ? String(l.rollLengthM) : '',
@@ -340,6 +348,7 @@ export function WarehouseLoadingTab({
   warehouseId,
   counterparties,
   finishedProducts,
+  finishedGoodsLots,
   packagingRecipes,
   keeperId,
   keeperName,
@@ -408,6 +417,15 @@ export function WarehouseLoadingTab({
     () => buildProductOptions(finishedProducts, warehouse),
     [finishedProducts, warehouse],
   )
+  const fgLots = finishedGoodsLots ?? []
+  const releasedLots = useMemo(
+    () => fgLots.filter((lot) => isLotAvailableForShipment(lot)),
+    [fgLots],
+  )
+  const regradePendingLots = useMemo(
+    () => fgLots.filter((lot) => lot.qcStatus === 'regrade_pending'),
+    [fgLots],
+  )
   const shipments = useMemo(() => listLoadingShipments(warehouse), [warehouse])
 
   const lines = useMemo(() => state.lines.map(toLine), [state.lines])
@@ -435,6 +453,35 @@ export function WarehouseLoadingTab({
       return finishedProducts.find((p) => p.id === opt.finishedProductId)
     }
     return findFinishedProductForItem(finishedProducts, opt.itemId)
+  }
+
+  function lotsForLine(line: UiLine) {
+    return releasedLots.filter((lot) => {
+      if (line.finishedProductId && lot.finishedProductId !== line.finishedProductId) {
+        return false
+      }
+      if (line.itemId && lot.warehouseItemId !== line.itemId) {
+        return false
+      }
+      return true
+    })
+  }
+
+  function pickLot(lineId: string, lotId: string) {
+    const lot = releasedLots.find((row) => row.id === lotId)
+    if (!lot) {
+      patchLine(lineId, { lotId: undefined, batchNo: undefined })
+      return
+    }
+    const fp = finishedProducts.find((p) => p.id === lot.finishedProductId)
+    patchLine(lineId, {
+      lotId: lot.id,
+      batchNo: lot.batchNo,
+      finishedProductId: lot.finishedProductId,
+      itemId: lot.warehouseItemId,
+      productKey: fp ? `fp:${fp.id}` : `wi:${lot.warehouseItemId}`,
+      name: fp?.name ?? lot.batchNo,
+    })
   }
 
   function profileOptsFromLine(line: UiLine, opt: ProductOption, packagingRecipeId?: string) {
@@ -599,6 +646,15 @@ export function WarehouseLoadingTab({
       return
     }
     const profile = applyProfileToLine(lineId, opt)
+    const line = state.lines.find((l) => l.id === lineId)
+    const lotMatches = lotsForLine({
+      ...(line ?? emptyUiLine()),
+      itemId: opt.itemId ?? profile.productItemId,
+      finishedProductId: opt.finishedProductId ?? profile.finishedProductId,
+    })
+    if (lotMatches.length === 1) {
+      pickLot(lineId, lotMatches[0]!.id)
+    }
     const needWeight = profile.missingWeights.filter((m) => m.itemId)
     if (needWeight.length > 0) {
       setWeightPrompt({ lineId, missing: needWeight, opt })
@@ -685,10 +741,14 @@ export function WarehouseLoadingTab({
       keeperName,
       lines: state.lines.map((u) => {
         const l = toLine(u)
+        const lot = releasedLots.find((row) => row.id === u.lotId)
+        const fallbackLot = lot ?? lotsForLine(u)[0]
         return {
           id: u.id,
           itemId: u.itemId,
           finishedProductId: u.finishedProductId,
+          lotId: fallbackLot?.id,
+          batchNo: fallbackLot?.batchNo,
           name: l.name,
           note: l.note,
           rollLengthM: l.rollLengthM,
@@ -1064,11 +1124,39 @@ export function WarehouseLoadingTab({
                 </button>
               </div>
             )}
+            {fgLots.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-b border-grid bg-stone-50 px-4 py-2 text-xs">
+                {fgLots.slice(0, 6).map((lot) => (
+                  <span
+                    key={lot.id}
+                    className="rounded-full border border-grid bg-white px-2 py-1 text-stone-600"
+                  >
+                    {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                  </span>
+                ))}
+              </div>
+            )}
+            {regradePendingLots.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950">
+                <span className="font-semibold uppercase tracking-wide">
+                  {t('warehouse.loading.regradePending')}
+                </span>
+                {regradePendingLots.slice(0, 5).map((lot) => (
+                  <span
+                    key={lot.id}
+                    className="rounded-full border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium text-amber-900"
+                  >
+                    {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                  </span>
+                ))}
+              </div>
+            )}
             <table className="min-w-[1400px] w-full text-sm">
               <thead>
                 <tr className="bg-stone-50 text-xs uppercase text-stone-500">
                   <th className="w-8 px-2 py-2">#</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.name')}</th>
+                  <th className="px-2 py-2 text-left">{t('warehouse.loading.lot')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.note')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.color')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.label')}</th>
@@ -1128,6 +1216,31 @@ export function WarehouseLoadingTab({
                         )}
                         {u.name && !u.productKey && (
                           <span className="mt-1 block truncate text-xs text-stone-500">{u.name}</span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1">
+                        <select
+                          className="w-44 max-w-full rounded border border-grid px-2 py-1.5 text-xs"
+                          value={u.lotId ?? ''}
+                          disabled={readOnly || !u.finishedProductId}
+                          onChange={(e) => pickLot(u.id, e.target.value)}
+                        >
+                          <option value="">{t('warehouse.loading.pickLot')}</option>
+                          {lotsForLine(u).map((lot) => (
+                            <option key={lot.id} value={lot.id}>
+                              {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                            </option>
+                          ))}
+                        </select>
+                        {!u.finishedProductId && (
+                          <p className="mt-1 text-[10px] text-stone-400">
+                            {t('warehouse.loading.pickProductFirst')}
+                          </p>
+                        )}
+                        {u.lotId && (
+                          <p className="mt-1 text-[10px] text-emerald-700">
+                            {t('warehouse.loading.lotSelected')}
+                          </p>
                         )}
                       </td>
                       <td className="px-1 py-1">

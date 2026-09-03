@@ -33,6 +33,33 @@ import {
   type ConfirmShiftReportResult,
 } from '@/lib/production/shiftReports'
 import {
+  confirmProductionPackagingReport as confirmPackagingReportCore,
+  confirmPackagingReportCorrection as confirmPackagingReportCorrectionCore,
+  listAvailableWipAtPackaging,
+  nextPackagingReportNumber,
+  type ConfirmPackagingReportInput,
+  type ProductionPackagingReport,
+} from '@/lib/production/packagingReports'
+import { listPendingQcLots, type FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
+import {
+  applyRejectTransferToScrap,
+  releaseFinishedGoodsLot,
+  applyServerQcReleaseMirror,
+  rejectFinishedGoodsLot,
+  requestRegrade,
+  startQcReview as startQcReviewCore,
+  type ApplyRejectTransferInput,
+  type ReleaseFinishedGoodsLotInput,
+  type RejectFinishedGoodsLotInput,
+  type RequestRegradeInput,
+} from '@/lib/production/qcRelease'
+import type {
+  QcAttachmentStorageAdapter,
+  QcAttachmentUploadInput,
+  QcLotAttachment,
+} from '@/lib/production/qcAttachments'
+import { resolveQcAttachmentAdapter } from '@/lib/production/qcAttachments'
+import {
   captureLegacyNormSnapshot,
 } from '@/lib/formulations/recipeApproval'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
@@ -45,7 +72,23 @@ import {
 } from '@/lib/warehouse/productionReservations'
 import type { StoreSliceDeps } from '../storeApi'
 
-export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
+function upsertReportById<T extends { id: string }>(rows: T[] | undefined, row: T): T[] {
+  const list = rows ? [...rows] : []
+  const idx = list.findIndex((item) => item.id === row.id)
+  if (idx >= 0) {
+    list[idx] = row
+    return list
+  }
+  return [...list, row]
+}
+
+let qcAttachmentAdapter: QcAttachmentStorageAdapter = resolveQcAttachmentAdapter()
+
+export function setQcAttachmentAdapterForTests(adapter?: QcAttachmentStorageAdapter) {
+  qcAttachmentAdapter = adapter ?? resolveQcAttachmentAdapter()
+}
+
+export function createProductionSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   return {
     upsertProductionRequest(entry: ProductionRequest) {
       const normalized = normalizeProductionRequest({
@@ -772,6 +815,357 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
           transactionGroupId: groupId,
           transactionGroupKind: 'production_shift_report',
           transactionGroupLabel: 'Исправление сменного отчёта',
+        },
+      )
+      return result
+    },
+
+    upsertPackagingReport(report: Omit<
+      ProductionPackagingReport,
+      | 'status'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'confirmedAt'
+      | 'confirmedBy'
+      | 'confirmedByName'
+      | 'fgReceiptDocumentId'
+      | 'finishedGoodsLotId'
+      | 'transactionGroupId'
+    > & { id?: string; number?: string }): string {
+      let reportId = report.id ?? crypto.randomUUID()
+      setStore((s) => {
+        const reports = s.production.packagingReports ?? []
+        const now = new Date().toISOString()
+        const existing = reports.find((r) => r.id === reportId)
+        if (existing && (existing.status === 'confirmed' || existing.status === 'cancelled')) {
+          reportId = existing.id
+          return s
+        }
+        const next: ProductionPackagingReport = {
+          ...(existing ?? {}),
+          ...report,
+          id: reportId,
+          number:
+            report.number ??
+            existing?.number ??
+            nextPackagingReportNumber(reports, report.shiftDate ?? now.slice(0, 10)),
+          status: 'draft',
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          transactionGroupId: existing?.transactionGroupId,
+        }
+        return {
+          ...s,
+          production: {
+            ...s.production,
+            packagingReports: upsertReportById(reports, next),
+          },
+        }
+      })
+      return reportId
+    },
+
+    confirmPackagingReport(input: ConfirmPackagingReportInput): ReturnType<typeof confirmPackagingReportCore>['result'] {
+      let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: false, error: 'unknown' }
+      const groupId =
+        input.transactionGroupId ??
+        `warehouse::production_packaging_report::${input.report.id ?? input.idempotencyKey}::${input.idempotencyKey}`
+      setStore(
+        (s) => {
+          const out = confirmPackagingReportCore(s.production, s.warehouse, {
+            ...input,
+            transactionGroupId: groupId,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          const packagingReports = upsertReportById(
+            s.production.packagingReports ?? [],
+            out.result.report!,
+          )
+          const finishedGoodsLots = upsertReportById(
+            s.production.finishedGoodsLots ?? [],
+            out.result.lot!,
+          )
+          return {
+            ...s,
+            production: {
+              ...out.production,
+              packagingReports,
+              finishedGoodsLots,
+            },
+            warehouse: out.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_packaging_report',
+          transactionGroupLabel: 'Отчёт упаковки',
+        },
+      )
+      return result
+    },
+
+    confirmPackagingReportCorrection(
+      input: ConfirmPackagingReportInput,
+    ): ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] {
+      let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = {
+        ok: false,
+        error: 'unknown',
+      }
+      const groupId =
+        input.transactionGroupId ??
+        `warehouse::production_packaging_report::${input.report.id ?? input.idempotencyKey}::correction::${input.idempotencyKey}`
+      setStore(
+        (s) => {
+          const out = confirmPackagingReportCorrectionCore(s.production, s.warehouse, {
+            ...input,
+            transactionGroupId: groupId,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          const packagingReports = upsertReportById(
+            s.production.packagingReports ?? [],
+            out.result.report!,
+          )
+          const finishedGoodsLots = upsertReportById(
+            s.production.finishedGoodsLots ?? [],
+            out.result.lot!,
+          )
+          return {
+            ...s,
+            production: {
+              ...out.production,
+              packagingReports,
+              finishedGoodsLots,
+            },
+            warehouse: out.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_packaging_report',
+          transactionGroupLabel: 'Корректировка отчёта упаковки',
+        },
+      )
+      return result
+    },
+
+    listPendingQcLots(): FinishedGoodsLot[] {
+      return listPendingQcLots(getStore().production.finishedGoodsLots)
+    },
+
+    listAvailableWipForPackaging(packagingLocationId: string) {
+      return listAvailableWipAtPackaging(
+        getStore().production,
+        getStore().warehouse,
+        packagingLocationId,
+      )
+    },
+
+    startQcReview(lotId: string) {
+      setStore((s) => {
+        const lots = s.production.finishedGoodsLots ?? []
+        const nextLots = lots.map((lot) => (lot.id === lotId ? startQcReviewCore(lot) : lot))
+        if (nextLots === lots) return s
+        return {
+          ...s,
+          production: {
+            ...s.production,
+            finishedGoodsLots: nextLots,
+          },
+        }
+      })
+    },
+
+    async upsertQcAttachment(input: QcAttachmentUploadInput): Promise<QcLotAttachment> {
+      const attachment = await qcAttachmentAdapter.upload(input)
+      setStore(
+        (s) => {
+          const nextAttachments = upsertReportById(s.production.qcAttachments ?? [], attachment)
+          const nextLots = (s.production.finishedGoodsLots ?? []).map((lot) => {
+            if (lot.id !== attachment.lotId) return lot
+            if (attachment.documentKind === 'passport') {
+              return { ...lot, passportAttachmentId: attachment.id, updatedAt: new Date().toISOString() }
+            }
+            if (attachment.documentKind === 'protocol') {
+              return { ...lot, protocolAttachmentId: attachment.id, updatedAt: new Date().toISOString() }
+            }
+            return lot
+          })
+          return {
+            ...s,
+            production: {
+              ...s.production,
+              qcAttachments: nextAttachments,
+              finishedGoodsLots: nextLots,
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: `warehouse::qc_release::${attachment.lotId}::attach:${attachment.id}`,
+          transactionGroupKind: 'qc_release',
+          transactionGroupLabel: 'Вложение QC',
+        },
+      )
+      return attachment
+    },
+
+    releaseFinishedGoodsLot(input: ReleaseFinishedGoodsLotInput) {
+      const groupId = `warehouse::qc_release::${input.lotId}::release`
+      let result: ReturnType<typeof releaseFinishedGoodsLot>['result'] = { ok: false, error: 'unknown' }
+      setStore(
+        (s) => {
+          const out = releaseFinishedGoodsLot(s.production, {
+            ...input,
+            access: input.access ?? s.access,
+          })
+          result = out.result
+          if (!out.result.ok || !out.result.lot) return s
+          return {
+            ...s,
+            production: {
+              ...s.production,
+              finishedGoodsLots: upsertReportById(s.production.finishedGoodsLots ?? [], out.result.lot),
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'qc_release',
+          transactionGroupLabel: 'QC выпуск партии',
+        },
+      )
+      return result
+    },
+
+    mirrorServerQcRelease(input: {
+      lotId: string
+      decisionId: string
+      decisionRevision?: number
+      decidedByUid?: string
+      decidedAt?: string
+    }) {
+      const groupId = `warehouse::qc_release::${input.lotId}::server-mirror`
+      let lot: FinishedGoodsLot | undefined
+      setStore(
+        (s) => {
+          const out = applyServerQcReleaseMirror(s.production, input)
+          lot = out.lot
+          if (!out.lot) return s
+          return {
+            ...s,
+            production: {
+              ...s.production,
+              finishedGoodsLots: upsertReportById(s.production.finishedGoodsLots ?? [], out.lot),
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'qc_release',
+          transactionGroupLabel: 'QC выпуск (server ack)',
+        },
+      )
+      return { ok: Boolean(lot), lot }
+    },
+
+    requestRegrade(input: RequestRegradeInput) {
+      const groupId = `warehouse::qc_regrade::${input.lotId}::${input.idempotencyKey}`
+      let result: ReturnType<typeof requestRegrade>['result'] = { ok: false, error: 'unknown' }
+      setStore(
+        (s) => {
+          const out = requestRegrade(s.production, s.warehouse, {
+            ...input,
+            access: input.access ?? s.access,
+          })
+          result = out.result
+          if (!out.result.ok || !out.result.originalLot || !out.result.newLot) return s
+          return {
+            ...s,
+            production: {
+              ...out.production,
+              finishedGoodsLots: upsertReportById(
+                out.production.finishedGoodsLots ?? [],
+                out.result.newLot,
+              ),
+            },
+            warehouse: out.warehouse ?? s.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'qc_regrade',
+          transactionGroupLabel: 'QC переоценка партии',
+        },
+      )
+      return result
+    },
+
+    rejectFinishedGoodsLot(input: RejectFinishedGoodsLotInput) {
+      const groupId = `warehouse::qc_reject_transfer::${input.lotId}::reject`
+      let result: ReturnType<typeof rejectFinishedGoodsLot>['result'] = { ok: false, error: 'unknown' }
+      setStore(
+        (s) => {
+          const out = rejectFinishedGoodsLot(s.production, {
+            ...input,
+            access: input.access ?? s.access,
+          })
+          result = out.result
+          if (!out.result.ok || !out.result.lot) return s
+          return {
+            ...s,
+            production: {
+              ...s.production,
+              finishedGoodsLots: upsertReportById(s.production.finishedGoodsLots ?? [], out.result.lot),
+            },
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'qc_reject_transfer',
+          transactionGroupLabel: 'QC отклонение партии',
+        },
+      )
+      return result
+    },
+
+    applyRejectTransferToScrap(input: ApplyRejectTransferInput) {
+      const groupId = `warehouse::qc_reject_transfer::${input.lotId}::scrap`
+      let result: ReturnType<typeof applyRejectTransferToScrap>['result'] = { ok: false, error: 'unknown' }
+      setStore(
+        (s) => {
+          const out = applyRejectTransferToScrap(s.production, s.warehouse, input)
+          result = out.result
+          if (!out.result.ok || !out.result.lot) return s
+          return {
+            ...s,
+            production: {
+              ...out.production,
+              finishedGoodsLots: upsertReportById(out.production.finishedGoodsLots ?? [], out.result.lot),
+            },
+            warehouse: out.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'qc_reject_transfer',
+          transactionGroupLabel: 'QC в брак',
         },
       )
       return result

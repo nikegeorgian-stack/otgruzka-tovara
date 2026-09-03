@@ -32,5 +32,14 @@ service firebase.storage {
         storeId == request.auth.uid
       );
     }
+
+    // QC uploads are mediated by /api/fst + Admin SDK; client writes stay closed here.
+    match /fstFiles/{storeId}/qc-lots/{lotId}/{attachmentId}/{fileName} {
+      allow read: if isAllowedFstEmail() && (
+        storeId == 'fibercell-main' ||
+        storeId == request.auth.uid
+      );
+      allow create, update, delete: if false;
+    }
   }
 }

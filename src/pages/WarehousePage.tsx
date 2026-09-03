@@ -129,6 +129,7 @@ export function WarehousePage(props: WarehousePageProps) {
     onPostLoadingShipment,
     onRemoveLoadingShipment,
     finishedProducts,
+    finishedGoodsLots,
     packagingRecipes,
     salesOrders,
     onOpenSalesOrder,
@@ -962,6 +963,7 @@ export function WarehousePage(props: WarehousePageProps) {
             warehouseId={warehouseId}
             counterparties={counterparties ?? []}
             finishedProducts={finishedProducts ?? []}
+            finishedGoodsLots={finishedGoodsLots ?? []}
             packagingRecipes={packagingRecipes ?? []}
             keeperId={keeperId}
             keeperName={resolvedKeeperName}

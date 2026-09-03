@@ -501,6 +501,23 @@ export function createAccessSlice({ setStore, getStore, getActor }: StoreSliceDe
       })
     },
 
+    setRoleAllowQcRelease(roleId: AccessRoleId, allowed: boolean) {
+      if (roleId === 'sysadmin') return
+      setStore((s) => {
+        const access = normalizeAccessStore(s.access)
+        const next = { ...(access.roleAllowQcRelease ?? {}) }
+        if (allowed) next[roleId] = true
+        else delete next[roleId]
+        return {
+          ...s,
+          access: {
+            ...access,
+            roleAllowQcRelease: next,
+          },
+        }
+      })
+    },
+
     setRoleAllowRecipeApproval(roleId: AccessRoleId, allowed: boolean) {
       if (roleId === 'sysadmin' || roleId === 'operations_director') return
       setStore((s) => {

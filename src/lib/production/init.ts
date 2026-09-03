@@ -300,5 +300,8 @@ export function normalizeProduction(raw: ProductionStore | undefined): Productio
     requests,
     planner: normalizePlanner(raw?.planner),
     shiftReports: Array.isArray(raw?.shiftReports) ? raw!.shiftReports : [],
+    packagingReports: Array.isArray(raw?.packagingReports) ? raw!.packagingReports : [],
+    finishedGoodsLots: Array.isArray(raw?.finishedGoodsLots) ? raw!.finishedGoodsLots : [],
+    qcAttachments: Array.isArray(raw?.qcAttachments) ? raw!.qcAttachments : [],
   }
 }

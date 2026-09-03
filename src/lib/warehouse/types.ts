@@ -51,6 +51,12 @@ export type WarehouseDocumentPurpose =
   | 'production_consumption'
   | 'production_wip_receipt'
   | 'production_waste_transfer'
+  /** PHASE P1C — упаковка / выпуск / regrade / reject */
+  | 'production_wip_pack_consumption'
+  | 'production_packaging_consumption'
+  | 'production_fg_receipt'
+  | 'production_fg_regrade_transfer'
+  | 'production_fg_reject_transfer'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -138,6 +144,10 @@ export type StockMovement = {
   productionOrderId?: string
   /** PHASE P1B — сменный отчёт */
   shiftReportId?: string
+  /** PHASE P1C — отчёт упаковки */
+  packagingReportId?: string
+  /** PHASE P1C — лот готовой продукции */
+  finishedGoodsLotId?: string
   /** Резерв под задание миксеру (ЗД-…) */
   mixTaskId?: string
   /** if entered in alternate unit */
@@ -309,10 +319,19 @@ export type WarehouseDocument = {
     | 'production_wip_receipt'
     | 'production_waste_issue'
     | 'production_waste_receipt'
+    | 'production_wip_pack_consumption'
+    | 'production_packaging_consumption'
+    | 'production_fg_receipt'
+    | 'production_fg_regrade_transfer'
+    | 'production_fg_reject_transfer'
   /** PHASE P1A — линия производства */
   productionLineId?: string
   /** PHASE P1B — сменный отчёт */
   shiftReportId?: string
+  /** PHASE P1C — отчёт упаковки */
+  packagingReportId?: string
+  /** PHASE P1C — лот готовой продукции */
+  finishedGoodsLotId?: string
   /** PHASE P1A — ссылка на документ резерва */
   reservationDocumentId?: string
   /** Причина превышения резерва / возврата */
@@ -484,6 +503,8 @@ export type LoadingShipmentLine = {
   id: string
   itemId?: string
   finishedProductId?: string
+  lotId?: string
+  batchNo?: string
   name: string
   note: string
   rollLengthM: number
