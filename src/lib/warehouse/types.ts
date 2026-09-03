@@ -47,6 +47,10 @@ export type WarehouseDocumentPurpose =
   /** PHASE P1A — передача сырья на линию / возврат */
   | 'production_material_transfer'
   | 'production_material_return'
+  /** PHASE P1B — фактический расход / ПФ / отходы */
+  | 'production_consumption'
+  | 'production_wip_receipt'
+  | 'production_waste_transfer'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -132,6 +136,8 @@ export type StockMovement = {
   comment?: string
   /** Резерв под заказ планировщика */
   productionOrderId?: string
+  /** PHASE P1B — сменный отчёт */
+  shiftReportId?: string
   /** Резерв под задание миксеру (ЗД-…) */
   mixTaskId?: string
   /** if entered in alternate unit */
@@ -299,8 +305,14 @@ export type WarehouseDocument = {
     | 'production_transfer_receipt'
     | 'production_return_issue'
     | 'production_return_receipt'
+    | 'production_consumption'
+    | 'production_wip_receipt'
+    | 'production_waste_issue'
+    | 'production_waste_receipt'
   /** PHASE P1A — линия производства */
   productionLineId?: string
+  /** PHASE P1B — сменный отчёт */
+  shiftReportId?: string
   /** PHASE P1A — ссылка на документ резерва */
   reservationDocumentId?: string
   /** Причина превышения резерва / возврата */
@@ -598,6 +610,10 @@ export type WarehouseStore = {
    * Не заполняется автоматически из пользовательских данных.
    */
   productionLineBindings?: ProductionLineLocationBinding[]
+  /**
+   * PHASE P1B — стабильный ID зоны брака/отходов (без name matching).
+   */
+  scrapLocationId?: string
 }
 
 /** PHASE P1A — конфиг линии → склад/location производства */

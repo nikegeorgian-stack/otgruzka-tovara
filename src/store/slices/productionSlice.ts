@@ -1,4 +1,8 @@
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
+import {
+  buildNormSnapshotFromVersion,
+  getApprovedRecipeVersion,
+} from '@/lib/formulations/recipeApproval'
 import { normalizeProductionOrder, normalizePlanner } from '@/lib/planner/init'
 import {
   historyNoteForReserve,
@@ -23,6 +27,14 @@ import { normalizeProductionRequest } from '@/lib/production/init'
 import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehouse'
 import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
+import {
+  confirmProductionShiftReport as confirmShiftReportCore,
+  confirmShiftReportCorrection as confirmShiftCorrectionCore,
+  type ConfirmShiftReportResult,
+} from '@/lib/production/shiftReports'
+import {
+  captureLegacyNormSnapshot,
+} from '@/lib/formulations/recipeApproval'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
 import {
@@ -230,17 +242,34 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
           const order = s.production.planner.orders.find((o) => o.id === id)
           if (!order) return s
 
-          const gate = canActivateProductionOrder(order)
+          const gate = canActivateProductionOrder(order, s.formulations)
           if (!gate.ok) {
             result = { ok: false, messageKey: gate.messageKey }
             return s
+          }
+
+          // P1B — freeze recipe norm snapshot from approved version if missing
+          let recipeNormSnapshot = order.recipeNormSnapshot
+          if (!recipeNormSnapshot && order.formulationRecipeId) {
+            const approved = getApprovedRecipeVersion(
+              s.formulations,
+              order.formulationRecipeId,
+            )
+            if (approved) {
+              recipeNormSnapshot = buildNormSnapshotFromVersion(approved)
+            }
           }
 
           const seq = s.production.planner.nextOrderSeq
           const year = new Date().getFullYear()
           const actor = actorFromGetter(getActor)
           const orderNumber = order.orderNumber || formatOrderNumber(year, seq)
-          const base = { ...order, orderNumber, status: 'active' as const }
+          const base = {
+            ...order,
+            orderNumber,
+            status: 'active' as const,
+            ...(recipeNormSnapshot ? { recipeNormSnapshot } : {}),
+          }
           const dayPlans =
             base.planMode === 'even' || !base.dayPlans.length
               ? generateEvenDayPlans(base)
@@ -632,6 +661,184 @@ export function createProductionSlice({ setStore, getActor }: StoreSliceDeps) {
           transactionGroupLabel: 'Перераспределение резерва материалов',
         },
       )
+      return result
+    },
+
+    confirmProductionShiftReport(input: {
+      report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+      productionOrderId: string
+      idempotencyKey: string
+      emergencyReason?: string
+    }): ConfirmShiftReportResult {
+      let result: ConfirmShiftReportResult = {
+        ok: false,
+        error: 'unknown',
+      }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_shift_report',
+        sourceId: input.productionOrderId,
+        revision: input.idempotencyKey,
+      })
+      const actor = actorFromGetter(getActor)
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === input.productionOrderId)
+          if (!order) {
+            result = { ok: false, error: 'planner.material.noOrder' }
+            return s
+          }
+          const out = confirmShiftReportCore(s.production, s.warehouse, {
+            report: input.report,
+            productionOrder: order,
+            actor: {
+              id: actor.actorId,
+              name: actor.actorName,
+              roleId: s.access.users.find((u) => u.id === actor.actorId)?.roleId,
+            },
+            access: s.access,
+            appScope: s,
+            idempotencyKey: input.idempotencyKey,
+            transactionGroupId: groupId,
+            emergencyReason: input.emergencyReason,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          return {
+            ...s,
+            production: out.production,
+            warehouse: out.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_shift_report',
+          transactionGroupLabel: 'Сменный производственный отчёт',
+        },
+      )
+      return result
+    },
+
+    confirmProductionShiftReportCorrection(input: {
+      originalReportId: string
+      correctionReason: string
+      report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+      productionOrderId: string
+      idempotencyKey: string
+      emergencyReason?: string
+    }): ConfirmShiftReportResult {
+      let result: ConfirmShiftReportResult = { ok: false, error: 'unknown' }
+      const groupId = warehouseTransactionGroupId({
+        kind: 'production_shift_report',
+        sourceId: `${input.productionOrderId}::corr::${input.originalReportId}`,
+        revision: input.idempotencyKey,
+      })
+      const actor = actorFromGetter(getActor)
+      setStore(
+        (s) => {
+          const order = s.production.planner.orders.find((o) => o.id === input.productionOrderId)
+          if (!order) {
+            result = { ok: false, error: 'planner.material.noOrder' }
+            return s
+          }
+          const out = confirmShiftCorrectionCore(s.production, s.warehouse, {
+            report: input.report,
+            productionOrder: order,
+            actor: {
+              id: actor.actorId,
+              name: actor.actorName,
+              roleId: s.access.users.find((u) => u.id === actor.actorId)?.roleId,
+            },
+            access: s.access,
+            appScope: s,
+            idempotencyKey: input.idempotencyKey,
+            transactionGroupId: groupId,
+            emergencyReason: input.emergencyReason,
+            originalReportId: input.originalReportId,
+            correctionReason: input.correctionReason,
+          })
+          result = out.result
+          if (!out.result.ok) return s
+          return {
+            ...s,
+            production: out.production,
+            warehouse: out.warehouse,
+          }
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_shift_report',
+          transactionGroupLabel: 'Исправление сменного отчёта',
+        },
+      )
+      return result
+    },
+
+    captureLegacyRecipeNormOnOrder(
+      orderId: string,
+      reason: string,
+    ): { ok: true } | { ok: false; error: string } {
+      let result: { ok: true } | { ok: false; error: string } = { ok: false, error: 'unknown' }
+      const actor = actorFromGetter(getActor)
+      setStore((s) => {
+        const order = s.production.planner.orders.find((o) => o.id === orderId)
+        if (!order?.formulationRecipeId) {
+          result = { ok: false, error: 'planner.material.noOrder' }
+          return s
+        }
+        const recipe = s.formulations.recipes.find((r) => r.id === order.formulationRecipeId)
+        if (!recipe) {
+          result = { ok: false, error: 'formulations.recipe.errNotFound' }
+          return s
+        }
+        const user = s.access.users.find((u) => u.id === actor.actorId)
+        const captured = captureLegacyNormSnapshot(
+          recipe,
+          { id: actor.actorId, name: actor.actorName, roleId: user?.roleId },
+          reason,
+          (id) => {
+            const item = s.warehouse.items.find((i) => i.id === id)
+            return item
+              ? { code: item.internalCode, name: item.name, unit: item.unit }
+              : undefined
+          },
+        )
+        if ('error' in captured) {
+          result = { ok: false, error: captured.error }
+          return s
+        }
+        result = { ok: true }
+        return {
+          ...s,
+          production: {
+            ...s.production,
+            planner: {
+              ...s.production.planner,
+              orders: s.production.planner.orders.map((o) =>
+                o.id === orderId
+                  ? {
+                      ...o,
+                      recipeNormSnapshot: captured.snapshot,
+                      updatedAt: new Date().toISOString(),
+                      history: [
+                        ...o.history,
+                        {
+                          id: newId(),
+                          at: new Date().toISOString(),
+                          type: 'note' as const,
+                          message: `Зафиксирована исходная норма (legacy): ${reason}`,
+                        },
+                      ],
+                    }
+                  : o,
+              ),
+            },
+          },
+        }
+      })
       return result
     },
   }

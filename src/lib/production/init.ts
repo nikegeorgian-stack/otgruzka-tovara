@@ -299,5 +299,6 @@ export function normalizeProduction(raw: ProductionStore | undefined): Productio
   return {
     requests,
     planner: normalizePlanner(raw?.planner),
+    shiftReports: Array.isArray(raw?.shiftReports) ? raw!.shiftReports : [],
   }
 }

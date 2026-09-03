@@ -882,6 +882,12 @@ function mergeProduction(
         local.planner.nextOrderSeq,
       ),
     },
+    shiftReports: mergeArrayById(
+      base.shiftReports ?? [],
+      remote.shiftReports ?? [],
+      local.shiftReports ?? [],
+      onConflict,
+    ),
   }
 }
 
@@ -993,6 +999,12 @@ function mergeFormulations(
       base.grammageRegistry ?? [],
       remote.grammageRegistry ?? [],
       local.grammageRegistry ?? [],
+    ),
+    recipeVersions: mergeArrayById(
+      base.recipeVersions ?? [],
+      remote.recipeVersions ?? [],
+      local.recipeVersions ?? [],
+      onConflict,
     ),
   }
 }
@@ -1281,6 +1293,26 @@ export function mergeCloudStores(
         base.access.roleAllowDocumentCancel,
         remote.access.roleAllowDocumentCancel,
         local.access.roleAllowDocumentCancel,
+      ),
+      roleAllowReservationReallocation: mergeRecords(
+        base.access.roleAllowReservationReallocation,
+        remote.access.roleAllowReservationReallocation,
+        local.access.roleAllowReservationReallocation,
+      ),
+      roleAllowRecipeApproval: mergeRecords(
+        base.access.roleAllowRecipeApproval,
+        remote.access.roleAllowRecipeApproval,
+        local.access.roleAllowRecipeApproval,
+      ),
+      userAllowReservationReallocation: pick3(
+        base.access.userAllowReservationReallocation,
+        remote.access.userAllowReservationReallocation,
+        local.access.userAllowReservationReallocation,
+      ),
+      workshopMasterProductionLines: mergeRecords(
+        base.access.workshopMasterProductionLines,
+        remote.access.workshopMasterProductionLines,
+        local.access.workshopMasterProductionLines,
       ),
       workshopMasterCoverages: mergeArrayById(
         base.access.workshopMasterCoverages,

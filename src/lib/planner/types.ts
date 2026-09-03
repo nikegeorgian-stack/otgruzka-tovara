@@ -40,6 +40,8 @@ export type PlannerHistoryEntry = {
     | 'plan_recalc'
     | 'manual_day'
     | 'note'
+    | 'recipe_norm_snapshot'
+    | 'legacy_norm_capture'
   message: string
 }
 
@@ -98,6 +100,12 @@ export type ProductionOrder = {
   boxItemId?: string
   /** Погонных метров в одном рулоне суровья (для расчёта) */
   metersPerRoll?: number
+  /** PHASE P1B — immutable recipe norm snapshot after confirm/activate */
+  recipeNormSnapshot?: import('@/lib/formulations/recipeApproval').RecipeNormSnapshot
+  /** PHASE P1B — stable semi-finished warehouse item (m² ledger) */
+  semiFinishedItemId?: string
+  /** PHASE P1B — m² per roll conversion for shift report validation */
+  m2PerRoll?: number
   /** Кэш расчёта по всему заказу */
   packagingPlan?: PackagingPlan
   dayPlans: PlannerDayPlan[]

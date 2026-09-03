@@ -15,6 +15,13 @@ import {
 } from '@/lib/formulations/init'
 import type { FormulationRecipe } from '@/lib/formulations/types'
 import {
+  approveRecipeVersion,
+  canEditRecipeDraft,
+  createDraftRecipeVersion,
+  RECIPE_EDIT_FORBIDDEN,
+  updateDraftRecipeVersion,
+} from '@/lib/formulations/recipeApproval'
+import {
   normalizeBoxRecipe,
   normalizePackagingRecipe,
   normalizePackagingRecipeStore,
@@ -365,6 +372,101 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
           },
         },
       }))
+    },
+
+    createDraftFormulationRecipeVersion(input: {
+      recipeId: string
+      components: import('@/lib/formulations/recipeApproval').FormulationRecipeVersionComponent[]
+      normBase?: import('@/lib/formulations/recipeApproval').RecipeNormBase
+      batchSize?: number
+      note?: string
+    }): { ok: true; versionId: string } | { ok: false; error: string } {
+      let result: { ok: true; versionId: string } | { ok: false; error: string } = {
+        ok: false,
+        error: 'unknown',
+      }
+      const actor = actorFromGetter(getActor)
+      setStore((s) => {
+        const user = s.access.users.find((u) => u.id === actor.actorId)
+        if (!canEditRecipeDraft(user ?? null)) {
+          result = { ok: false, error: RECIPE_EDIT_FORBIDDEN }
+          return s
+        }
+        const out = createDraftRecipeVersion(s.formulations, {
+          ...input,
+          actor: { id: actor.actorId, name: actor.actorName },
+        })
+        if ('error' in out) {
+          result = { ok: false, error: out.error }
+          return s
+        }
+        result = { ok: true, versionId: out.version.id }
+        return { ...s, formulations: out.store }
+      })
+      return result
+    },
+
+    updateDraftFormulationRecipeVersion(
+      versionId: string,
+      patch: Partial<
+        Pick<
+          import('@/lib/formulations/recipeApproval').FormulationRecipeVersion,
+          'components' | 'normBase' | 'batchSize' | 'note' | 'effectiveFrom' | 'effectiveTo'
+        >
+      >,
+    ): { ok: true } | { ok: false; error: string } {
+      let result: { ok: true } | { ok: false; error: string } = { ok: false, error: 'unknown' }
+      const actor = actorFromGetter(getActor)
+      setStore((s) => {
+        const user = s.access.users.find((u) => u.id === actor.actorId)
+        if (!canEditRecipeDraft(user ?? null)) {
+          result = { ok: false, error: RECIPE_EDIT_FORBIDDEN }
+          return s
+        }
+        const out = updateDraftRecipeVersion(s.formulations, versionId, patch)
+        if ('error' in out) {
+          result = { ok: false, error: out.error }
+          return s
+        }
+        result = { ok: true }
+        return { ...s, formulations: out.store }
+      })
+      return result
+    },
+
+    approveFormulationRecipeVersion(
+      versionId: string,
+      opts?: { reason?: string },
+    ): { ok: true } | { ok: false; error: string } {
+      let result: { ok: true } | { ok: false; error: string } = { ok: false, error: 'unknown' }
+      const actor = actorFromGetter(getActor)
+      setStore((s) => {
+        const user = s.access.users.find((u) => u.id === actor.actorId)
+        const out = approveRecipeVersion(
+          s.formulations,
+          versionId,
+          {
+            id: actor.actorId,
+            name: actor.actorName,
+            roleId: user?.roleId,
+          },
+          s.access,
+          opts,
+        )
+        if ('error' in out) {
+          result = { ok: false, error: out.error }
+          return s
+        }
+        result = { ok: true }
+        const withFormulations = { ...s, formulations: out.store }
+        return appendAudit(withFormulations, {
+          action: 'directory_change',
+          detail: out.auditDetail,
+          by: actor.actorId,
+          byName: actor.actorName,
+        })
+      })
+      return result
     },
   }
 }

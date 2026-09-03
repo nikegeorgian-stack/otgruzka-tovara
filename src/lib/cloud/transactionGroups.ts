@@ -25,6 +25,7 @@ export type WarehouseTransactionGroupKind =
   | 'production_material_transfer'
   | 'production_material_return'
   | 'production_over_reserve_issue'
+  | 'production_shift_report'
 
 export type TransactionGroupMeta = {
   transactionGroupId: string

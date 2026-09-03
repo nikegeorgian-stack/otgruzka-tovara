@@ -1077,6 +1077,12 @@ export default function App() {
                 journalNav?.view === 'production' ? journalNav.productionRequestId : null
               }
               onJournalFocusConsumed={() => setJournalNav(null)}
+              productionStore={app.store.production}
+              access={app.store.access}
+              currentUser={app.currentUser}
+              appScope={app.store}
+              onConfirmShiftReport={app.confirmProductionShiftReport}
+              onCorrectShiftReport={app.confirmProductionShiftReportCorrection}
             />
           )}
           {app.view === 'planner' && (
@@ -1610,6 +1616,7 @@ export default function App() {
               onSetRoleDirectorySections={app.setRoleDirectorySections}
               onSetRoleAllowNegativeStock={app.setRoleAllowNegativeStock}
               onSetRoleAllowDocumentCancel={app.setRoleAllowDocumentCancel}
+              onSetRoleAllowRecipeApproval={app.setRoleAllowRecipeApproval}
               onSetRoleTimesheetAccess={app.setRoleTimesheetAccess}
               onSetRoleTaskAccess={app.setRoleTaskAccess}
               onUpsertUserGroup={app.upsertUserGroup}

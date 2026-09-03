@@ -89,23 +89,30 @@ export type ReallocateReservationInput = {
 const BASE_REALLOCATION_ROLES: AccessRoleId[] = ['operations_director']
 
 /**
- * PHASE P1A — reallocation rights:
+ * PHASE P1B — reallocation rights:
  * - operations_director: allowed
+ * - planner: no dedicated role — grant via access.userAllowReservationReallocation (user ids)
  * - sysadmin: emergency only with non-empty reason
- * - chief_engineer: only when access.roleAllowReservationReallocation.chief_engineer === true AND reason
+ * - chief_engineer (and other roles): only when roleAllowReservationReallocation[role]=true AND reason
+ * - warehouse_keeper / workshop_master: always denied
  */
 export function canManualReallocateReservations(
-  user: { roleId?: AccessRoleId; active?: boolean } | null | undefined,
+  user: { id?: string; roleId?: AccessRoleId; active?: boolean } | null | undefined,
   access?: AccessStore | null,
   opts?: { reason?: string },
 ): boolean {
   if (!user?.roleId) return false
   if (user.active === false) return false
+  if (user.roleId === 'warehouse_keeper' || user.roleId === 'workshop_master') return false
   if (BASE_REALLOCATION_ROLES.includes(user.roleId)) return true
   const reasonOk = Boolean(opts?.reason?.trim())
   if (user.roleId === 'sysadmin') return reasonOk
-  if (user.roleId === 'chief_engineer') {
-    return access?.roleAllowReservationReallocation?.chief_engineer === true && reasonOk
+  // Explicit planner assignment (user id allowlist) — same bar as director
+  if (user.id && access?.userAllowReservationReallocation?.includes(user.id)) {
+    return true
+  }
+  if (access?.roleAllowReservationReallocation?.[user.roleId] === true && reasonOk) {
+    return true
   }
   return false
 }

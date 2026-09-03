@@ -501,6 +501,23 @@ export function createAccessSlice({ setStore, getStore, getActor }: StoreSliceDe
       })
     },
 
+    setRoleAllowRecipeApproval(roleId: AccessRoleId, allowed: boolean) {
+      if (roleId === 'sysadmin' || roleId === 'operations_director') return
+      setStore((s) => {
+        const access = normalizeAccessStore(s.access)
+        const next = { ...(access.roleAllowRecipeApproval ?? {}) }
+        if (allowed) next[roleId] = true
+        else delete next[roleId]
+        return {
+          ...s,
+          access: {
+            ...access,
+            roleAllowRecipeApproval: next,
+          },
+        }
+      })
+    },
+
     setRoleTimesheetAccess(roleId: AccessRoleId, level: 'none' | 'view' | 'edit') {
       if (roleId === 'sysadmin') return
       setStore((s) => {
@@ -583,7 +600,7 @@ export function createAccessSlice({ setStore, getStore, getActor }: StoreSliceDe
             ? String((err as { code?: string }).code)
             : ''
         if (code === 'auth/requires-recent-login') {
-          throw new Error('requires_recent_login')
+          throw new Error('requires_recent_login', { cause: err })
         }
         throw err
       }

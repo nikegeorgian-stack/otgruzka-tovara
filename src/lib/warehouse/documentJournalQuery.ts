@@ -49,12 +49,20 @@ export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourc
     doc.docRole === 'production_return_receipt' ||
     doc.purpose === 'production_material_transfer' ||
     doc.purpose === 'production_material_return' ||
+    doc.purpose === 'production_consumption' ||
+    doc.purpose === 'production_wip_receipt' ||
+    doc.purpose === 'production_waste_transfer' ||
     doc.purpose === 'production_reservation' ||
     doc.purpose === 'production_reservation_increase' ||
     doc.purpose === 'production_reservation_release' ||
     doc.purpose === 'production_reservation_reallocation' ||
+    doc.docRole === 'production_consumption' ||
+    doc.docRole === 'production_wip_receipt' ||
+    doc.docRole === 'production_waste_issue' ||
+    doc.docRole === 'production_waste_receipt' ||
     doc.productionRequestId ||
     doc.productionOrderId ||
+    doc.shiftReportId ||
     doc.mixTaskId ||
     doc.type === 'reservation'
   ) {

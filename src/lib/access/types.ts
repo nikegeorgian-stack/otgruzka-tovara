@@ -147,12 +147,28 @@ export type AccessStore = {
   /** Разрешить сторнирование складских документов */
   roleAllowDocumentCancel?: Partial<Record<AccessRoleId, boolean>>
   /**
-   * PHASE P1A — явное право перераспределения резервов (chief_engineer и др.).
-   * Роль сама по себе не даёт право.
+   * PHASE P1A/P1B — явное право перераспределения резервов (chief_engineer и др.).
+   * Роль сама по себе не даёт право (кроме operations_director).
    */
   roleAllowReservationReallocation?: Partial<Record<AccessRoleId, boolean>>
+  /**
+   * PHASE P1B — user ids acting as planner for reservation reallocation
+   * (no dedicated planner AccessRoleId in this project).
+   */
+  userAllowReservationReallocation?: string[]
+  /**
+   * PHASE P1B — явное полномочие «Главный технолог» / утверждение рецептур.
+   * Для роли technologist: false/absent = только draft; true = approve.
+   * Не выдаётся автоматически всем технологам.
+   */
+  roleAllowRecipeApproval?: Partial<Record<AccessRoleId, boolean>>
   /** Подмены мастеров цеха (админ / HR). */
   workshopMasterCoverages?: WorkshopMasterCoverage[]
+  /**
+   * PHASE P1B — явные линии производства для учётки мастера (fail-closed если пусто у master).
+   * Ключ = user.id
+   */
+  workshopMasterProductionLines?: Record<string, string[]>
   /** Пользовательские группы учёток (фильтр / пакетные права в админке). */
   userGroups?: AccessUserGroup[]
   /** Доступ к разделу «Задачи» по роли. */
@@ -166,6 +182,9 @@ export const DOCUMENT_CANCEL_ROLES: AccessRoleId[] = ['warehouse_keeper']
 
 /** Отрицательный остаток отключён глобально. */
 export const NEGATIVE_STOCK_ROLES: AccessRoleId[] = []
+
+/** PHASE P1B — роли, которым можно отдельно назначить утверждение рецептур (главный технолог). */
+export const RECIPE_APPROVAL_ROLES: AccessRoleId[] = ['technologist']
 
 /** Разделы приложения, которыми управляет администратор */
 export const MANAGED_VIEWS: ViewId[] = [

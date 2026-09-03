@@ -147,6 +147,8 @@ export type ProductionRequest = {
 export type ProductionStore = {
   requests: ProductionRequest[]
   planner: PlannerStore
+  /** PHASE P1B — сменные производственные отчёты */
+  shiftReports?: import('./shiftReports').ProductionShiftReport[]
 }
 
 export const PRODUCTION_LINES: {

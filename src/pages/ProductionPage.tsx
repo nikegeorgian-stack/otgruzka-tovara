@@ -30,6 +30,7 @@ import { ProductionPrintPreview } from '@/components/production/ProductionPrintP
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
 import { ProductionDayOutputReport } from '@/components/production/ProductionDayOutputReport'
 import { ProductionBrigadeRoster } from '@/components/production/ProductionBrigadeRoster'
+import { ProductionShiftReportPanel } from '@/components/production/ProductionShiftReportPanel'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import {
@@ -65,8 +66,11 @@ import type { ProductionOrder } from '@/lib/planner/types'
 import type { FormulationStore } from '@/lib/formulations/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { Employee, MonthSheet } from '@/lib/types'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import type { ProductionStore } from '@/lib/production/types'
+import type { ConfirmShiftReportResult } from '@/lib/production/shiftReports'
 
-type Tab = 'request' | 'journal' | 'summary'
+type Tab = 'request' | 'journal' | 'summary' | 'shift'
 
 type Props = {
   requests: ProductionRequest[]
@@ -90,6 +94,22 @@ type Props = {
   workspaceDrafts: Record<string, unknown>
   focusRequestId?: string | null
   onJournalFocusConsumed?: () => void
+  productionStore: ProductionStore
+  access: AccessStore
+  currentUser: AppUser | null
+  appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
+  onConfirmShiftReport: (input: {
+    report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+    productionOrderId: string
+    idempotencyKey: string
+  }) => ConfirmShiftReportResult
+  onCorrectShiftReport: (input: {
+    originalReportId: string
+    correctionReason: string
+    report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+    productionOrderId: string
+    idempotencyKey: string
+  }) => ConfirmShiftReportResult
 }
 
 type ProductionWorkspaceDraft = {
@@ -118,6 +138,12 @@ export function ProductionPage({
   workspaceDrafts,
   focusRequestId,
   onJournalFocusConsumed,
+  productionStore,
+  access,
+  currentUser,
+  appScope,
+  onConfirmShiftReport,
+  onCorrectShiftReport,
 }: Props) {
   const { t, tf, locale, employeeName } = useI18n()
   const { confirm } = useConfirm()
@@ -331,6 +357,8 @@ export function ProductionPage({
   useEffect(() => {
     if (!focusRequestId) return
     const req = requests.find((r) => r.id === focusRequestId)
+    // Pre-existing journal focus restore pattern (not introduced by P1B).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot focus load
     if (req) loadRequest(req)
     onJournalFocusConsumed?.()
   }, [focusRequestId])
@@ -569,6 +597,7 @@ export function ProductionPage({
           tabs={(
             [
               ['request', 'production.tab.request'],
+              ['shift', 'production.tab.shift'],
               ['journal', 'production.tab.journal'],
               ['summary', 'production.tab.summary'],
             ] as const
@@ -1430,6 +1459,19 @@ export function ProductionPage({
           </div>
           )}
         </div>
+      )}
+
+      {tab === 'shift' && (
+        <ProductionShiftReportPanel
+          orders={orders}
+          production={productionStore}
+          warehouse={warehouse}
+          access={access}
+          currentUser={currentUser}
+          appScope={appScope}
+          onConfirm={onConfirmShiftReport}
+          onCorrect={onCorrectShiftReport}
+        />
       )}
 
       {tab === 'journal' && (

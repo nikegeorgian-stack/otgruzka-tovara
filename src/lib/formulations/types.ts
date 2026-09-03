@@ -88,6 +88,8 @@ export type FormulationStore = {
   mixTasks?: FormulationMixTask[]
   /** Расширяемая база граммовок (г/м²) для расчётов */
   grammageRegistry?: number[]
+  /** PHASE P1B — утверждённые/черновые версии норм */
+  recipeVersions?: import('./recipeApproval').FormulationRecipeVersion[]
 }
 
 /** Статус задания на замес */

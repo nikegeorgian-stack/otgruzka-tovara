@@ -245,6 +245,7 @@ function normalizeRoleViews(
 function normalizeRoleAllowNegativeStock(
   _raw: Partial<Record<AccessRoleId, boolean>> | undefined,
 ): Partial<Record<AccessRoleId, boolean>> {
+  void _raw
   return {}
 }
 
@@ -468,6 +469,20 @@ export function normalizeAccessStore(raw: AccessStore | undefined): AccessStore 
     roleAllowReservationReallocation: normalizeRoleAllowReservationReallocation(
       raw.roleAllowReservationReallocation,
     ),
+    userAllowReservationReallocation: Array.isArray(raw.userAllowReservationReallocation)
+      ? raw.userAllowReservationReallocation.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      : undefined,
+    roleAllowRecipeApproval: normalizeRoleAllowReservationReallocation(
+      raw.roleAllowRecipeApproval,
+    ),
+    workshopMasterProductionLines:
+      raw.workshopMasterProductionLines && typeof raw.workshopMasterProductionLines === 'object'
+        ? Object.fromEntries(
+            Object.entries(raw.workshopMasterProductionLines).filter(
+              ([k, v]) => typeof k === 'string' && Array.isArray(v),
+            ) as [string, string[]][],
+          )
+        : undefined,
     ...(workshopMasterCoverages.length > 0 ? { workshopMasterCoverages } : {}),
     ...(userGroups.length > 0 ? { userGroups } : {}),
   }
