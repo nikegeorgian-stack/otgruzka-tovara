@@ -22,6 +22,9 @@ export type WarehouseTransactionGroupKind =
   | 'production_reservation_adjustment'
   | 'production_reservation_release'
   | 'production_reservation_reallocation'
+  | 'production_material_transfer'
+  | 'production_material_return'
+  | 'production_over_reserve_issue'
 
 export type TransactionGroupMeta = {
   transactionGroupId: string

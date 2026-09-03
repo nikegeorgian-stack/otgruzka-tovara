@@ -37,18 +37,22 @@ export function documentSortKey(doc: WarehouseDocument): string {
 export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourceFilter, 'all'> {
   if (doc.docRole === 'reversal' || doc.reversesDocumentId) return 'reversal'
   if (doc.isOpeningInventory || doc.purpose === 'opening_inventory') return 'opening'
-  if (doc.docRole === 'transfer_issue' || doc.docRole === 'transfer_receipt' || doc.transferPairId) {
-    return 'transfer'
-  }
-  if (doc.docRole === 'batch_issue' || doc.docRole === 'batch_receipt' || doc.batchRunId) {
-    return 'batch'
-  }
-  if (doc.docRole === 'loading_issue' || doc.loadingShipmentId) return 'loading'
+  // P1A handoff pairs have transferPairId but must stay source=production
   if (
     doc.docRole === 'production_issue' ||
     doc.docRole === 'production_receipt' ||
     doc.docRole === 'production_reservation' ||
     doc.docRole === 'production_reservation_release' ||
+    doc.docRole === 'production_transfer_issue' ||
+    doc.docRole === 'production_transfer_receipt' ||
+    doc.docRole === 'production_return_issue' ||
+    doc.docRole === 'production_return_receipt' ||
+    doc.purpose === 'production_material_transfer' ||
+    doc.purpose === 'production_material_return' ||
+    doc.purpose === 'production_reservation' ||
+    doc.purpose === 'production_reservation_increase' ||
+    doc.purpose === 'production_reservation_release' ||
+    doc.purpose === 'production_reservation_reallocation' ||
     doc.productionRequestId ||
     doc.productionOrderId ||
     doc.mixTaskId ||
@@ -56,6 +60,13 @@ export function documentSourceKind(doc: WarehouseDocument): Exclude<JournalSourc
   ) {
     return 'production'
   }
+  if (doc.docRole === 'transfer_issue' || doc.docRole === 'transfer_receipt' || doc.transferPairId) {
+    return 'transfer'
+  }
+  if (doc.docRole === 'batch_issue' || doc.docRole === 'batch_receipt' || doc.batchRunId) {
+    return 'batch'
+  }
+  if (doc.docRole === 'loading_issue' || doc.loadingShipmentId) return 'loading'
   if (doc.purchaseOrderId) return 'procurement'
   return 'manual'
 }

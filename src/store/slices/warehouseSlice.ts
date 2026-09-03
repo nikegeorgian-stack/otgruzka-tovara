@@ -28,6 +28,15 @@ import {
 } from '@/lib/warehouse/openingInventory'
 import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
 import {
+  transferProductionMaterials,
+  returnProductionMaterials,
+  type HandoffResult,
+  type ProductionMaterialReturnInput,
+  type ProductionMaterialTransferInput,
+} from '@/lib/warehouse/productionMaterialHandoff'
+import { upsertProductionLineBinding } from '@/lib/warehouse/productionLineLocationConfig'
+import type { ProductionLineLocationBinding } from '@/lib/warehouse/types'
+import {
   acquireWarehouseDocumentLock as acquireDocLockInStore,
   releaseWarehouseDocumentLock as releaseDocLockInStore,
 } from '@/lib/warehouse/documentLock'
@@ -375,6 +384,79 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         },
       )
       return result
+    },
+
+    transferProductionOrderMaterials(
+      input: ProductionMaterialTransferInput,
+    ): HandoffResult {
+      let result: HandoffResult = { ok: false, error: 'unknown' }
+      const kind = input.overReserveReason?.trim()
+        ? 'production_over_reserve_issue'
+        : 'production_material_transfer'
+      const groupId =
+        input.transactionGroupId ??
+        warehouseTransactionGroupId({
+          kind,
+          sourceId: input.productionOrder.id,
+          revision: input.idempotencyKey,
+        })
+      patchWarehouse(
+        setStore,
+        (w) => {
+          const out = transferProductionMaterials(w, {
+            ...input,
+            transactionGroupId: groupId,
+          })
+          result = out.result
+          return out.store
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: kind,
+          transactionGroupLabel: input.overReserveReason?.trim()
+            ? 'Выдача в производство сверх резерва'
+            : 'Передача материалов в производство',
+        },
+      )
+      return result
+    },
+
+    returnProductionOrderMaterials(input: ProductionMaterialReturnInput): HandoffResult {
+      let result: HandoffResult = { ok: false, error: 'unknown' }
+      const groupId =
+        input.transactionGroupId ??
+        warehouseTransactionGroupId({
+          kind: 'production_material_return',
+          sourceId: input.productionOrder.id,
+          revision: input.idempotencyKey,
+        })
+      patchWarehouse(
+        setStore,
+        (w) => {
+          const out = returnProductionMaterials(w, {
+            ...input,
+            transactionGroupId: groupId,
+          })
+          result = out.result
+          return out.store
+        },
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: groupId,
+          transactionGroupKind: 'production_material_return',
+          transactionGroupLabel: 'Возврат материалов из производства',
+        },
+      )
+      return result
+    },
+
+    upsertProductionLineLocationBinding(
+      binding: Omit<ProductionLineLocationBinding, 'id'> & { id?: string },
+    ) {
+      patchWarehouse(setStore, (w) => upsertProductionLineBinding(w, binding))
     },
 
     cancelWarehouseDocument(

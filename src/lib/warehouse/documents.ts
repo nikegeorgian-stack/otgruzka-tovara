@@ -213,8 +213,11 @@ function buildDocumentMovements(
       comment: line.comment ?? full.comment,
       inputUnit: line.inputUnit,
       unitCost,
-      batchNo: isReceipt ? line.batchNo : undefined,
-      expiryDate: isReceipt ? line.expiryDate : undefined,
+      batchNo: line.batchNo,
+      expiryDate: line.expiryDate,
+      productionOrderId: full.productionOrderId,
+      mixTaskId: full.mixTaskId,
+      transactionGroupId: full.transactionGroupId,
       createdAt,
       createdBy: actorId,
       createdByName: actorName,
@@ -731,6 +734,8 @@ export function postWarehouseTransfer(
   store: WarehouseStore,
   args: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
     targetWarehouseId: string
+    /** Optional override for issue leg docRole (P1A production transfer/return) */
+    docRole?: WarehouseDocument['docRole']
   },
 ): { store: WarehouseStore; result: PostDocumentResult } {
   const pairId = crypto.randomUUID()
@@ -745,14 +750,16 @@ export function postWarehouseTransfer(
       number: issueNo,
       comment: baseComment,
       transferPairId: pairId,
-      docRole: 'transfer_issue',
+      docRole: args.docRole ?? 'transfer_issue',
       purpose: args.purpose ?? 'transfer',
-      idempotencyKey: warehouseIdempotencyKey({
-        source: 'transfer',
-        sourceId: pairId,
-        role: 'transfer_issue',
-        warehouseId: args.warehouseId,
-      }),
+      idempotencyKey: args.idempotencyKey
+        ? `${args.idempotencyKey}::issue`
+        : warehouseIdempotencyKey({
+            source: 'transfer',
+            sourceId: pairId,
+            role: 'transfer_issue',
+            warehouseId: args.warehouseId,
+          }),
     },
     {
       ...args,
@@ -761,14 +768,21 @@ export function postWarehouseTransfer(
       warehouseId: args.targetWarehouseId,
       comment: baseComment,
       transferPairId: pairId,
-      docRole: 'transfer_receipt',
+      docRole:
+        args.docRole === 'production_transfer_issue'
+          ? 'production_transfer_receipt'
+          : args.docRole === 'production_return_issue'
+            ? 'production_return_receipt'
+            : 'transfer_receipt',
       purpose: args.purpose ?? 'transfer',
-      idempotencyKey: warehouseIdempotencyKey({
-        source: 'transfer',
-        sourceId: pairId,
-        role: 'transfer_receipt',
-        warehouseId: args.targetWarehouseId,
-      }),
+      idempotencyKey: args.idempotencyKey
+        ? `${args.idempotencyKey}::receipt`
+        : warehouseIdempotencyKey({
+            source: 'transfer',
+            sourceId: pairId,
+            role: 'transfer_receipt',
+            warehouseId: args.targetWarehouseId,
+          }),
     },
   ])
   if (!atomic.result.ok) {

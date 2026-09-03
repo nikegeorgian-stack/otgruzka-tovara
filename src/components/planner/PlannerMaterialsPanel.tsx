@@ -24,12 +24,16 @@ import {
   isLegacyBareReserveMovement,
   listReservationDocumentsForOrder,
 } from '@/lib/warehouse/productionReservations'
+import { computeLineMaterialBalances } from '@/lib/warehouse/productionMaterialHandoff'
+import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 
 type Props = {
   orders: ProductionOrder[]
   warehouseItems: WarehouseItem[]
   warehouseMovements: StockMovement[]
   warehouseDocuments?: WarehouseDocument[]
+  warehouseLocations?: import('@/lib/warehouse/types').WarehouseLocation[]
+  productionLineBindings?: import('@/lib/warehouse/types').ProductionLineLocationBinding[]
   warehouseAccounting?: WarehouseAccountingState[]
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
@@ -90,6 +94,8 @@ export function PlannerMaterialsPanel({
   warehouseItems,
   warehouseMovements,
   warehouseDocuments = [],
+  warehouseLocations = [],
+  productionLineBindings = [],
   warehouseAccounting,
   onReserveOrder,
   onUnreserveOrder,
@@ -108,9 +114,18 @@ export function PlannerMaterialsPanel({
       items: warehouseItems,
       movements: warehouseMovements,
       documents: warehouseDocuments,
+      locations: warehouseLocations,
       accountingByWarehouse: warehouseAccounting,
+      productionLineBindings,
     }),
-    [warehouseItems, warehouseMovements, warehouseDocuments, warehouseAccounting],
+    [
+      warehouseItems,
+      warehouseMovements,
+      warehouseDocuments,
+      warehouseLocations,
+      warehouseAccounting,
+      productionLineBindings,
+    ],
   )
 
   const relevantOrders = useMemo(
@@ -315,6 +330,51 @@ export function PlannerMaterialsPanel({
                   ) : null}
                 </div>
               </div>
+              {(() => {
+                const loc = resolveProductionLineLocation(
+                  warehouse as import('@/lib/warehouse/types').WarehouseStore,
+                  order.lineId,
+                )
+                if (!loc.ok) {
+                  return (
+                    <div className="border-b border-grid bg-stone-50 px-4 py-2 text-xs text-amber-800">
+                      {t('warehouse.handoff.setupHint')}
+                    </div>
+                  )
+                }
+                const atLine = computeLineMaterialBalances(
+                  warehouse as import('@/lib/warehouse/types').WarehouseStore,
+                  {
+                    productionOrderId: order.id,
+                    productionLocationId: loc.productionLocationId,
+                    lineId: order.lineId,
+                  },
+                )
+                if (!atLine.length) return null
+                return (
+                  <div className="border-b border-grid bg-sky-50/50 px-4 py-2 text-xs text-stone-700">
+                    {atLine.map((row) => {
+                      const name =
+                        warehouseItems.find((i) => i.id === row.itemId)?.name ?? row.itemId
+                      return (
+                        <div key={`${row.itemId}-${row.batchNo ?? ''}`} className="flex flex-wrap gap-3">
+                          <span className="font-medium">{name}</span>
+                          <span>
+                            {t('planner.material.issuedToLine')}: {formatQty(row.transferredQty)}
+                          </span>
+                          <span>
+                            {t('planner.material.atLine')}: {formatQty(row.remainingQty)}
+                          </span>
+                          <span>
+                            {t('planner.material.returned')}: {formatQty(row.returnedQty)}
+                          </span>
+                          {row.batchNo ? <span>партия {row.batchNo}</span> : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
               {(() => {
                 const docs = listReservationDocumentsForOrder(
                   { documents: warehouseDocuments },

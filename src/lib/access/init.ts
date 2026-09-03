@@ -260,6 +260,19 @@ function normalizeRoleAllowDocumentCancel(
   return out
 }
 
+function normalizeRoleAllowReservationReallocation(
+  raw: Partial<Record<AccessRoleId, boolean>> | undefined,
+): Partial<Record<AccessRoleId, boolean>> {
+  const out: Partial<Record<AccessRoleId, boolean>> = {}
+  if (!raw) return out
+  // Explicit capability only — never auto-grant for sysadmin via this map
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin' || roleId === 'operations_director') continue
+    if (raw[roleId] === true) out[roleId] = true
+  }
+  return out
+}
+
 function normalizeRoleTimesheetAccess(
   raw: AccessStore['roleTimesheetAccess'],
 ): AccessStore['roleTimesheetAccess'] {
@@ -452,6 +465,9 @@ export function normalizeAccessStore(raw: AccessStore | undefined): AccessStore 
     roleTaskBoards: normalizeRoleTaskBoards(raw.roleTaskBoards),
     roleAllowNegativeStock: normalizeRoleAllowNegativeStock(raw.roleAllowNegativeStock),
     roleAllowDocumentCancel: normalizeRoleAllowDocumentCancel(raw.roleAllowDocumentCancel),
+    roleAllowReservationReallocation: normalizeRoleAllowReservationReallocation(
+      raw.roleAllowReservationReallocation,
+    ),
     ...(workshopMasterCoverages.length > 0 ? { workshopMasterCoverages } : {}),
     ...(userGroups.length > 0 ? { userGroups } : {}),
   }

@@ -365,6 +365,7 @@ describe('PHASE W3 document-backed production reservations', () => {
       quantity: 999,
       reason: 'need',
       idempotencyKey: 'realloc-bad',
+      actor: { id: 'u1', name: 'Dir', roleId: 'operations_director' },
     })
     expect(bad.result.ok).toBe(false)
     expect(bad.result.error).toBe(FOREIGN_RESERVE_ERROR)
@@ -393,6 +394,7 @@ describe('PHASE W3 document-backed production reservations', () => {
       quantity: 3,
       reason: '  ',
       idempotencyKey: 'realloc-1',
+      actor: { id: 'u1', name: 'Dir', roleId: 'operations_director' },
     })
     expect(noReason.result.ok).toBe(false)
     expect(noReason.result.error).toBe(REALLOCATION_REASON_REQUIRED)
@@ -441,6 +443,7 @@ describe('PHASE W3 document-backed production reservations', () => {
       quantity: 999,
       reason: 'x',
       idempotencyKey: 'realloc-fail',
+      actor: { id: 'u1', name: 'Dir', roleId: 'operations_director' },
     })
     expect(fail.result.ok).toBe(false)
     expect(fail.store.documents.length).toBe(snapDocs)

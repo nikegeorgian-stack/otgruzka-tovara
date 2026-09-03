@@ -146,6 +146,11 @@ export type AccessStore = {
   roleAllowNegativeStock?: Partial<Record<AccessRoleId, boolean>>
   /** Разрешить сторнирование складских документов */
   roleAllowDocumentCancel?: Partial<Record<AccessRoleId, boolean>>
+  /**
+   * PHASE P1A — явное право перераспределения резервов (chief_engineer и др.).
+   * Роль сама по себе не даёт право.
+   */
+  roleAllowReservationReallocation?: Partial<Record<AccessRoleId, boolean>>
   /** Подмены мастеров цеха (админ / HR). */
   workshopMasterCoverages?: WorkshopMasterCoverage[]
   /** Пользовательские группы учёток (фильтр / пакетные права в админке). */

@@ -87,6 +87,8 @@ type Props = {
   warehouseCategories: WarehouseCategory[]
   warehouseMovements: StockMovement[]
   warehouseDocuments?: import('@/lib/warehouse/types').WarehouseDocument[]
+  warehouseLocations?: import('@/lib/warehouse/types').WarehouseLocation[]
+  productionLineBindings?: import('@/lib/warehouse/types').ProductionLineLocationBinding[]
   warehouseAccounting?: import('@/lib/warehouse/types').WarehouseAccountingState[]
   activeMonth: string
   onMonthChange: (m: string) => void
@@ -139,6 +141,8 @@ export function PlannerPage({
   warehouseCategories,
   warehouseMovements,
   warehouseDocuments = [],
+  warehouseLocations = [],
+  productionLineBindings = [],
   warehouseAccounting,
   activeMonth,
   onMonthChange,
@@ -1291,6 +1295,8 @@ export function PlannerPage({
           warehouseItems={warehouseItems}
           warehouseMovements={warehouseMovements}
           warehouseDocuments={warehouseDocuments}
+          warehouseLocations={warehouseLocations}
+          productionLineBindings={productionLineBindings}
           warehouseAccounting={warehouseAccounting}
           onReserveOrder={onReserveMaterials}
           onUnreserveOrder={onUnreserveMaterials}

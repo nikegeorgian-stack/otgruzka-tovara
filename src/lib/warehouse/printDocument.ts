@@ -40,6 +40,10 @@ export type ReceiptPrintDoc = Pick<
   | 'reversalDocumentId'
   | 'cancellationReason'
   | 'status'
+  | 'productionOrderId'
+  | 'productionLineId'
+  | 'overReserveReason'
+  | 'returnReason'
 >
 
 export type IssuePrintDoc = Pick<
@@ -67,6 +71,10 @@ export type IssuePrintDoc = Pick<
   | 'reversalDocumentId'
   | 'cancellationReason'
   | 'status'
+  | 'productionOrderId'
+  | 'productionLineId'
+  | 'overReserveReason'
+  | 'returnReason'
 >
 
 export type ReceiptPrintLine = {
@@ -100,6 +108,9 @@ export type ReceiptPrintModel = {
   keeperName?: string
   responsibleName?: string
   productionRequestLabel?: string
+  productionOrderLabel?: string
+  productionLineId?: string
+  handoffReason?: string
   orgLine: string
   lines: ReceiptPrintLine[]
   lineCount: number
@@ -135,6 +146,9 @@ export type IssuePrintModel = {
   keeperName?: string
   responsibleName?: string
   productionRequestLabel?: string
+  productionOrderLabel?: string
+  productionLineId?: string
+  handoffReason?: string
   orgLine: string
   lines: ReceiptPrintLine[]
   lineCount: number
@@ -319,6 +333,11 @@ export function buildReceiptPrintModel(
     keeperName: doc.keeperName,
     responsibleName: doc.responsibleEmployeeNameSnapshot || doc.keeperName,
     productionRequestLabel: productionRequestLabel(doc.productionRequestId, opts?.productionRequests),
+    productionOrderLabel: doc.productionOrderId
+      ? [doc.basisNumber, doc.productionOrderId].filter(Boolean).join(' · ')
+      : undefined,
+    productionLineId: doc.productionLineId,
+    handoffReason: doc.overReserveReason || doc.returnReason,
     orgLine: [meta.site, meta.responsible].filter(Boolean).join(' · ') || '—',
     lines,
     lineCount: lines.length,
@@ -366,6 +385,11 @@ export function buildIssuePrintModel(
     keeperName: doc.keeperName,
     responsibleName: doc.responsibleEmployeeNameSnapshot || doc.keeperName,
     productionRequestLabel: productionRequestLabel(doc.productionRequestId, opts?.productionRequests),
+    productionOrderLabel: doc.productionOrderId
+      ? [doc.basisNumber, doc.productionOrderId].filter(Boolean).join(' · ')
+      : undefined,
+    productionLineId: doc.productionLineId,
+    handoffReason: doc.overReserveReason || doc.returnReason,
     orgLine: [meta.site, meta.responsible].filter(Boolean).join(' · ') || '—',
     lines,
     lineCount: lines.length,

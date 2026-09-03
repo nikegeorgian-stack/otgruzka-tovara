@@ -2,7 +2,7 @@
  * PHASE W3 — document-backed production material reservations.
  * Reserve/unreserve only via WarehouseDocument (type=reservation); never bare movements.
  */
-import type { AccessRoleId, AppUser } from '@/lib/access/types'
+import type { AccessRoleId, AccessStore, AppUser } from '@/lib/access/types'
 import { materialLinesForOrder, type OrderMaterialLine } from '@/lib/planner/materialNeeds'
 import { reservedQtyForOrder } from '@/lib/planner/materialStock'
 import type { ProductionOrder } from '@/lib/planner/types'
@@ -78,24 +78,36 @@ export type ReallocateReservationInput = {
   quantity: number
   reason: string
   actor?: { id?: string; name?: string; roleId?: AccessRoleId }
+  /** Optional access store for chief_engineer capability check */
+  access?: AccessStore | null
   idempotencyKey: string
   batchNo?: string
   expiryDate?: string
   batchOverrideReason?: string
 }
 
-const MANUAL_REALLOCATION_ROLES: AccessRoleId[] = [
-  'operations_director',
-  'sysadmin',
-  'chief_engineer',
-]
+const BASE_REALLOCATION_ROLES: AccessRoleId[] = ['operations_director']
 
+/**
+ * PHASE P1A — reallocation rights:
+ * - operations_director: allowed
+ * - sysadmin: emergency only with non-empty reason
+ * - chief_engineer: only when access.roleAllowReservationReallocation.chief_engineer === true AND reason
+ */
 export function canManualReallocateReservations(
   user: { roleId?: AccessRoleId; active?: boolean } | null | undefined,
+  access?: AccessStore | null,
+  opts?: { reason?: string },
 ): boolean {
   if (!user?.roleId) return false
   if (user.active === false) return false
-  return MANUAL_REALLOCATION_ROLES.includes(user.roleId)
+  if (BASE_REALLOCATION_ROLES.includes(user.roleId)) return true
+  const reasonOk = Boolean(opts?.reason?.trim())
+  if (user.roleId === 'sysadmin') return reasonOk
+  if (user.roleId === 'chief_engineer') {
+    return access?.roleAllowReservationReallocation?.chief_engineer === true && reasonOk
+  }
+  return false
 }
 
 /** Auto-reserve on confirm is allowed for planner operators (not warehouse-only). */
@@ -1074,7 +1086,9 @@ export function reallocateProductionReservation(
       },
     }
   }
-  if (input.actor?.roleId && !canManualReallocateReservations(input.actor)) {
+  if (
+    !canManualReallocateReservations(input.actor, input.access, { reason: input.reason })
+  ) {
     return {
       store,
       result: {

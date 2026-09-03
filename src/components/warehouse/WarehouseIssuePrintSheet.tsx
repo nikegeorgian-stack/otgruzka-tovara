@@ -73,6 +73,24 @@ export function WarehouseIssuePrintSheet({ model }: Props) {
               <dd>{model.productionRequestLabel}</dd>
             </div>
           ) : null}
+          {model.productionOrderLabel ? (
+            <div>
+              <dt>{t('warehouse.doc.productionOrder')}</dt>
+              <dd>{model.productionOrderLabel}</dd>
+            </div>
+          ) : null}
+          {model.productionLineId ? (
+            <div>
+              <dt>{t('warehouse.doc.productionLine')}</dt>
+              <dd>{model.productionLineId}</dd>
+            </div>
+          ) : null}
+          {model.basisLabel ? (
+            <div>
+              <dt>{t('warehouse.doc.basis')}</dt>
+              <dd>{model.basisLabel}</dd>
+            </div>
+          ) : null}
           {model.keeperName ? (
             <div>
               <dt>{t('warehouse.doc.keeper')}</dt>
@@ -89,6 +107,9 @@ export function WarehouseIssuePrintSheet({ model }: Props) {
               <th>{t('warehouse.col.category')}</th>
               <th>{t('warehouse.col.unit')}</th>
               <th>{t('warehouse.quantity')}</th>
+              {model.lines.some((l) => l.batchNo) ? (
+                <th>{t('warehouse.batch')}</th>
+              ) : null}
               <th>{t('warehouse.price')}</th>
               <th>{t('warehouse.col.sum')}</th>
             </tr>
@@ -104,6 +125,9 @@ export function WarehouseIssuePrintSheet({ model }: Props) {
                 <td className="c">{line.category}</td>
                 <td className="c">{line.unit}</td>
                 <td className="r num">{formatQty(line.qty)}</td>
+                {model.lines.some((l) => l.batchNo) ? (
+                  <td className="c">{line.batchNo || '—'}</td>
+                ) : null}
                 <td className="r num">{line.price ? formatReceiptMoney(line.price) : '—'}</td>
                 <td className="r num">{line.sum ? formatReceiptMoney(line.sum) : '—'}</td>
               </tr>
@@ -127,6 +151,12 @@ export function WarehouseIssuePrintSheet({ model }: Props) {
             </div>
           </div>
         </div>
+
+        {model.handoffReason ? (
+          <p className="warehouse-receipt-note">
+            <strong>{t('warehouse.doc.handoffReason')}:</strong> {model.handoffReason}
+          </p>
+        ) : null}
 
         {model.comment ? (
           <p className="warehouse-receipt-note">

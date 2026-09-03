@@ -44,6 +44,9 @@ export type WarehouseDocumentPurpose =
   | 'production_reservation_increase'
   | 'production_reservation_release'
   | 'production_reservation_reallocation'
+  /** PHASE P1A — передача сырья на линию / возврат */
+  | 'production_material_transfer'
+  | 'production_material_return'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -175,6 +178,9 @@ export type WarehouseDocumentLine = {
   requiredQty?: number
   reservedQty?: number
   shortageQty?: number
+  /** PHASE P1A — выдано / сверх резерва */
+  issuedQty?: number
+  overReserveQty?: number
   /** Ручная замена партии (причина на документе) */
   batchOverrideReason?: string
 }
@@ -289,6 +295,17 @@ export type WarehouseDocument = {
     | 'loading_issue'
     | 'production_reservation'
     | 'production_reservation_release'
+    | 'production_transfer_issue'
+    | 'production_transfer_receipt'
+    | 'production_return_issue'
+    | 'production_return_receipt'
+  /** PHASE P1A — линия производства */
+  productionLineId?: string
+  /** PHASE P1A — ссылка на документ резерва */
+  reservationDocumentId?: string
+  /** Причина превышения резерва / возврата */
+  overReserveReason?: string
+  returnReason?: string
   /** Связь с погрузкой ГП */
   loadingShipmentId?: string
   /** Когда документ выгружен бухгалтеру / в Balance */
@@ -576,6 +593,21 @@ export type WarehouseStore = {
   accountingByWarehouse?: WarehouseAccountingState[]
   /** PHASE W3 — дефициты материалов (soft-resolve, без hard delete) */
   materialShortages?: MaterialShortageRecord[]
+  /**
+   * PHASE P1A — привязка lineId → production warehouse/location (стабильные ID).
+   * Не заполняется автоматически из пользовательских данных.
+   */
+  productionLineBindings?: ProductionLineLocationBinding[]
+}
+
+/** PHASE P1A — конфиг линии → склад/location производства */
+export type ProductionLineLocationBinding = {
+  /** Stable row id (= lineId for cloud merge) */
+  id: string
+  lineId: string
+  productionWarehouseId: string
+  productionLocationId: string
+  note?: string
 }
 
 /** PHASE W0.5 — состояние подтверждения остатков по складу */
