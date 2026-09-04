@@ -21,6 +21,9 @@ import {
   emptyCriticalPayload,
   fingerprintCriticalPayload,
   isPeriodClosed,
+  isProductionDomainActive,
+  isWarehouseDomainActive,
+  markWarehouseDomainActive,
   monthKeyFromDate,
   nextReversalNumber,
   nextServerDocumentNumber,
@@ -29,6 +32,7 @@ import {
   principalAccessId,
   sanitizeDocumentLines,
   serializeCriticalPayload,
+  stableDomainHash,
 } from './_g1CriticalHelpers.mjs'
 import {
   G2_CAPS,
@@ -134,10 +138,11 @@ async function loadOrInitCritical(dc, storeId, actorUid) {
   const { data } = await getFstCriticalStore(dc, { id: storeId })
   const row = data?.fstCriticalStore ?? null
   if (row) {
-    const parsed = parseCriticalPayload(row.payloadJson)
+    const revision = Number(row.revision) || 0
+    const parsed = parseCriticalPayload(row.payloadJson, { revision })
     if (!parsed.ok) return fail(parsed.error, 500)
     return ok({
-      revision: row.revision,
+      revision,
       payload: parsed.payload,
       fingerprint: row.fingerprint,
     })
@@ -146,12 +151,12 @@ async function loadOrInitCritical(dc, storeId, actorUid) {
   const payloadJson = serializeCriticalPayload(payload)
   await upsertFstCriticalStore(dc, {
     id: storeId,
-    revision: 1,
+    revision: 0,
     payloadJson,
     fingerprint: fingerprintCriticalPayload(payloadJson),
     updatedByUid: actorUid,
   })
-  return ok({ revision: 1, payload, fingerprint: fingerprintCriticalPayload(payloadJson) })
+  return ok({ revision: 0, payload, fingerprint: fingerprintCriticalPayload(payloadJson) })
 }
 
 export async function getAuthoritativeCriticalStore(storeId) {
@@ -159,21 +164,31 @@ export async function getAuthoritativeCriticalStore(storeId) {
   const { data } = await getFstCriticalStore(dc, { id: storeId })
   const row = data?.fstCriticalStore ?? null
   if (!row) {
+    const empty = emptyCriticalPayload()
     return ok({
       id: storeId,
       revision: 0,
-      payload: emptyCriticalPayload(),
-      warehouse: emptyCriticalPayload().domains.warehouse,
+      payload: empty,
+      warehouse: empty.domains.warehouse,
+      production: empty.domains.production,
+      domainMeta: empty.domainMeta,
+      warehouseActive: false,
+      productionActive: false,
       authoritative: true,
     })
   }
-  const parsed = parseCriticalPayload(row.payloadJson)
+  const revision = Number(row.revision) || 0
+  const parsed = parseCriticalPayload(row.payloadJson, { revision })
   if (!parsed.ok) return fail(parsed.error, 500)
   return ok({
     id: storeId,
-    revision: row.revision,
+    revision,
     payload: parsed.payload,
     warehouse: parsed.payload.domains.warehouse,
+    production: parsed.payload.domains.production ?? emptyCriticalPayload().domains.production,
+    domainMeta: parsed.payload.domainMeta,
+    warehouseActive: isWarehouseDomainActive(parsed.payload, revision),
+    productionActive: isProductionDomainActive(parsed.payload, revision),
     fingerprint: row.fingerprint,
     updatedByUid: row.updatedByUid,
     authoritative: true,
@@ -192,13 +207,45 @@ async function loadReceipt(dc, idempotencyKey, storeId) {
   }
 }
 
-async function casCommit(dc, storeId, critical, nextWarehouse, actorUid) {
-  const nextPayload = {
+function embeddedReceipt(payload, idempotencyKey) {
+  const row = payload?.commandReceipts?.[idempotencyKey]
+  if (!row?.result) return null
+  return { result: row.result, criticalRevision: row.criticalRevisionAfter, embedded: true }
+}
+
+/**
+ * G2 CAS preserves sibling domains (production) and stamps warehouse activation.
+ * Idempotency result is embedded in the same CAS payload (external receipt is best-effort).
+ */
+async function casCommit(dc, storeId, critical, nextWarehouse, actorUid, { idempotencyKey, commandType, result } = {}) {
+  let nextPayload = {
     ...critical.payload,
-    domains: { ...critical.payload.domains, warehouse: nextWarehouse },
+    schemaVersion: Math.max(Number(critical.payload.schemaVersion) || 0, 3),
+    domains: {
+      ...critical.payload.domains,
+      warehouse: nextWarehouse,
+      // Explicitly keep production reference (deep-equal sibling)
+      production: critical.payload.domains.production ?? emptyCriticalPayload().domains.production,
+    },
+  }
+  nextPayload = markWarehouseDomainActive(nextPayload, actorUid)
+  const nextRevision = critical.revision + 1
+  if (idempotencyKey && result) {
+    nextPayload = {
+      ...nextPayload,
+      commandReceipts: {
+        ...(nextPayload.commandReceipts ?? {}),
+        [idempotencyKey]: {
+          commandType,
+          actorUid,
+          at: new Date().toISOString(),
+          criticalRevisionAfter: nextRevision,
+          result,
+        },
+      },
+    }
   }
   const nextJson = serializeCriticalPayload(nextPayload)
-  const nextRevision = critical.revision + 1
   try {
     await updateFstCriticalStoreCas(dc, {
       id: storeId,
@@ -218,7 +265,9 @@ async function casCommit(dc, storeId, critical, nextWarehouse, actorUid) {
   return ok({
     criticalRevision: nextRevision,
     warehouse: nextWarehouse,
+    production: nextPayload.domains.production,
     payload: nextPayload,
+    productionHash: stableDomainHash(nextPayload.domains.production),
   })
 }
 
@@ -597,7 +646,23 @@ export async function executeG2Command(input) {
   const critical = await loadOrInitCritical(dc, storeId, actor.uid)
   if (!critical.ok) return critical
 
+  const embedded = embeddedReceipt(critical.payload, idempotencyKey)
+  if (embedded?.result) {
+    // CAS already committed earlier; external receipt missing — recover + best-effort reinsert
+    await saveReceipt(
+      dc,
+      idempotencyKey,
+      storeId,
+      commandType,
+      actor.uid,
+      embedded.result,
+      embedded.criticalRevision ?? critical.revision,
+    )
+    return ok({ ...embedded.result, idempotent: true, recoveredFromEmbeddedReceipt: true })
+  }
+
   let warehouse = structuredClone(critical.payload.domains.warehouse)
+  const productionBeforeHash = stableDomainHash(critical.payload.domains.production)
   const now = new Date().toISOString()
 
   let resultPayload
@@ -633,12 +698,8 @@ export async function executeG2Command(input) {
   if (!resultPayload.ok) return resultPayload
   warehouse = resultPayload.warehouse
 
-  const committed = await casCommit(dc, storeId, critical, warehouse, actor.uid)
-  if (!committed.ok) return committed
-
-  const result = {
+  const resultPreview = {
     ...resultPayload.result,
-    criticalRevision: committed.criticalRevision,
     warehouse: {
       documents: warehouse.documents,
       movements: warehouse.movements,
@@ -651,6 +712,22 @@ export async function executeG2Command(input) {
       accountingByWarehouse: warehouse.accountingByWarehouse,
       dailyIssueSessions: warehouse.dailyIssueSessions,
     },
+  }
+
+  const committed = await casCommit(dc, storeId, critical, warehouse, actor.uid, {
+    idempotencyKey,
+    commandType,
+    result: resultPreview,
+  })
+  if (!committed.ok) return committed
+
+  if (stableDomainHash(committed.production) !== productionBeforeHash) {
+    return fail('cross_domain_corruption', 500)
+  }
+
+  const result = {
+    ...resultPreview,
+    criticalRevision: committed.criticalRevision,
   }
   await saveReceipt(dc, idempotencyKey, storeId, commandType, actor.uid, result, committed.criticalRevision)
   return ok(result)

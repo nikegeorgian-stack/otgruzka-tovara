@@ -61,6 +61,7 @@ import {
   g1GetAuthoritativeWarehouse,
   resolveAuthoritativeWarehouseOverlay,
 } from '@/lib/warehouse/g1ServerClient'
+import { resolveAuthoritativeProductionOverlay } from '@/lib/production/g3ServerClient'
 
 const SAVE_DEBOUNCE_MS = 2500
 const LOAD_TIMEOUT_MS = 45_000
@@ -317,19 +318,54 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         const parsed = parsePayloadJson(row.payloadJson)
         if (!parsed) throw new Error('invalid_payload')
         applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
-        // PHASE G1 — overlay authoritative warehouse when critical store revision > 0.
-        // Forged FstStore.warehouse from UpdateFstStore is not treated as stock truth.
-        try {
+            // PHASE G1 — overlay warehouse when warehouse domain active (or soft-upgrade rev>0).
+            try {
           const g1 = await g1GetAuthoritativeWarehouse(storeId)
-          if (g1.ok && g1.data.revision > 0 && g1.data.warehouse) {
+          if (g1.ok && g1.data.warehouse) {
+            const warehouseActive =
+              g1.data.warehouseActive === true ||
+              (g1.data.warehouseActive !== false && g1.data.revision > 0)
             const local = storeRef.current
-            const overlay = resolveAuthoritativeWarehouseOverlay({
-              legacyWarehouse: local.warehouse,
-              criticalWarehouse: g1.data.warehouse,
-              criticalRevision: g1.data.revision,
-            })
-            if (overlay.source === G1_CRITICAL_SOURCE) {
-              const next = { ...local, warehouse: overlay.warehouse }
+            let next = local
+            if (warehouseActive) {
+              const overlay = resolveAuthoritativeWarehouseOverlay({
+                legacyWarehouse: local.warehouse,
+                criticalWarehouse: g1.data.warehouse,
+                criticalRevision: g1.data.revision,
+                warehouseActive: true,
+              })
+              if (overlay.source === G1_CRITICAL_SOURCE) {
+                next = { ...next, warehouse: overlay.warehouse }
+              }
+            }
+            // PHASE G3.1 — production overlay ONLY when production domain explicitly active
+            const productionActive = g1.data.productionActive === true
+            if (productionActive && g1.data.production) {
+              const prodOverlay = resolveAuthoritativeProductionOverlay({
+                legacyProduction: next.production as unknown as Record<string, unknown>,
+                criticalProduction: g1.data.production,
+                criticalRevision: g1.data.revision,
+                productionActive: true,
+              })
+              if (prodOverlay.source === 'fst_critical_store') {
+                next = {
+                  ...next,
+                  production: prodOverlay.production as typeof next.production,
+                }
+              } else if (prodOverlay.authoritativeBlocked) {
+                console.warn('FST G3 production overlay blocked — not treating legacy as truth')
+              }
+            } else {
+              // Ensure flag stays false so legacy production remains visible
+              next = {
+                ...next,
+                production: {
+                  ...next.production,
+                  g3ProductionDomainActive: false,
+                } as typeof next.production,
+              }
+            }
+            if (next !== local) {
               applyCloud(next)
               if (!cloudDirtyTracker.hasPendingUserOperations()) {
                 commitSyncedBaseline(next, row.revision)
@@ -337,7 +373,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
             }
           }
         } catch (g1Err) {
-          console.warn('FST G1 warehouse overlay skipped', g1Err)
+          console.warn('FST G1/G3 critical overlay skipped', g1Err)
         }
         if (force) setError(null)
       } catch (err) {

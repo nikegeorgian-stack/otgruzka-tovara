@@ -103,10 +103,21 @@ describe('G1 critical helpers', () => {
   it('rejects non-allowlisted domains in critical payload', async () => {
     const h = await import('../api/fst/_g1CriticalHelpers.mjs')
     const bad = h.parseCriticalPayload(
-      JSON.stringify({ schemaVersion: 1, domains: { warehouse: h.emptyWarehouseStore(), production: {} } }),
+      JSON.stringify({
+        schemaVersion: 1,
+        domains: { warehouse: h.emptyWarehouseStore(), sales: {} },
+      }),
     )
     expect(bad.ok).toBe(false)
     expect(bad.error).toBe('domain_not_allowed')
+    const good = h.parseCriticalPayload(
+      JSON.stringify({
+        schemaVersion: 3,
+        domains: { warehouse: h.emptyWarehouseStore(), production: h.emptyProductionStore() },
+      }),
+    )
+    expect(good.ok).toBe(true)
+    expect(h.G1_ALLOWED_DOMAINS).toEqual(['warehouse', 'production'])
   })
 
   it('server recomputes balance from movements (ignores client balances)', async () => {
@@ -215,7 +226,7 @@ describe('G1 warehouse post command', () => {
     expect(r.warehouse.documents).toHaveLength(1)
     expect(r.warehouse.movements).toHaveLength(1)
     expect(r.warehouse.auditLog).toHaveLength(1)
-    expect(r.criticalRevision).toBe(2) // init 1 then post → 2
+    expect(r.criticalRevision).toBe(1) // init 0 then post → 1
   })
 
   it('rejects issue that would go negative (server-side stock)', async () => {

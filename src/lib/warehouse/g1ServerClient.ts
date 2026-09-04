@@ -63,9 +63,11 @@ export function resolveAuthoritativeWarehouseOverlay(input: {
   legacyWarehouse: WarehouseStore
   criticalWarehouse?: WarehouseStore | null
   criticalRevision?: number
+  warehouseActive?: boolean
 }): { warehouse: WarehouseStore; source: G1WarehouseSource; criticalRevision: number } {
   const rev = Number(input.criticalRevision ?? 0)
-  if (rev > 0 && input.criticalWarehouse) {
+  const active = input.warehouseActive === true || (input.warehouseActive !== false && rev > 0)
+  if (active && input.criticalWarehouse) {
     return {
       warehouse: {
         ...input.legacyWarehouse,
@@ -99,7 +101,7 @@ export function resolveAuthoritativeWarehouseOverlay(input: {
   return {
     warehouse: input.legacyWarehouse,
     source: G1_LEGACY_NOT_AUTHORITATIVE,
-    criticalRevision: 0,
+    criticalRevision: rev,
   }
 }
 
@@ -123,6 +125,18 @@ export async function g1GetAuthoritativeWarehouse(storeId = FST_SHARED_STORE_DOC
     ok: true
     revision: number
     warehouse: WarehouseStore
+    production?: {
+      recipeVersions?: unknown[]
+      orders?: unknown[]
+      shiftReports?: unknown[]
+      wipBatches?: unknown[]
+      wasteRecords?: unknown[]
+      handoffs?: unknown[]
+      auditLog?: unknown[]
+    }
+    domainMeta?: unknown
+    warehouseActive?: boolean
+    productionActive?: boolean
     source: string
     authoritative: boolean
   }>('/api/fst/g1-warehouse-get', { storeId })

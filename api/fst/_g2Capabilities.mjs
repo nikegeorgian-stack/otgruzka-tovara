@@ -48,7 +48,7 @@ export function hasCapability(caps, capability) {
 
 /** Default grant shape for sysadmin bootstrap (explicit, not from FstStore). */
 export function defaultWarehouseCapabilities(partial = {}) {
-  return {
+  const out = {
     [G2_CAPS.READ]: partial[G2_CAPS.READ] !== false && partial.canViewWarehouse !== false,
     [G2_CAPS.DRAFT_EDIT]:
       partial[G2_CAPS.DRAFT_EDIT] === true || partial.canDraftEdit === true,
@@ -62,4 +62,12 @@ export function defaultWarehouseCapabilities(partial = {}) {
     [G2_CAPS.PERIOD_CLOSE]: partial[G2_CAPS.PERIOD_CLOSE] === true,
     [G2_CAPS.PERIOD_REOPEN]: partial[G2_CAPS.PERIOD_REOPEN] === true,
   }
+  // PHASE G3 — pass through production capabilities / line scopes explicitly granted.
+  for (const [key, value] of Object.entries(partial)) {
+    if (key.startsWith('production.') && value === true) out[key] = true
+  }
+  if (Array.isArray(partial.productionLineIds)) {
+    out.productionLineIds = partial.productionLineIds.map(String)
+  }
+  return out
 }

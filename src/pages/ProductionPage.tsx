@@ -107,7 +107,7 @@ type Props = {
     report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
     productionOrderId: string
     idempotencyKey: string
-  }) => ConfirmShiftReportResult
+  }) => ConfirmShiftReportResult | Promise<ConfirmShiftReportResult>
   onConfirmPackagingReport?: (input: {
     report: import('@/lib/production/packagingReports').ConfirmPackagingReportInput['report']
     idempotencyKey: string
@@ -130,7 +130,7 @@ type Props = {
     report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
     productionOrderId: string
     idempotencyKey: string
-  }) => ConfirmShiftReportResult
+  }) => ConfirmShiftReportResult | Promise<ConfirmShiftReportResult>
 }
 
 type ProductionWorkspaceDraft = {

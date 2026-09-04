@@ -42,7 +42,9 @@ type Props = {
     >
     productionOrderId: string
     idempotencyKey: string
-  }) => { ok: boolean; error?: string; report?: ProductionShiftReport }
+  }) =>
+    | { ok: boolean; error?: string; report?: ProductionShiftReport }
+    | Promise<{ ok: boolean; error?: string; report?: ProductionShiftReport }>
   onCorrect: (input: {
     originalReportId: string
     correctionReason: string
@@ -52,7 +54,9 @@ type Props = {
     >
     productionOrderId: string
     idempotencyKey: string
-  }) => { ok: boolean; error?: string }
+  }) =>
+    | { ok: boolean; error?: string; report?: ProductionShiftReport }
+    | Promise<{ ok: boolean; error?: string; report?: ProductionShiftReport }>
 }
 
 export function ProductionShiftReportPanel({
@@ -147,7 +151,7 @@ export function ProductionShiftReportPanel({
     ]
   }
 
-  function handleConfirm() {
+  async function handleConfirm() {
     setNotice(null)
     if (!order || !snapshot || !primaryItemId) {
       setNotice(t('production.shift.errSetup'))
@@ -196,7 +200,7 @@ export function ProductionShiftReportPanel({
     }
 
     if (correctionMode && viewReport) {
-      const res = onCorrect({
+      const res = await onCorrect({
         originalReportId: viewReport.id,
         correctionReason,
         productionOrderId: order.id,
@@ -211,7 +215,7 @@ export function ProductionShiftReportPanel({
       return
     }
 
-    const res = onConfirm({
+    const res = await onConfirm({
       productionOrderId: order.id,
       idempotencyKey: reportBase.idempotencyKey,
       report: reportBase,

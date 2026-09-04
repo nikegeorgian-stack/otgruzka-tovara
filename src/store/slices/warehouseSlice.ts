@@ -588,9 +588,67 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       }
     },
 
-    transferProductionOrderMaterials(
+    async transferProductionOrderMaterials(
       input: ProductionMaterialTransferInput,
-    ): HandoffResult {
+    ): Promise<HandoffResult> {
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+      if (
+        isG3WebAuthoritativePath() &&
+        isG3ProductionDomainActive(
+          // production may not be on warehouse slice store — read via getStore if available
+          (typeof getStore === 'function'
+            ? (getStore() as { production?: Record<string, unknown> }).production
+            : undefined) as Record<string, unknown>,
+        )
+      ) {
+        const server = await g3ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'production.material.issueToLine',
+          command: {
+            orderId: input.productionOrder.id,
+            lineId: input.productionOrder.lineId,
+            rawWarehouseId: input.rawWarehouseId,
+            overReserveReason: input.overReserveReason,
+            reason: input.overReserveReason || input.comment,
+            lines: input.lines.map((l) => ({
+              itemId: l.itemId,
+              quantity: l.quantity,
+              batchNo: l.batchNo,
+              expiryDate: l.expiryDate,
+            })),
+          },
+        })
+        if (!server.ok) return { ok: false, error: server.error || server.message }
+        patchWarehouse(
+          setStore,
+          (w) => {
+            const mirrored = mirrorG3Ack(w, {}, {
+              warehouse: server.data.warehouse,
+              production: server.data.production,
+              criticalRevision: server.data.criticalRevision,
+            })
+            return mirrored.warehouse
+          },
+          {
+            origin: 'user',
+            atomic: true,
+            transactionGroupId: warehouseTransactionGroupId({
+              kind: 'production_material_transfer',
+              sourceId: input.productionOrder.id,
+              revision: String(server.data.criticalRevision ?? 1),
+            }),
+            transactionGroupKind: 'production_material_transfer',
+            transactionGroupLabel: 'G3 issue to line',
+          },
+        )
+        return {
+          ok: true,
+          documentIds: (server.data as { documentIds?: string[] }).documentIds,
+          idempotent: server.data.idempotent,
+        }
+      }
+
       let result: HandoffResult = { ok: false, error: 'unknown' }
       const kind = input.overReserveReason?.trim()
         ? 'production_over_reserve_issue'
@@ -625,7 +683,64 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       return result
     },
 
-    returnProductionOrderMaterials(input: ProductionMaterialReturnInput): HandoffResult {
+    async returnProductionOrderMaterials(input: ProductionMaterialReturnInput): Promise<HandoffResult> {
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+      if (
+        isG3WebAuthoritativePath() &&
+        isG3ProductionDomainActive(
+          // production may not be on warehouse slice store — read via getStore if available
+          (typeof getStore === 'function'
+            ? (getStore() as { production?: Record<string, unknown> }).production
+            : undefined) as Record<string, unknown>,
+        )
+      ) {
+        const server = await g3ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'production.material.returnFromLine',
+          command: {
+            orderId: input.productionOrder.id,
+            lineId: input.productionOrder.lineId,
+            rawWarehouseId: input.rawWarehouseId,
+            reason: input.returnReason,
+            lines: input.lines.map((l) => ({
+              itemId: l.itemId,
+              quantity: l.quantity,
+              batchNo: l.batchNo,
+              expiryDate: l.expiryDate,
+            })),
+          },
+        })
+        if (!server.ok) return { ok: false, error: server.error || server.message }
+        patchWarehouse(
+          setStore,
+          (w) => {
+            const mirrored = mirrorG3Ack(w, {}, {
+              warehouse: server.data.warehouse,
+              production: server.data.production,
+              criticalRevision: server.data.criticalRevision,
+            })
+            return mirrored.warehouse
+          },
+          {
+            origin: 'user',
+            atomic: true,
+            transactionGroupId: warehouseTransactionGroupId({
+              kind: 'production_material_return',
+              sourceId: input.productionOrder.id,
+              revision: String(server.data.criticalRevision ?? 1),
+            }),
+            transactionGroupKind: 'production_material_return',
+            transactionGroupLabel: 'G3 return from line',
+          },
+        )
+        return {
+          ok: true,
+          documentIds: (server.data as { documentIds?: string[] }).documentIds,
+          idempotent: server.data.idempotent,
+        }
+      }
+
       let result: HandoffResult = { ok: false, error: 'unknown' }
       const groupId =
         input.transactionGroupId ??

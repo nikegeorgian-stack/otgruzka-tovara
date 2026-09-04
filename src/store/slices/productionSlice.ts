@@ -270,7 +270,77 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       )
     },
 
-    activateProductionOrder(id: string): { ok: boolean; messageKey?: string } {
+    async activateProductionOrder(id: string): Promise<{ ok: boolean; messageKey?: string; error?: string }> {
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+      if (
+        isG3WebAuthoritativePath() &&
+        isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const order = getStore().production.planner.orders.find((o) => o.id === id)
+        if (!order) return { ok: false, messageKey: 'planner.material.noOrder' }
+        // Ensure draft exists on critical store then confirm
+        const draftKey = `g3-order-draft-${id}`
+        const draft = await g3ProductionCommand({
+          idempotencyKey: draftKey,
+          commandType: 'production.order.draft.save',
+          command: {
+            orderId: id,
+            orderNumber: order.orderNumber,
+            finishedProductId: order.finishedProductId,
+            formulationRecipeId: order.formulationRecipeId,
+            lineId: order.lineId,
+            totalQtyMp: order.totalQtyMp,
+            startDate: order.startDate,
+            endDate: order.endDate,
+            productName: order.productName,
+            customer: order.customer,
+            category: order.category,
+            priority: order.priority,
+          },
+        })
+        if (!draft.ok) return { ok: false, error: draft.error, messageKey: draft.error }
+        const rawWarehouseId =
+          getStore().warehouse.accountingByWarehouse?.[0]?.warehouseId ||
+          getStore().warehouse.locations?.[0]?.id ||
+          ''
+        const conf = await g3ProductionCommand({
+          idempotencyKey: `g3-order-confirm-${id}`,
+          commandType: 'production.order.confirm',
+          command: { orderId: id, rawWarehouseId },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error, messageKey: conf.error }
+        setStore((s) => {
+          const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            productionActive: true,
+          })
+          const orders = s.production.planner.orders.map((o) =>
+            o.id === id
+              ? {
+                  ...o,
+                  status: 'active' as const,
+                  recipeNormSnapshot: (
+                    conf.data.production?.orders as Array<{ id: string; recipeNormSnapshot?: unknown }> | undefined
+                  )?.find((x) => x.id === id)?.recipeNormSnapshot as typeof o.recipeNormSnapshot,
+                }
+              : o,
+          )
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+              planner: { ...s.production.planner, orders },
+            },
+          }
+        })
+        return { ok: true }
+      }
+
       let result: { ok: boolean; messageKey?: string } = {
         ok: false,
         messageKey: 'planner.material.noOrder',
@@ -707,12 +777,79 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return result
     },
 
-    confirmProductionShiftReport(input: {
+    async confirmProductionShiftReport(input: {
       report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
       productionOrderId: string
       idempotencyKey: string
       emergencyReason?: string
-    }): ConfirmShiftReportResult {
+    }): Promise<ConfirmShiftReportResult> {
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+      if (
+        isG3WebAuthoritativePath() &&
+        isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const order = getStore().production.planner.orders.find((o) => o.id === input.productionOrderId)
+        if (!order) return { ok: false, error: 'planner.material.noOrder' }
+        const materialLines = input.report.materialLines ?? []
+        const conf = await g3ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'production.shift.confirm',
+          command: {
+            orderId: input.productionOrderId,
+            lineId: input.report.lineId,
+            shiftDate: input.report.shiftDate,
+            shiftSlot: input.report.shift,
+            outputMp: input.report.outputM2,
+            outputRolls: input.report.rollCount ?? 0,
+            actualInputs: materialLines.map((l) => ({
+              itemId: l.itemId,
+              quantity: l.actualInputQty,
+              deviationReason: l.deviationReason,
+              batchNo: l.batchNo,
+              expiryDate: l.expiryDate,
+            })),
+            wasteLines: (input.report.wasteLines ?? []).map((w) => ({
+              itemId: w.itemId,
+              quantity: w.quantity,
+              reason: w.comment || w.reasonCode,
+              unit: w.unitSnapshot,
+            })),
+            semiFinishedItemId: input.report.semiFinishedItemId,
+            packLocationId: input.report.packagingLocationId,
+            reportKey: input.idempotencyKey,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let reportOut: import('@/lib/production/shiftReports').ProductionShiftReport | undefined
+        setStore((s) => {
+          const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+          })
+          const g3Reports = (conf.data.production?.shiftReports ?? []) as Array<
+            import('@/lib/production/shiftReports').ProductionShiftReport & { id: string }
+          >
+          reportOut = g3Reports.find((r) => r.id === conf.data.reportId) ?? g3Reports[g3Reports.length - 1]
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+              shiftReports: [
+                ...(s.production.shiftReports ?? []),
+                ...(reportOut && !(s.production.shiftReports ?? []).some((r) => r.id === reportOut!.id)
+                  ? [reportOut]
+                  : []),
+              ],
+            },
+          }
+        })
+        return { ok: true, report: reportOut }
+      }
+
       let result: ConfirmShiftReportResult = {
         ok: false,
         error: 'unknown',
@@ -763,14 +900,87 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return result
     },
 
-    confirmProductionShiftReportCorrection(input: {
+    async confirmProductionShiftReportCorrection(input: {
       originalReportId: string
       correctionReason: string
       report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
       productionOrderId: string
       idempotencyKey: string
       emergencyReason?: string
-    }): ConfirmShiftReportResult {
+    }): Promise<ConfirmShiftReportResult> {
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+      if (
+        isG3WebAuthoritativePath() &&
+        isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const materialLines = input.report.materialLines ?? []
+        const conf = await g3ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'production.shift.confirmCorrection',
+          command: {
+            originalReportId: input.originalReportId,
+            correctionReason: input.correctionReason,
+            emergencyReason: input.emergencyReason,
+            orderId: input.productionOrderId,
+            lineId: input.report.lineId,
+            shiftDate: input.report.shiftDate,
+            shiftSlot: input.report.shift,
+            outputMp: input.report.outputM2,
+            outputRolls: input.report.rollCount ?? 0,
+            actualInputs: materialLines.map((l) => ({
+              itemId: l.itemId,
+              quantity: l.actualInputQty,
+              deviationReason: l.deviationReason,
+              batchNo: l.batchNo,
+              expiryDate: l.expiryDate,
+            })),
+            wasteLines: (input.report.wasteLines ?? []).map((w) => ({
+              itemId: w.itemId,
+              quantity: w.quantity,
+              reason: w.comment || w.reasonCode,
+              unit: w.unitSnapshot,
+            })),
+            semiFinishedItemId: input.report.semiFinishedItemId,
+            packLocationId: input.report.packagingLocationId,
+            reportKey: input.idempotencyKey,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let reportOut: import('@/lib/production/shiftReports').ProductionShiftReport | undefined
+        setStore((s) => {
+          const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+          })
+          const g3Reports = (conf.data.production?.shiftReports ?? []) as Array<
+            import('@/lib/production/shiftReports').ProductionShiftReport & { id: string }
+          >
+          reportOut = g3Reports.find((r) => r.id === conf.data.reportId) ?? g3Reports[g3Reports.length - 1]
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+              shiftReports: [
+                ...(s.production.shiftReports ?? []).map((r) =>
+                  r.id === input.originalReportId
+                    ? { ...r, correctedAt: new Date().toISOString() }
+                    : r,
+                ),
+                ...(reportOut &&
+                !(s.production.shiftReports ?? []).some((r) => r.id === reportOut!.id)
+                  ? [reportOut]
+                  : []),
+              ],
+            },
+          }
+        })
+        return { ok: true, report: reportOut }
+      }
+
       let result: ConfirmShiftReportResult = { ok: false, error: 'unknown' }
       const groupId = warehouseTransactionGroupId({
         kind: 'production_shift_report',

@@ -94,7 +94,9 @@ type Props = {
   onMonthChange: (m: string) => void
   onSaveOrder: (o: ProductionOrder) => void
   onRemoveOrder: (id: string) => void
-  onActivateOrder: (id: string) => { ok: boolean; messageKey?: string }
+  onActivateOrder: (id: string) =>
+    | { ok: boolean; messageKey?: string; error?: string }
+    | Promise<{ ok: boolean; messageKey?: string; error?: string }>
   onRecalculateOrder: (id: string) => void
   onNavigateToDirectory: (section: DirectorySection) => void
   branchWorkspace: (target: WorkspaceBranchTarget, from?: WorkspaceBranchFrom) => void
@@ -207,6 +209,7 @@ export function PlannerPage({
     if (!focusOrderId) return
     const o = orders.find((x) => x.id === focusOrderId)
     if (o) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot focus load
       setSelectedId(o.id)
       setForm(o)
       setEditing(false)
@@ -467,9 +470,9 @@ export function PlannerPage({
     ) {
       return
     }
-    const res = onActivateOrder(id)
+    const res = await onActivateOrder(id)
     if (!res.ok) {
-      setNotice(t(res.messageKey ?? 'planner.activate.recipePending'))
+      setNotice(t(res.messageKey ?? res.error ?? 'planner.activate.recipePending'))
       return
     }
     setNotice(t('planner.activated'))

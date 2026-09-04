@@ -43,6 +43,10 @@ export default async function handler(req, res) {
     id: result.id,
     revision: result.revision,
     warehouse: result.warehouse,
+    production: result.production,
+    domainMeta: result.domainMeta,
+    warehouseActive: result.warehouseActive,
+    productionActive: result.productionActive,
     source: 'fst_critical_store',
   })
 }
