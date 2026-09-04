@@ -14,6 +14,19 @@ import {
 } from './_qcDataConnect.mjs'
 import { FST_ADMIN_EMAILS } from './_adminAuth.mjs'
 import { buildQcStoragePath, QC_ATTACHMENT_MAX_BYTES, assertMime, verifyStorageObject, createSignedUploadSession } from './_qcStorage.mjs'
+import {
+  getFstCriticalStore,
+  getFstPrincipalAccessByUidStore,
+  getG1DataConnect,
+  upsertFstPrincipalAccess,
+} from './_g1DataConnect.mjs'
+import {
+  isPackagingQcFeatureActive,
+  parseCapabilities,
+  parseCriticalPayload,
+  principalAccessId,
+} from './_g1CriticalHelpers.mjs'
+import { QC_PERMISSION_TO_G4 } from './_g4Capabilities.mjs'
 
 export function permissionId(storeId, uid) {
   return `${String(storeId ?? '').trim()}::${String(uid ?? '').trim()}`
@@ -58,6 +71,54 @@ async function loadPermission(dc, storeId, uid) {
   const { data } = await getQcPermissionByUidStore(dc, { firebaseUid: uid, storeId })
   const row = data?.qcPermissions?.[0] ?? null
   return row
+}
+
+/**
+ * PHASE G4.1 — packagingQc feature from FstCriticalStore.
+ * Fail-soft false when critical unavailable (legacy P1C.3 unit tests).
+ */
+export async function isPackagingQcActiveForStore(storeId) {
+  const id = String(storeId ?? '').trim()
+  if (!id) return false
+  try {
+    const g1 = getG1DataConnect()
+    const { data } = await getFstCriticalStore(g1, { id })
+    const row = data?.fstCriticalStore
+    if (!row) return false
+    const revision = Number(row.revision) || 0
+    const parsed = parseCriticalPayload(row.payloadJson, { revision })
+    if (!parsed.ok) return false
+    return isPackagingQcFeatureActive(parsed.payload)
+  } catch {
+    return false
+  }
+}
+
+async function loadPrincipalCaps(storeId, uid) {
+  const g1 = getG1DataConnect()
+  const { data } = await getFstPrincipalAccessByUidStore(g1, {
+    firebaseUid: uid,
+    storeId,
+  })
+  const row = data?.fstPrincipalAccesses?.[0] ?? null
+  if (!row || row.active !== true) return { row: null, caps: {} }
+  return { row, caps: parseCapabilities(row.capabilitiesJson) }
+}
+
+function syntheticPermissionFromFlag(storeId, uid, flag, base) {
+  return {
+    id: permissionId(storeId, uid),
+    firebaseUid: uid,
+    storeId,
+    active: true,
+    canView: flag === 'canView' ? true : Boolean(base?.canView),
+    canUpload: flag === 'canUpload',
+    canRelease: flag === 'canRelease',
+    canRegrade: flag === 'canRegrade',
+    canReject: flag === 'canReject',
+    canPostShipment: flag === 'canPostShipment',
+    [flag]: true,
+  }
 }
 
 async function loadLot(dc, lotId) {
@@ -146,23 +207,126 @@ function buildDecisionRow(currentDecision, input, actor, status) {
   }
 }
 
+/**
+ * PHASE G4.1 ACL:
+ * - packagingQc.active === true → ONLY FstPrincipalAccess (QcPermission ignored).
+ * - packagingQc inactive → legacy QcPermission OR principal (P1C.3 compatibility).
+ * AppStore roleId is never consulted.
+ */
 export async function requireActivePermission(uid, storeId, flag) {
-  const dc = getQcDataConnect()
-  const permission = await loadPermission(dc, storeId, uid)
-  if (!permission || permission.active !== true || permission[flag] !== true) {
+  const g4Cap = QC_PERMISSION_TO_G4[flag]
+  const packagingQcActive = await isPackagingQcActiveForStore(storeId)
+
+  if (packagingQcActive) {
+    if (!g4Cap) return fail('forbidden', 403)
+    try {
+      const { row, caps } = await loadPrincipalCaps(storeId, uid)
+      if (row && caps[g4Cap] === true) {
+        return ok({
+          permission: syntheticPermissionFromFlag(storeId, uid, flag, null),
+          source: 'fst_principal_access',
+          packagingQcActive: true,
+          principal: row,
+        })
+      }
+    } catch {
+      return fail('forbidden', 403)
+    }
     return fail('forbidden', 403)
   }
-  return ok({ permission })
+
+  const dc = getQcDataConnect()
+  const permission = await loadPermission(dc, storeId, uid)
+  if (permission && permission.active === true && permission[flag] === true) {
+    return ok({ permission, source: 'qc_permission_legacy', packagingQcActive: false })
+  }
+
+  if (g4Cap) {
+    try {
+      const { row, caps } = await loadPrincipalCaps(storeId, uid)
+      if (row && caps[g4Cap] === true) {
+        return ok({
+          permission: syntheticPermissionFromFlag(storeId, uid, flag, permission),
+          source: 'fst_principal_access',
+          packagingQcActive: false,
+          principal: row,
+        })
+      }
+    } catch {
+      // Principal unavailable — fall through.
+    }
+  }
+
+  return fail('forbidden', 403)
 }
 
+/** Mutating P1C.3 QC/shipment APIs must not bypass G4 after feature activation. */
+export async function rejectIfPackagingQcAuthoritative(storeId) {
+  if (await isPackagingQcActiveForStore(storeId)) {
+    return fail('use_g4_gateway', 409)
+  }
+  return ok()
+}
+
+function flagsToG4Caps(flags) {
+  const caps = {}
+  const safe = asSafeFlags(flags)
+  for (const [flag, g4] of Object.entries(QC_PERMISSION_TO_G4)) {
+    if (safe[flag] === true) caps[g4] = true
+  }
+  return caps
+}
+
+/**
+ * Admin grant: FstPrincipalAccess is canonical; QcPermission is deprecated projection only.
+ */
 export async function grantPermission(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
   if (!isSysadminActor(actor)) return fail('forbidden', 403)
+  const storeId = String(input.storeId ?? '').trim()
+  const firebaseUid = String(input.firebaseUid ?? '').trim()
+  if (!storeId || !firebaseUid) return fail('invalid_input', 400)
+
   const dc = getQcDataConnect()
-  const current = await loadPermission(dc, input.storeId, input.firebaseUid)
-  const row = buildPermissionRow(current, input, actor)
+  const current = await loadPermission(dc, storeId, firebaseUid)
+  const row = buildPermissionRow(current, { ...input, storeId, firebaseUid }, actor)
   await upsertQcPermission(dc, row)
+
+  try {
+    const g1 = getG1DataConnect()
+    const { data } = await getFstPrincipalAccessByUidStore(g1, { firebaseUid, storeId })
+    const existing = data?.fstPrincipalAccesses?.[0] ?? null
+    const prevCaps = existing ? parseCapabilities(existing.capabilitiesJson) : {}
+    const nextCaps = { ...prevCaps, ...flagsToG4Caps(input.flags) }
+    for (const [flag, g4] of Object.entries(QC_PERMISSION_TO_G4)) {
+      if (row[flag] === true) nextCaps[g4] = true
+      else if (
+        input.flags &&
+        Object.prototype.hasOwnProperty.call(input.flags, flag) &&
+        input.flags[flag] !== true
+      ) {
+        nextCaps[g4] = false
+      }
+    }
+    await upsertFstPrincipalAccess(g1, {
+      id: principalAccessId(storeId, firebaseUid),
+      firebaseUid,
+      storeId,
+      roleId: existing?.roleId ?? 'qc',
+      capabilitiesJson: JSON.stringify(nextCaps),
+      active: true,
+      revision: (existing?.revision ?? 0) + 1,
+      createdByUid: existing?.createdByUid ?? actor.uid,
+      updatedByUid: actor.uid,
+      revokedAt: null,
+      revokedByUid: null,
+      revokeReason: null,
+    })
+  } catch (err) {
+    console.warn('grantPermission principal upsert failed', err)
+  }
+
   return ok({
     permission: {
       id: row.id,
@@ -181,33 +345,94 @@ export async function grantPermission(input) {
       revokedByUid: row.revokedByUid,
       revokeReason: row.revokeReason,
     },
+    aclSource: 'fst_principal_access',
   })
 }
 
+/**
+ * Admin revoke: clear mapped QC/shipment G4 caps on principal + deprecate QcPermission.
+ */
 export async function revokePermission(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
   if (!isSysadminActor(actor)) return fail('forbidden', 403)
   if (!asNonEmptyString(input.reason)) return fail('invalid_input', 400)
+  const storeId = String(input.storeId ?? '').trim()
+  const firebaseUid = String(input.firebaseUid ?? '').trim()
+  if (!storeId || !firebaseUid) return fail('invalid_input', 400)
+
   const dc = getQcDataConnect()
-  const current = await loadPermission(dc, input.storeId, input.firebaseUid)
-  const row = buildPermissionRow(current, {
-    ...input,
-    active: false,
-    revokedAt: new Date().toISOString(),
-    revokedByUid: actor.uid,
-    revokeReason: input.reason,
-    flags: {
-      canView: false,
-      canUpload: false,
-      canRelease: false,
-      canRegrade: false,
-      canReject: false,
-      canPostShipment: false,
+  const current = await loadPermission(dc, storeId, firebaseUid)
+  const row = buildPermissionRow(
+    current,
+    {
+      ...input,
+      storeId,
+      firebaseUid,
+      active: false,
+      revokedAt: new Date().toISOString(),
+      revokedByUid: actor.uid,
+      revokeReason: input.reason,
+      flags: {
+        canView: false,
+        canUpload: false,
+        canRelease: false,
+        canRegrade: false,
+        canReject: false,
+        canPostShipment: false,
+      },
     },
-  }, actor)
+    actor,
+  )
   await upsertQcPermission(dc, row)
-  return ok({ permission: row })
+
+  try {
+    const g1 = getG1DataConnect()
+    const { data } = await getFstPrincipalAccessByUidStore(g1, { firebaseUid, storeId })
+    const existing = data?.fstPrincipalAccesses?.[0] ?? null
+    const prevCaps = existing ? parseCapabilities(existing.capabilitiesJson) : {}
+    const nextCaps = { ...prevCaps }
+    for (const g4 of Object.values(QC_PERMISSION_TO_G4)) {
+      nextCaps[g4] = false
+    }
+    await upsertFstPrincipalAccess(g1, {
+      id: principalAccessId(storeId, firebaseUid),
+      firebaseUid,
+      storeId,
+      roleId: existing?.roleId ?? 'qc',
+      capabilitiesJson: JSON.stringify(nextCaps),
+      active: existing?.active === true,
+      revision: (existing?.revision ?? 0) + 1,
+      createdByUid: existing?.createdByUid ?? actor.uid,
+      updatedByUid: actor.uid,
+      revokedAt: existing?.revokedAt ?? null,
+      revokedByUid: existing?.revokedByUid ?? null,
+      revokeReason: existing?.revokeReason ?? null,
+    })
+  } catch (err) {
+    console.warn('revokePermission principal upsert failed', err)
+  }
+
+  return ok({
+    permission: {
+      id: row.id,
+      firebaseUid: row.firebaseUid,
+      storeId: row.storeId,
+      active: row.active,
+      canView: row.canView,
+      canUpload: row.canUpload,
+      canRelease: row.canRelease,
+      canRegrade: row.canRegrade,
+      canReject: row.canReject,
+      canPostShipment: row.canPostShipment,
+      revision: row.revision,
+      updatedByUid: row.updatedByUid,
+      revokedAt: row.revokedAt,
+      revokedByUid: row.revokedByUid,
+      revokeReason: row.revokeReason,
+    },
+    aclSource: 'fst_principal_access',
+  })
 }
 
 export async function initiateAttachment(input) {
@@ -347,6 +572,8 @@ async function updateAttachmentRecord(dc, record, objectGeneration, nextRevision
 export async function upsertLotProjection(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const dc = getQcDataConnect()
   const current = await loadLot(dc, input.id)
   if (current && current.storeId !== input.storeId) return fail('not_found', 404)
@@ -356,6 +583,8 @@ export async function upsertLotProjection(input) {
 }
 
 export async function releaseLot(input) {
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canRelease')
   if (!permission.ok) return permission
   const dc = getQcDataConnect()
@@ -423,6 +652,8 @@ export async function releaseLot(input) {
 }
 
 export async function regradeLot(input) {
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canRegrade')
   if (!permission.ok) return permission
   if (!asNonEmptyString(input.reason)) return fail('invalid_input', 400)
@@ -451,6 +682,8 @@ export async function regradeLot(input) {
 }
 
 export async function rejectLot(input) {
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canReject')
   if (!permission.ok) return permission
   if (!asNonEmptyString(input.reason)) return fail('invalid_input', 400)
@@ -493,6 +726,8 @@ async function loadLatestDecision(dc, storeId, lotId) {
 }
 
 export async function authorizeShipment(input) {
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canPostShipment')
   if (!permission.ok) return permission
   const dc = getQcDataConnect()
@@ -557,6 +792,8 @@ export async function applyShipment(input) {
 }
 
 export async function cancelShipment(input) {
+  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canPostShipment')
   if (!permission.ok) return permission
   const dc = getQcDataConnect()

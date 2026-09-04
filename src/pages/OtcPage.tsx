@@ -50,13 +50,13 @@ type Props = {
   access: AccessStore
   finishedProducts: FinishedProduct[]
   currentUser?: AppUser | null
-  onStartQcReview: (lotId: string) => void
+  onStartQcReview: (lotId: string) => void | Promise<void>
   onReleaseFinishedGoodsLot: (input: {
     lotId: string
     access?: AccessStore | null
     actor?: { id?: string; name?: string; roleId?: AppUser['roleId'] }
     attachments?: { passportAttachmentId?: string; protocolAttachmentId?: string }
-  }) => { ok: boolean; error?: string }
+  }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onMirrorServerQcRelease: (input: {
     lotId: string
     decisionId: string
@@ -73,13 +73,13 @@ type Props = {
     access?: AccessStore | null
     actor?: { id?: string; name?: string; roleId?: AppUser['roleId'] }
     idempotencyKey: string
-  }) => { ok: boolean; error?: string }
+  }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onRejectFinishedGoodsLot: (input: {
     lotId: string
     reason: string
     access?: AccessStore | null
     actor?: { id?: string; name?: string; roleId?: AppUser['roleId'] }
-  }) => { ok: boolean; error?: string }
+  }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onUpsertQcAttachment: (input: {
     lotId: string
     documentKind: QcDocumentKind
@@ -128,6 +128,7 @@ export function OtcPage({
 
   useEffect(() => {
     if (!focusTab) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot focus load
     setTab(focusTab)
     onFocusTabConsumed?.()
   }, [focusTab, onFocusTabConsumed])
@@ -197,7 +198,7 @@ export function OtcPage({
     setNotice(`${lot.batchNo}: ${attachment.displayName}`)
   }
 
-  function handleRelease(lot: FinishedGoodsLot) {
+  async function handleRelease(lot: FinishedGoodsLot) {
     const preview = previewReleaseFinishedGoodsLot(productionStore, {
       lotId: lot.id,
       access,
@@ -209,6 +210,26 @@ export function OtcPage({
     }).result
     if (!preview.ok) {
       setNotice(t(preview.error ?? 'otc.qc.error'))
+      return
+    }
+
+    const { isG4WebAuthoritativePath, isG4PackagingQcActive } = await import(
+      '@/lib/production/g4ServerClient'
+    )
+    if (
+      isG4WebAuthoritativePath() &&
+      isG4PackagingQcActive(productionStore as unknown as Record<string, unknown>)
+    ) {
+      const result = await onReleaseFinishedGoodsLot({
+        lotId: lot.id,
+        access,
+        actor,
+        attachments: {
+          passportAttachmentId: lot.passportAttachmentId,
+          protocolAttachmentId: lot.protocolAttachmentId,
+        },
+      })
+      setNotice(result.ok ? t('otc.qc.released') : t(result.error ?? 'otc.qc.error'))
       return
     }
 
@@ -240,7 +261,7 @@ export function OtcPage({
       return
     }
 
-    const result = onReleaseFinishedGoodsLot({
+    const result = await onReleaseFinishedGoodsLot({
       lotId: lot.id,
       access,
       actor,
@@ -252,12 +273,12 @@ export function OtcPage({
     setNotice(result.ok ? t('otc.qc.released') : t(result.error ?? 'otc.qc.error'))
   }
 
-  function handleReview(lot: FinishedGoodsLot) {
-    onStartQcReview(lot.id)
+  async function handleReview(lot: FinishedGoodsLot) {
+    await onStartQcReview(lot.id)
     setNotice(`${lot.batchNo}: ${t(lotQcBadgeKey('in_review'))}`)
   }
 
-  function handleRegrade(lot: FinishedGoodsLot) {
+  async function handleRegrade(lot: FinishedGoodsLot) {
     const draft = regradeDraftFor(lot)
     const targetProduct = finishedProducts.find((p) => p.id === draft.targetFinishedProductId)
     const targetWarehouseItemId = targetProduct?.warehouseItemId
@@ -270,7 +291,7 @@ export function OtcPage({
       setNotice(t('otc.qc.error'))
       return
     }
-    const result = onRequestRegrade({
+    const result = await onRequestRegrade({
       lotId: lot.id,
       access,
       targetFinishedProductId: targetProduct.id,
@@ -283,8 +304,8 @@ export function OtcPage({
     setNotice(result.ok ? t('otc.qc.regraded') : t(result.error ?? 'otc.qc.error'))
   }
 
-  function handleReject(lot: FinishedGoodsLot) {
-    const result = onRejectFinishedGoodsLot({
+  async function handleReject(lot: FinishedGoodsLot) {
+    const result = await onRejectFinishedGoodsLot({
       lotId: lot.id,
       access,
       reason: t('otc.qc.rejectReason'),

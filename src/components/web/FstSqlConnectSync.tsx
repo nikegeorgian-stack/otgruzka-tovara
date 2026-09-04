@@ -365,6 +365,40 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
                 } as typeof next.production,
               }
             }
+            // PHASE G4 — packaging/QC/FG overlay ONLY when packagingQc feature explicitly active.
+            // Production core active alone must NOT hide legacy packaging/FG data.
+            const packagingQcActive = g1.data.packagingQcActive === true
+            if (packagingQcActive && g1.data.production) {
+              const { resolveAuthoritativePackagingOverlay } = await import(
+                '@/lib/production/g4ServerClient'
+              )
+              const g4Overlay = resolveAuthoritativePackagingOverlay({
+                legacyProduction: next.production as unknown as Record<string, unknown>,
+                criticalProduction: g1.data.production,
+                criticalWarehouse: g1.data.warehouse,
+                legacyWarehouse: next.warehouse,
+                criticalRevision: g1.data.revision,
+                packagingQcActive: true,
+                productionActive,
+              })
+              if (g4Overlay.source === 'fst_critical_store') {
+                next = {
+                  ...next,
+                  production: g4Overlay.production as typeof next.production,
+                  warehouse: g4Overlay.warehouse ?? next.warehouse,
+                }
+              } else if (g4Overlay.authoritativeBlocked) {
+                console.warn('FST G4 packaging overlay blocked — not treating legacy as truth')
+              }
+            } else {
+              next = {
+                ...next,
+                production: {
+                  ...next.production,
+                  g4PackagingQcActive: false,
+                } as typeof next.production,
+              }
+            }
             if (next !== local) {
               applyCloud(next)
               if (!cloudDirtyTracker.hasPendingUserOperations()) {

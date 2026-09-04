@@ -43,6 +43,8 @@ const WAREHOUSE_KNOWN = new Set([
   'materialShortages',
   'productionLineBindings',
   'scrapLocationId',
+  // PHASE G4 — loading/shipment journals live with warehouse stock truth
+  'loadingShipments',
 ])
 
 const PRODUCTION_KNOWN = new Set([
@@ -54,6 +56,10 @@ const PRODUCTION_KNOWN = new Set([
   'handoffs',
   'auditLog',
   'lineBindings',
+  // PHASE G4 — packaging / FG lots / canonical QC decision snapshots
+  'packagingReports',
+  'finishedGoodsLots',
+  'qcDecisions',
 ])
 
 export function emptyWarehouseStore() {
@@ -69,10 +75,11 @@ export function emptyWarehouseStore() {
     periodHistory: [],
     accountingByWarehouse: [],
     dailyIssueSessions: [],
+    loadingShipments: [],
   }
 }
 
-/** Minimal authoritative production roots (G3). Legacy FstStore production remains for non-critical UI. */
+/** Minimal authoritative production roots (G3 + G4 fields). Legacy FstStore remains until packagingQc activation. */
 export function emptyProductionStore() {
   return {
     recipeVersions: [],
@@ -83,6 +90,9 @@ export function emptyProductionStore() {
     handoffs: [],
     auditLog: [],
     lineBindings: [],
+    packagingReports: [],
+    finishedGoodsLots: [],
+    qcDecisions: [],
   }
 }
 
@@ -136,6 +146,7 @@ function normalizeWarehouse(raw) {
     materialShortages: asArray(src.materialShortages),
     productionLineBindings: asArray(src.productionLineBindings),
     scrapLocationId: src.scrapLocationId,
+    loadingShipments: asArray(src.loadingShipments),
   }
 }
 
@@ -151,7 +162,29 @@ function normalizeProduction(raw) {
     handoffs: asArray(src.handoffs),
     auditLog: asArray(src.auditLog),
     lineBindings: asArray(src.lineBindings),
+    packagingReports: asArray(src.packagingReports),
+    finishedGoodsLots: asArray(src.finishedGoodsLots),
+    qcDecisions: asArray(src.qcDecisions),
   }
+}
+
+function normalizeFeatureMeta(raw) {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (!value || typeof value !== 'object') {
+      out[key] = value
+      continue
+    }
+    out[key] = {
+      ...pickUnknown(value, new Set(['active', 'version', 'activatedAt', 'activatedBy'])),
+      active: value.active === true,
+      version: Number(value.version) || (value.active === true ? 1 : 0),
+      activatedAt: value.activatedAt,
+      activatedBy: value.activatedBy,
+    }
+  }
+  return out
 }
 
 function normalizeDomainMeta(raw) {
@@ -159,6 +192,8 @@ function normalizeDomainMeta(raw) {
   if (!raw || typeof raw !== 'object') return base
   const wh = raw.warehouse && typeof raw.warehouse === 'object' ? raw.warehouse : {}
   const prod = raw.production && typeof raw.production === 'object' ? raw.production : {}
+  const prodKnown = new Set(['active', 'version', 'activatedAt', 'activatedBy', 'features'])
+  const features = normalizeFeatureMeta(prod.features)
   return {
     warehouse: {
       ...pickUnknown(wh, new Set(['active', 'version', 'activatedAt', 'activatedBy'])),
@@ -168,11 +203,12 @@ function normalizeDomainMeta(raw) {
       activatedBy: wh.activatedBy,
     },
     production: {
-      ...pickUnknown(prod, new Set(['active', 'version', 'activatedAt', 'activatedBy'])),
+      ...pickUnknown(prod, prodKnown),
       active: prod.active === true,
       version: Number(prod.version) || (prod.active === true ? 1 : 0),
       activatedAt: prod.activatedAt,
       activatedBy: prod.activatedBy,
+      ...(features ? { features } : {}),
     },
   }
 }
@@ -207,6 +243,44 @@ export function isWarehouseDomainActive(payload, revision = 0) {
 
 export function isProductionDomainActive(payload, revision = 0) {
   return resolveDomainActivation(payload, revision).productionActive
+}
+
+/**
+ * PHASE G4 — packaging/QC/FG/shipment feature flag.
+ * Production core active alone must NOT make empty packaging/QC authoritative.
+ */
+export function isPackagingQcFeatureActive(payload) {
+  return payload?.domainMeta?.production?.features?.packagingQc?.active === true
+}
+
+export function markPackagingQcFeatureActive(payload, actorUid, now = new Date().toISOString()) {
+  const meta = {
+    ...(payload.domainMeta && typeof payload.domainMeta === 'object'
+      ? payload.domainMeta
+      : emptyDomainMeta()),
+  }
+  if (!meta.warehouse || typeof meta.warehouse !== 'object') {
+    meta.warehouse = { active: false, version: 0 }
+  }
+  const prevProd = meta.production && typeof meta.production === 'object' ? meta.production : {}
+  const prevFeatures =
+    prevProd.features && typeof prevProd.features === 'object' ? { ...prevProd.features } : {}
+  const prevFeat =
+    prevFeatures.packagingQc && typeof prevFeatures.packagingQc === 'object'
+      ? prevFeatures.packagingQc
+      : {}
+  prevFeatures.packagingQc = {
+    ...prevFeat,
+    active: true,
+    version: Math.max(1, Number(prevFeat.version) || 0) + (prevFeat.active === true ? 0 : 1),
+    activatedAt: prevFeat.activatedAt ?? now,
+    activatedBy: prevFeat.activatedBy ?? actorUid,
+  }
+  meta.production = {
+    ...prevProd,
+    features: prevFeatures,
+  }
+  return { ...payload, domainMeta: meta }
 }
 
 export function markWarehouseDomainActive(payload, actorUid, now = new Date().toISOString()) {

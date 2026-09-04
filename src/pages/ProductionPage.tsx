@@ -115,7 +115,7 @@ type Props = {
     appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
     access?: import('@/lib/access/types').AccessStore | null
     emergencyReason?: string
-  }) => ConfirmPackagingReportResult
+  }) => ConfirmPackagingReportResult | Promise<ConfirmPackagingReportResult>
   onConfirmPackagingReportCorrection?: (input: {
     report: import('@/lib/production/packagingReports').ConfirmPackagingReportInput['report']
     idempotencyKey: string
@@ -123,7 +123,7 @@ type Props = {
     appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
     access?: import('@/lib/access/types').AccessStore | null
     emergencyReason?: string
-  }) => { ok: boolean; error?: string }
+  }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onCorrectShiftReport: (input: {
     originalReportId: string
     correctionReason: string
@@ -336,7 +336,7 @@ export function ProductionPage({
     )
   }
 
-  function confirmPackagingReport() {
+  async function confirmPackagingReport() {
     if (!onConfirmPackagingReport || !activePackagingOrder) return
     const report = {
       productionOrderId: activePackagingOrder.id,
@@ -381,7 +381,7 @@ export function ProductionPage({
       id: undefined,
       number: undefined,
     }
-    const result = onConfirmPackagingReport({
+    const result = await onConfirmPackagingReport({
       report,
       idempotencyKey: `pack::${activePackagingOrder.id}::${form.date}`,
       actor: {
@@ -392,9 +392,11 @@ export function ProductionPage({
       appScope,
       access,
     })
-    if (result.ok) {
-      openPackagingPrintPreview(result)
+    if (!result.ok) {
+      setNotice(result.error ? t(result.error) : 'Error')
+      return
     }
+    openPackagingPrintPreview(result)
   }
 
   const plannerPreview = useMemo(

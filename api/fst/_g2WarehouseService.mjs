@@ -21,6 +21,7 @@ import {
   emptyCriticalPayload,
   fingerprintCriticalPayload,
   isPeriodClosed,
+  isPackagingQcFeatureActive,
   isProductionDomainActive,
   isWarehouseDomainActive,
   markWarehouseDomainActive,
@@ -174,6 +175,7 @@ export async function getAuthoritativeCriticalStore(storeId) {
       domainMeta: empty.domainMeta,
       warehouseActive: false,
       productionActive: false,
+      packagingQcActive: false,
       authoritative: true,
     })
   }
@@ -189,6 +191,7 @@ export async function getAuthoritativeCriticalStore(storeId) {
     domainMeta: parsed.payload.domainMeta,
     warehouseActive: isWarehouseDomainActive(parsed.payload, revision),
     productionActive: isProductionDomainActive(parsed.payload, revision),
+    packagingQcActive: isPackagingQcFeatureActive(parsed.payload),
     fingerprint: row.fingerprint,
     updatedByUid: row.updatedByUid,
     authoritative: true,

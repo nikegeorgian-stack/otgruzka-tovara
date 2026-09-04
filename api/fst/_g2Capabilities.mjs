@@ -66,8 +66,20 @@ export function defaultWarehouseCapabilities(partial = {}) {
   for (const [key, value] of Object.entries(partial)) {
     if (key.startsWith('production.') && value === true) out[key] = true
   }
+  // PHASE G4 — packaging / QC / shipment capabilities
+  for (const [key, value] of Object.entries(partial)) {
+    if (
+      (key.startsWith('packaging.') || key.startsWith('qc.') || key.startsWith('shipment.')) &&
+      value === true
+    ) {
+      out[key] = true
+    }
+  }
   if (Array.isArray(partial.productionLineIds)) {
     out.productionLineIds = partial.productionLineIds.map(String)
+  }
+  if (Array.isArray(partial.warehouseIds)) {
+    out.warehouseIds = partial.warehouseIds.map(String)
   }
   return out
 }

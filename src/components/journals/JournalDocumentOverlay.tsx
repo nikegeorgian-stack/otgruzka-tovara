@@ -35,6 +35,7 @@ export type JournalOverlayTarget =
   | { kind: 'sales_order'; orderId: string }
 
 /** Ссылки, которые открываем окном поверх журнала (как в 1С). */
+// eslint-disable-next-line react-refresh/only-export-components -- helper co-located with overlay
 export function journalOverlayTarget(link: JournalLink): JournalOverlayTarget | null {
   switch (link.kind) {
     case 'warehouse_document':
@@ -86,7 +87,9 @@ type LoadingHandlers = {
   onPostLoadingShipment: (
     shipmentId: string,
     args?: { keeperId?: string; keeperName?: string },
-  ) => import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+  ) =>
+    | import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+    | Promise<import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult>
   onRemoveLoadingShipment: (shipmentId: string) => void
   onUpsertItem: (item: WarehouseItem) => void
   onUpsertFinishedProduct: (fp: FinishedProduct) => void
@@ -303,6 +306,7 @@ function WarehouseDocOverlay({
   }, [warehouse.categories])
   const balances = useMemo(
     () => computeAllBalances(warehouse, whId || undefined),
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- warehouse object identity from store
     [warehouse, whId],
   )
   const counterparties = store.counterparties?.items ?? []

@@ -131,7 +131,9 @@ type Props = {
   onPostLoadingShipment: (
     shipmentId: string,
     args?: { keeperId?: string; keeperName?: string },
-  ) => import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+  ) =>
+    | import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+    | Promise<import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult>
   onRemoveLoadingShipment: (shipmentId: string) => void
   salesOrders?: SalesOrder[]
   onOpenSalesOrder?: (orderId: string) => void
@@ -706,6 +708,7 @@ export function WarehouseLoadingTab({
     if (!state.counterpartyId) return
     const cp = counterparties.find((c) => c.id === state.counterpartyId)
     if (!cp) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync customer name from counterparty id
     setState((s) => (s.customer === cp.name ? s : { ...s, customer: cp.name }))
   }, [counterparties, state.counterpartyId])
 
@@ -786,7 +789,7 @@ export function WarehouseLoadingTab({
     setError(null)
     const id = onUpsertLoadingShipment(buildInput())
     setState((s) => ({ ...s, draftId: id }))
-    const res = onPostLoadingShipment(id, { keeperId, keeperName })
+    const res = await onPostLoadingShipment(id, { keeperId, keeperName })
     if (!res.ok) {
       const base = t(res.error ?? 'warehouse.loading.errGeneric')
       setError(res.detail ? `${base}: ${res.detail}` : base)
@@ -815,8 +818,12 @@ export function WarehouseLoadingTab({
     if (!pendingOpenShipmentId) return
     const shipments = listLoadingShipments(warehouse)
     const shipment = shipments.find((s) => s.id === pendingOpenShipmentId)
-    if (shipment) openDraft(shipment)
+    if (shipment) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot open from journal
+      openDraft(shipment)
+    }
     onPendingOpenConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot pending open
   }, [pendingOpenShipmentId])
 
   function newForm() {

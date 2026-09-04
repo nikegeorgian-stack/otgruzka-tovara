@@ -200,7 +200,9 @@ export type WarehousePageProps = {
   onPostLoadingShipment?: (
     shipmentId: string,
     args?: { keeperId?: string; keeperName?: string },
-  ) => import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+  ) =>
+    | import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+    | Promise<import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult>
   onRemoveLoadingShipment?: (shipmentId: string) => void
   salesOrders?: import('@/lib/sales/types').SalesOrder[]
   onOpenSalesOrder?: (orderId: string) => void

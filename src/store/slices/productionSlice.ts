@@ -1075,7 +1075,76 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return reportId
     },
 
-    confirmPackagingReport(input: ConfirmPackagingReportInput): ReturnType<typeof confirmPackagingReportCore>['result'] {
+    async confirmPackagingReport(
+      input: ConfirmPackagingReportInput,
+    ): Promise<ReturnType<typeof confirmPackagingReportCore>['result']> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const report = input.report
+        const conf = await g4ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'packaging.report.confirm',
+          command: {
+            productionOrderId: report.productionOrderId,
+            orderId: report.productionOrderId,
+            lineId: report.lineId ?? 'pack',
+            reportDate: report.shiftDate,
+            date: report.shiftDate,
+            shiftSlot: report.shift === 'night' ? 'night' : 'day',
+            finishedProductId: report.finishedProductId,
+            warehouseItemId: report.warehouseItemId,
+            packagingLocationId: report.packagingLocationId,
+            outputM2: report.outputM2,
+            outputMp: report.outputM2,
+            outputRolls: report.rollCount ?? 0,
+            wipLines: report.wipLines ?? [],
+            materialLines: report.materialLines ?? [],
+            batchNo: report.batchNo,
+            reportKey: input.idempotencyKey,
+            emergencyReason: input.emergencyReason,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: true }
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          const reportId = conf.data.reportId ?? conf.data.finishedGoodsLotId
+          const reports = (mirrored.production.packagingReports ?? []) as ProductionPackagingReport[]
+          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
+          const confirmedReport =
+            reports.find((r) => r.id === reportId || r.idempotencyKey === input.idempotencyKey) ??
+            reports.find((r) => r.id === conf.data.reportId)
+          const lot =
+            lots.find((l) => l.id === conf.data.finishedGoodsLotId) ??
+            lots.find((l) => l.packagingReportId === confirmedReport?.id)
+          result = {
+            ok: true,
+            idempotent: conf.data.idempotent,
+            report: confirmedReport,
+            lot,
+          }
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return result
+      }
+
       let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: false, error: 'unknown' }
       const groupId =
         input.transactionGroupId ??
@@ -1117,9 +1186,78 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return result
     },
 
-    confirmPackagingReportCorrection(
+    async confirmPackagingReportCorrection(
       input: ConfirmPackagingReportInput,
-    ): ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] {
+    ): Promise<ReturnType<typeof confirmPackagingReportCorrectionCore>['result']> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const report = input.report
+        const conf = await g4ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'packaging.report.confirmCorrection',
+          command: {
+            originalReportId: report.correctsReportId,
+            correctsReportId: report.correctsReportId,
+            correctionReason: report.correctionReason,
+            reason: report.correctionReason,
+            emergencyReason: input.emergencyReason ?? report.correctionReason,
+            productionOrderId: report.productionOrderId,
+            orderId: report.productionOrderId,
+            lineId: report.lineId ?? 'pack',
+            reportDate: report.shiftDate,
+            date: report.shiftDate,
+            shiftSlot: report.shift === 'night' ? 'night' : 'day',
+            finishedProductId: report.finishedProductId,
+            warehouseItemId: report.warehouseItemId,
+            packagingLocationId: report.packagingLocationId,
+            outputM2: report.outputM2,
+            outputMp: report.outputM2,
+            outputRolls: report.rollCount ?? 0,
+            wipLines: report.wipLines ?? [],
+            materialLines: report.materialLines ?? [],
+            batchNo: report.batchNo,
+            reportKey: input.idempotencyKey,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = { ok: true }
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          const reports = (mirrored.production.packagingReports ?? []) as ProductionPackagingReport[]
+          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
+          const confirmedReport =
+            reports.find((r) => r.id === conf.data.reportId || r.idempotencyKey === input.idempotencyKey)
+          const lot =
+            lots.find((l) => l.id === conf.data.finishedGoodsLotId) ??
+            lots.find((l) => l.packagingReportId === confirmedReport?.id)
+          result = {
+            ok: true,
+            idempotent: conf.data.idempotent,
+            report: confirmedReport,
+            lot,
+          }
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return result
+      }
+
       let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = {
         ok: false,
         error: 'unknown',
@@ -1176,7 +1314,38 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       )
     },
 
-    startQcReview(lotId: string) {
+    async startQcReview(lotId: string): Promise<void> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const conf = await g4ProductionCommand({
+          idempotencyKey: `g4-qc-review-${lotId}`,
+          commandType: 'qc.review.start',
+          command: { lotId, finishedGoodsLotId: lotId },
+        })
+        if (!conf.ok) return
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return
+      }
       setStore((s) => {
         const lots = s.production.finishedGoodsLots ?? []
         const nextLots = lots.map((lot) => (lot.id === lotId ? startQcReviewCore(lot) : lot))
@@ -1226,7 +1395,50 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return attachment
     },
 
-    releaseFinishedGoodsLot(input: ReleaseFinishedGoodsLotInput) {
+    async releaseFinishedGoodsLot(
+      input: ReleaseFinishedGoodsLotInput,
+    ): Promise<ReturnType<typeof releaseFinishedGoodsLot>['result']> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const conf = await g4ProductionCommand({
+          idempotencyKey: `g4-qc-release-${input.lotId}`,
+          commandType: 'qc.release',
+          command: {
+            lotId: input.lotId,
+            finishedGoodsLotId: input.lotId,
+            passportAttachmentId: input.attachments?.passportAttachmentId,
+            protocolAttachmentId: input.attachments?.protocolAttachmentId,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let result: ReturnType<typeof releaseFinishedGoodsLot>['result'] = { ok: true }
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
+          const lot = lots.find((l) => l.id === input.lotId || l.id === conf.data.finishedGoodsLotId)
+          result = { ok: true, lot }
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return result
+      }
+
       const groupId = `warehouse::qc_release::${input.lotId}::release`
       let result: ReturnType<typeof releaseFinishedGoodsLot>['result'] = { ok: false, error: 'unknown' }
       setStore(
@@ -1289,7 +1501,57 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return { ok: Boolean(lot), lot }
     },
 
-    requestRegrade(input: RequestRegradeInput) {
+    async requestRegrade(
+      input: RequestRegradeInput,
+    ): Promise<ReturnType<typeof requestRegrade>['result']> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const conf = await g4ProductionCommand({
+          idempotencyKey: input.idempotencyKey,
+          commandType: 'qc.regrade',
+          command: {
+            lotId: input.lotId,
+            finishedGoodsLotId: input.lotId,
+            targetFinishedProductId: input.targetFinishedProductId,
+            targetWarehouseItemId: input.targetWarehouseItemId,
+            reason: input.reason,
+            regradeReason: input.reason,
+            quantity: input.quantity,
+            batchNo: input.batchNo,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let result: ReturnType<typeof requestRegrade>['result'] = { ok: true }
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
+          const originalLot = lots.find((l) => l.id === input.lotId)
+          const newLot =
+            lots.find((l) => l.originalLotId === input.lotId) ??
+            lots.find((l) => l.id === conf.data.finishedGoodsLotId)
+          result = { ok: true, originalLot, newLot }
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return result
+      }
+
       const groupId = `warehouse::qc_regrade::${input.lotId}::${input.idempotencyKey}`
       let result: ReturnType<typeof requestRegrade>['result'] = { ok: false, error: 'unknown' }
       setStore(
@@ -1323,7 +1585,50 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return result
     },
 
-    rejectFinishedGoodsLot(input: RejectFinishedGoodsLotInput) {
+    async rejectFinishedGoodsLot(
+      input: RejectFinishedGoodsLotInput,
+    ): Promise<ReturnType<typeof rejectFinishedGoodsLot>['result']> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const conf = await g4ProductionCommand({
+          idempotencyKey: `g4-qc-reject-${input.lotId}`,
+          commandType: 'qc.reject',
+          command: {
+            lotId: input.lotId,
+            finishedGoodsLotId: input.lotId,
+            reason: input.reason,
+            rejectReason: input.reason,
+          },
+        })
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        let result: ReturnType<typeof rejectFinishedGoodsLot>['result'] = { ok: true }
+        setStore((s) => {
+          const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
+            warehouse: conf.data.warehouse,
+            production: conf.data.production,
+            criticalRevision: conf.data.criticalRevision,
+            packagingQcActive: conf.data.packagingQcActive ?? true,
+            productionActive: conf.data.productionActive,
+          })
+          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
+          const lot = lots.find((l) => l.id === input.lotId || l.id === conf.data.finishedGoodsLotId)
+          result = { ok: true, lot }
+          return {
+            ...s,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...s.production,
+              ...(mirrored.production as typeof s.production),
+            },
+          }
+        })
+        return result
+      }
+
       const groupId = `warehouse::qc_reject_transfer::${input.lotId}::reject`
       let result: ReturnType<typeof rejectFinishedGoodsLot>['result'] = { ok: false, error: 'unknown' }
       setStore(

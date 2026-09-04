@@ -47,6 +47,7 @@ export default async function handler(req, res) {
     domainMeta: result.domainMeta,
     warehouseActive: result.warehouseActive,
     productionActive: result.productionActive,
+    packagingQcActive: result.packagingQcActive === true,
     source: 'fst_critical_store',
   })
 }

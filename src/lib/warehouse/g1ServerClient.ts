@@ -137,6 +137,7 @@ export async function g1GetAuthoritativeWarehouse(storeId = FST_SHARED_STORE_DOC
     domainMeta?: unknown
     warehouseActive?: boolean
     productionActive?: boolean
+    packagingQcActive?: boolean
     source: string
     authoritative: boolean
   }>('/api/fst/g1-warehouse-get', { storeId })

@@ -37,6 +37,7 @@ export function assertLotShippable(
     return { ok: false, error: SHIP_LOT_ITEM }
   }
   // On web, forged qcStatus is ignored unless server decision mirror says released.
+  // When G4 packagingQc is active, overlay sets serverQcDecisionStatus from critical qcDecisions.
   const isWeb =
     typeof import.meta !== 'undefined' &&
     Boolean((import.meta as ImportMeta & { env?: { VITE_FST_WEB?: string } }).env?.VITE_FST_WEB === 'true')

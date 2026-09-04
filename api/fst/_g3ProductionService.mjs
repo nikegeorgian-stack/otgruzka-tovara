@@ -19,6 +19,7 @@ import {
   fingerprintCriticalPayload,
   isPeriodClosed,
   isProductionDomainActive,
+  markPackagingQcFeatureActive,
   markProductionDomainActive,
   markWarehouseDomainActive,
   nextServerDocumentNumber,
@@ -153,7 +154,7 @@ async function casCommitDomains(
   nextWarehouse,
   nextProduction,
   actorUid,
-  { idempotencyKey, commandType, result, activateProduction = false } = {},
+  { idempotencyKey, commandType, result, activateProduction = false, activatePackagingQc = false } = {},
 ) {
   let nextPayload = {
     ...critical.payload,
@@ -167,6 +168,9 @@ async function casCommitDomains(
   // Preserve warehouse activation; never auto-activate production except explicit flag
   if (isProductionDomainActive(critical.payload, critical.revision) || activateProduction) {
     nextPayload = markProductionDomainActive(nextPayload, actorUid)
+  }
+  if (activatePackagingQc) {
+    nextPayload = markPackagingQcFeatureActive(nextPayload, actorUid)
   }
   if (
     critical.payload.domainMeta?.warehouse?.active === true ||

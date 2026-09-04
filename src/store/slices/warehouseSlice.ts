@@ -780,6 +780,67 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       documentId: string,
       args?: { cancelledBy?: string; cancelledByName?: string; reason?: string },
     ): Promise<CancelDocumentResult> {
+      const currentForG4 = getStore()
+      const loadingShipmentForG4 = currentForG4.warehouse.loadingShipments?.find((shipment) => {
+        if (shipment.postedDocumentId === documentId) return true
+        const docIds = (shipment as { documentIds?: string[] }).documentIds
+        return Array.isArray(docIds) && docIds.includes(documentId)
+      })
+      if (loadingShipmentForG4) {
+        const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+          await import('@/lib/production/g4ServerClient')
+        if (
+          isG4WebAuthoritativePath() &&
+          isG4PackagingQcActive(currentForG4.production as unknown as Record<string, unknown>)
+        ) {
+          const reason = args?.reason?.trim()
+          if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
+          const server = await g4ProductionCommand({
+            idempotencyKey: `g4-ship-cancel-${loadingShipmentForG4.id}`,
+            commandType: 'shipment.cancel',
+            command: {
+              shipmentId: loadingShipmentForG4.id,
+              reason,
+              cancellationReason: reason,
+            },
+          })
+          if (!server.ok) return { ok: false, error: server.error || server.message }
+          setStore((s) => {
+            const mirrored = mirrorG4Ack(
+              s.warehouse,
+              s.production as unknown as Record<string, unknown>,
+              {
+                warehouse: server.data.warehouse,
+                production: server.data.production,
+                criticalRevision: server.data.criticalRevision,
+                packagingQcActive: server.data.packagingQcActive ?? true,
+                productionActive: server.data.productionActive,
+              },
+            )
+            let next = {
+              ...s,
+              warehouse: mirrored.warehouse,
+              production: {
+                ...s.production,
+                ...(mirrored.production as typeof s.production),
+              },
+            }
+            if (loadingShipmentForG4.salesOrderId) {
+              next = syncSalesOrderLoadingInStore(next, loadingShipmentForG4.salesOrderId)
+            }
+            return next
+          })
+          const reversalIds = Array.isArray(
+            (server.data as { reversalDocumentIds?: string[]; reversalIds?: string[] }).reversalDocumentIds,
+          )
+            ? ((server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds as string[])
+            : Array.isArray((server.data as { reversalIds?: string[] }).reversalIds)
+              ? ((server.data as { reversalIds?: string[] }).reversalIds as string[])
+              : []
+          return { ok: true, reversalIds }
+        }
+      }
+
       if (isG2WebAuthoritativePath()) {
         const reason = args?.reason?.trim()
         if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
@@ -1237,10 +1298,87 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       return shipmentId
     },
 
-    postLoadingShipment(
+    async postLoadingShipment(
       shipmentId: string,
       args?: { keeperId?: string; keeperName?: string },
     ) {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        await import('@/lib/production/g4ServerClient')
+      if (
+        isG4WebAuthoritativePath() &&
+        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const shipment = getStore().warehouse.loadingShipments?.find((s) => s.id === shipmentId)
+        if (!shipment) {
+          return { ok: false as const, error: 'warehouse.loading.errNotFound' }
+        }
+        const lots = getStore().production.finishedGoodsLots ?? []
+        const usages = resolveLoadingShipmentLotUsages(shipment.lines, lots)
+        if (!usages.ok) return { ok: false as const, error: usages.error }
+        if (usages.usages.length === 0) {
+          return { ok: false as const, error: 'warehouse.loading.errEmpty' }
+        }
+
+        let lastNumber = shipment.number
+        for (const usage of usages.usages) {
+          const lot = lots.find((l) => l.id === usage.lotId)
+          if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
+          const lineShipmentId =
+            usages.usages.length === 1 ? shipmentId : `${shipmentId}::${usage.lineId}`
+          const server = await g4ProductionCommand({
+            idempotencyKey: `g4-ship-post-${lineShipmentId}`,
+            commandType: 'shipment.post',
+            command: {
+              shipmentId: lineShipmentId,
+              finishedProductId: lot.finishedProductId,
+              finishedGoodsLotId: usage.lotId,
+              lotId: usage.lotId,
+              quantity: usage.quantity,
+              warehouseId: shipment.warehouseId || lot.warehouseId,
+              salesOrderId: shipment.salesOrderId,
+              date: shipment.date,
+              counterpartyId: shipment.counterpartyId,
+              keeperId: args?.keeperId ?? shipment.keeperId,
+              keeperName: args?.keeperName ?? shipment.keeperName,
+            },
+          })
+          if (!server.ok) {
+            return { ok: false as const, error: server.error || server.message }
+          }
+          setStore((s) => {
+            const mirrored = mirrorG4Ack(
+              s.warehouse,
+              s.production as unknown as Record<string, unknown>,
+              {
+                warehouse: server.data.warehouse,
+                production: server.data.production,
+                criticalRevision: server.data.criticalRevision,
+                packagingQcActive: server.data.packagingQcActive ?? true,
+                productionActive: server.data.productionActive,
+              },
+            )
+            let next = {
+              ...s,
+              warehouse: mirrored.warehouse,
+              production: {
+                ...s.production,
+                ...(mirrored.production as typeof s.production),
+              },
+            }
+            if (shipment.salesOrderId) {
+              next = syncSalesOrderLoadingInStore(next, shipment.salesOrderId)
+              next = markSalesOrderShippedIfFullyLoaded(next, shipment.salesOrderId)
+            }
+            return next
+          })
+          lastNumber =
+            (server.data as { number?: string }).number ??
+            server.data.shipmentId ??
+            lastNumber
+        }
+        return { ok: true as const, number: lastNumber }
+      }
+
       let result: ReturnType<typeof postLoadingShipment>['result'] = {
         ok: false,
         error: 'warehouse.loading.errNotFound',
