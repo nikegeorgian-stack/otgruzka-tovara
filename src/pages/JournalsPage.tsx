@@ -318,10 +318,11 @@ export function JournalsPage({
       if (!draft) return
       const saveDraft = warehouseDocActions.onSaveDocumentDraft
       if (!saveDraft) return
-      const result = saveDraft(draft)
-      if (result.ok) {
-        setOverlay({ kind: 'warehouse_document', documentId: result.documentId, mode: 'edit' })
-      }
+      void Promise.resolve(saveDraft(draft)).then((result) => {
+        if (result.ok) {
+          setOverlay({ kind: 'warehouse_document', documentId: result.documentId, mode: 'edit' })
+        }
+      })
       return
     }
     if (basedOn === 'loading_from_sales' && entry.link.kind === 'sales_order') {

@@ -315,19 +315,23 @@ export default function App() {
       }
       return app.postWarehouseDoc(doc)
     },
-    onPostTransfer: app.postWarehouseTransfer,
-    onCancelDocument: (documentId: string, args?: { reason?: string }) =>
+    onPostTransfer: async (
+      doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
+        targetWarehouseId: string
+      },
+    ) => app.postWarehouseTransfer(doc),
+    onCancelDocument: async (documentId: string, args?: { reason?: string }) =>
       app.cancelWarehouseDocument(documentId, {
         cancelledBy: app.currentUser?.id,
         cancelledByName: app.currentUser?.displayName,
         reason: args?.reason,
       }),
-    onSaveDocumentDraft: (doc: SaveDraftInput) =>
+    onSaveDocumentDraft: async (doc: SaveDraftInput) =>
       app.saveWarehouseDocDraft(doc, {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
       }),
-    onPostExistingDocument: (documentId: string) =>
+    onPostExistingDocument: async (documentId: string) =>
       app.postExistingWarehouseDoc(documentId, {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
@@ -336,7 +340,7 @@ export default function App() {
       // PHASE W1 — destructive unpost removed; UI should use onCancelDocument.
       return { ok: false as const, error: 'warehouse.doc.errUnpostRemoved' }
     },
-    onRemoveDocumentDraft: (documentId: string) =>
+    onRemoveDocumentDraft: async (documentId: string) =>
       app.removeWarehouseDraft(documentId, {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
@@ -352,7 +356,7 @@ export default function App() {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
       }),
-    onPostOpeningInventory: (input: Parameters<typeof app.postOpeningInventory>[0]) =>
+    onPostOpeningInventory: async (input: Parameters<typeof app.postOpeningInventory>[0]) =>
       app.postOpeningInventory(input, {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
@@ -1650,6 +1654,12 @@ export default function App() {
               onPostWorkshopMasterCoverage={app.postWorkshopMasterCoverage}
               onEndWorkshopMasterCoverage={app.endWorkshopMasterCoverage}
               onSetWarehouseMonthClosed={app.setWarehouseMonthClosed}
+              canCloseWarehousePeriod={
+                accessUser?.roleId === 'sysadmin' || accessUser?.roleId === 'operations_director'
+              }
+              canReopenWarehousePeriod={
+                accessUser?.roleId === 'sysadmin' || accessUser?.roleId === 'operations_director'
+              }
               onAddMonth={app.addMonth}
               onRemoveMonth={app.removeMonth}
               onArchiveMonth={app.archiveMonth}

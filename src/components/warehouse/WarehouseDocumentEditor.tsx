@@ -99,12 +99,12 @@ type Props = {
     doc: Omit<WarehouseDocument, 'id' | 'createdAt'>,
   ) => PostDocumentResult | Promise<PostDocumentResult>
   /** Сохранить черновик (без движений). Если не задан — кнопки черновика нет. */
-  onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult
+  onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
   onPostTransfer?: (
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string
     },
-  ) => PostDocumentResult
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onMergeInvoiceRegistry: (registry: import('@/lib/warehouse/types').GeorgianInvoice[]) => void
   onCancel?: () => void
   allowNegativeStock?: boolean
@@ -121,7 +121,7 @@ type Props = {
 
 export type WarehouseDocumentEditorHandle = {
   isDirty: () => boolean
-  saveDraft: () => boolean
+  saveDraft: () => boolean | Promise<boolean>
 }
 
 function newLine(): DocLineRow {
@@ -537,7 +537,9 @@ ref,
         if (!(await confirm({ message: `${t('warehouse.issue.overdraftConfirm')}\n\n${detail}`, danger: true }))) return
       }
       setFormError(null)
-      const result = onPostTransfer({ ...buildDocBase(), lines: parsed, targetWarehouseId })
+      const result = await Promise.resolve(
+        onPostTransfer({ ...buildDocBase(), lines: parsed, targetWarehouseId }),
+      )
       if (showPostError(result)) return
       resetForm()
       return
@@ -590,7 +592,7 @@ ref,
     resetForm()
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!onSaveDraft || readOnly) return false
     const itemUnitMap = new Map(activeItems.map((i) => [i.id, i.unit]))
     const parsed = lines
@@ -611,12 +613,14 @@ ref,
             : {}),
         }
       })
-    const result = onSaveDraft({
-      id: existingDocument?.id,
-      type,
-      ...buildDocBase(),
-      lines: parsed,
-    })
+    const result = await Promise.resolve(
+      onSaveDraft({
+        id: existingDocument?.id,
+        type,
+        ...buildDocBase(),
+        lines: parsed,
+      }),
+    )
     if (showPostError(result)) return false
     setFormError(null)
     if (!existingDocument) resetForm()

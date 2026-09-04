@@ -2980,6 +2980,11 @@ export const ru: Dict = {
   'settings.warehousePeriodClosed': 'Период склада закрыт.',
   'settings.warehousePeriodOpened': 'Период склада открыт.',
   'settings.warehousePeriodClosedBadge': 'закрыт',
+  'settings.warehousePeriodForbidden': 'Нет права закрывать/открывать период склада.',
+  'settings.confirmCloseWarehousePeriod': 'Закрыть складской период «{month}»? Проводки в этом месяце будут запрещены.',
+  'settings.confirmReopenWarehousePeriod': 'Открыть складской период «{month}» повторно?',
+  'settings.warehousePeriodReopenReasonPrompt': 'Укажите причину повторного открытия периода:',
+  'settings.warehousePeriodReopenReasonRequired': 'Для открытия периода нужна обязательная причина.',
   'settings.colWhPeriod': 'Месяц',
   'settings.monthsHint': 'Текущий и следующий месяц создаются сами при открытии табеля (стрелки ‹ ›). Кнопка ниже — только для далёких месяцев. Архивный месяц нельзя удалить без снятия «Архив».',
   'settings.archiveBootstrapTitle': 'Архивное внесение (подготовка к внедрению)',
@@ -5699,6 +5704,10 @@ export const ru: Dict = {
   'warehouse.g1.errUnsupportedType':
     'Серверное проведение G1 пока поддерживает только приход и расход.',
   'warehouse.g1.errServer': 'Серверное проведение склада недоступно. Повторите позже.',
+  'warehouse.g2.errServer': 'Серверная команда склада недоступна. Повторите позже.',
+  'warehouse.g2.errPeriodClosed': 'Период склада закрыт. Операция запрещена.',
+  'warehouse.g2.errRevisionConflict':
+    'Конфликт версии склада. Обновите данные и повторите операцию.',
   'warehouse.doc.errPostedImmutable':
     'Проведённый или отменённый документ нельзя редактировать. Исправьте через сторно или корректирующий документ.',
   'warehouse.doc.errBareMovementBlocked':

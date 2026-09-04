@@ -76,7 +76,21 @@ export function resolveAuthoritativeWarehouseOverlay(input: {
         items: input.criticalWarehouse.items?.length
           ? input.criticalWarehouse.items
           : input.legacyWarehouse.items,
+        locations: input.criticalWarehouse.locations?.length
+          ? input.criticalWarehouse.locations
+          : input.legacyWarehouse.locations,
+        categories: input.criticalWarehouse.categories?.length
+          ? input.criticalWarehouse.categories
+          : input.legacyWarehouse.categories,
         auditLog: input.criticalWarehouse.auditLog ?? input.legacyWarehouse.auditLog,
+        closedMonths:
+          input.criticalWarehouse.closedMonths ?? input.legacyWarehouse.closedMonths,
+        accountingByWarehouse:
+          input.criticalWarehouse.accountingByWarehouse ??
+          input.legacyWarehouse.accountingByWarehouse,
+        dailyIssueSessions:
+          input.criticalWarehouse.dailyIssueSessions ??
+          input.legacyWarehouse.dailyIssueSessions,
       },
       source: G1_CRITICAL_SOURCE,
       criticalRevision: rev,

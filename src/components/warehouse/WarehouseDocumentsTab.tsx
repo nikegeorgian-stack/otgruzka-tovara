@@ -222,14 +222,14 @@ export function WarehouseDocumentsTab({
     setCancelTarget(doc)
   }
 
-  function confirmCancel() {
+  async function confirmCancel() {
     if (!onCancelDocument || !cancelTarget) return
     const reason = cancelReason.trim()
     if (!reason) {
       setJournalNotice(t('warehouse.doc.errCancelReasonRequired'))
       return
     }
-    const result = onCancelDocument(cancelTarget.id, { reason })
+    const result = await Promise.resolve(onCancelDocument(cancelTarget.id, { reason }))
     setCancelTarget(null)
     if (!result.ok) {
       setJournalNotice(t(result.error))
@@ -238,16 +238,16 @@ export function WarehouseDocumentsTab({
     setJournalNotice(t('warehouse.doc.cancelSuccess'))
   }
 
-  function handlePostExisting(doc: WarehouseDocument) {
+  async function handlePostExisting(doc: WarehouseDocument) {
     if (!onPostExistingDocument) return
     if (!window.confirm(t('warehouse.doc.postConfirm'))) return
-    const result = onPostExistingDocument(doc.id)
+    const result = await Promise.resolve(onPostExistingDocument(doc.id))
     setJournalNotice(result.ok ? t('warehouse.doc.postSuccess') : t(result.error))
   }
 
-  function handleRemoveDraft(doc: WarehouseDocument) {
+  async function handleRemoveDraft(doc: WarehouseDocument) {
     if (!onRemoveDocumentDraft) return
-    const result = onRemoveDocumentDraft(doc.id)
+    const result = await Promise.resolve(onRemoveDocumentDraft(doc.id))
     setJournalNotice(result.ok ? t('warehouse.doc.draftRemoved') : t(result.error))
   }
 
@@ -650,11 +650,15 @@ export function WarehouseDocumentsTab({
           size="preview"
           dirty={docModal.mode !== 'view' && docDirty}
           onSaveDirty={async () => {
-            const ok = docEditorRef.current?.saveDraft()
+            const ok = await Promise.resolve(docEditorRef.current?.saveDraft())
             if (ok === false) throw new Error('draft_save_failed')
           }}
           onPrimaryAction={
-            docModal.mode === 'view' ? undefined : () => docEditorRef.current?.saveDraft()
+            docModal.mode === 'view'
+              ? undefined
+              : async () => {
+                  await Promise.resolve(docEditorRef.current?.saveDraft())
+                }
           }
           initialFocus="none"
         >
@@ -753,9 +757,11 @@ export function WarehouseDocumentsTab({
               onPost={async (doc) => {
                 const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
                 if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
-                  const saved = onSaveDocumentDraft({ ...doc, id: draftId })
+                  const saved = await Promise.resolve(
+                    onSaveDocumentDraft({ ...doc, id: draftId }),
+                  )
                   if (!saved.ok) return saved
-                  const result = onPostExistingDocument(draftId)
+                  const result = await Promise.resolve(onPostExistingDocument(draftId))
                   if (result.ok) {
                     closeDocModal()
                     setJournalNotice(t('warehouse.doc.postSuccess'))
@@ -770,8 +776,8 @@ export function WarehouseDocumentsTab({
               }}
               onSaveDraft={
                 onSaveDocumentDraft && docModal.mode !== 'view'
-                  ? (doc) => {
-                      const result = onSaveDocumentDraft(doc)
+                  ? async (doc) => {
+                      const result = await Promise.resolve(onSaveDocumentDraft(doc))
                       if (result.ok) {
                         closeDocModal()
                         setJournalNotice(t('warehouse.doc.draftSaved'))
@@ -780,8 +786,10 @@ export function WarehouseDocumentsTab({
                     }
                   : undefined
               }
-              onPostTransfer={(doc) => {
-                const result = onPostTransfer?.(doc) ?? { ok: false as const, error: 'unknown' }
+              onPostTransfer={async (doc) => {
+                const result =
+                  (await Promise.resolve(onPostTransfer?.(doc))) ??
+                  ({ ok: false as const, error: 'unknown' } as const)
                 if (result.ok) {
                   closeDocModal()
                 }

@@ -29,12 +29,19 @@ type Props = {
   onPost: (
     sessionId: string,
     options?: { allowNegativeStock?: boolean },
-  ) => {
-    ok: boolean
-    reason?: string
-    detail?: string
-    documentNumber?: string
-  }
+  ) =>
+    | {
+        ok: boolean
+        reason?: string
+        detail?: string
+        documentNumber?: string
+      }
+    | Promise<{
+        ok: boolean
+        reason?: string
+        detail?: string
+        documentNumber?: string
+      }>
   onClose: () => void
 }
 
@@ -194,7 +201,7 @@ export function WarehouseDailyIssueModal({
       }
       if (!(await confirm({ message: `${t('warehouse.issue.overdraftConfirm')}\n\n${detail}`, danger: true }))) return
     }
-    const result = onPost(sessionId, { allowNegativeStock })
+    const result = await Promise.resolve(onPost(sessionId, { allowNegativeStock }))
     if (!result.ok) {
       if (result.reason === 'stock') {
         setError(tf('warehouse.dailyIssue.stockError', { items: result.detail ?? '' }))

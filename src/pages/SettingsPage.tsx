@@ -65,8 +65,14 @@ type Props = {
   }) => void
   onPostWorkshopMasterCoverage?: (coverageId: string) => void
   onEndWorkshopMasterCoverage?: (coverageId: string) => void
-  onSetWarehouseMonthClosed: (month: string, closed: boolean) => void
+  onSetWarehouseMonthClosed: (
+    month: string,
+    closed: boolean,
+    reason?: string,
+  ) => void | Promise<{ ok: boolean; error?: string } | void>
   onAddMonth: (month: string) => void
+  canCloseWarehousePeriod?: boolean
+  canReopenWarehousePeriod?: boolean
   onRemoveMonth: (month: string) => void
   onArchiveMonth: (month: string, archived: boolean) => void
   onSetMonthClosed: (month: string, closed: boolean) => void
@@ -107,6 +113,8 @@ export function SettingsPage({
   onEndWorkshopMasterCoverage,
   onSetWarehouseMonthClosed,
   onAddMonth,
+  canCloseWarehousePeriod,
+  canReopenWarehousePeriod,
   onRemoveMonth,
   onArchiveMonth,
   onSetMonthClosed,
@@ -145,6 +153,84 @@ export function SettingsPage({
 
   const months = listMonthKeys(store)
   const closedWhMonths = store.warehouse.closedMonths ?? []
+  const periodHistory = store.warehouse.periodHistory ?? []
+  const canCloseWhPeriod = canCloseWarehousePeriod ?? isSysAdmin(currentUser)
+  const canReopenWhPeriod = canReopenWarehousePeriod ?? isSysAdmin(currentUser)
+  const showWarehousePeriods = canCloseWhPeriod || canReopenWhPeriod || closedWhMonths.length > 0
+
+  function periodActorLabel(month: string) {
+    const entries = periodHistory.filter((h) => h.month === month)
+    const last = entries[entries.length - 1]
+    if (!last) return null
+    return {
+      action: last.action,
+      at: last.at,
+      who: last.actorEmail || last.actorUid,
+      reason: last.reason,
+    }
+  }
+
+  async function handleCloseWarehousePeriod(month: string) {
+    if (!canCloseWhPeriod) {
+      showNotice('error', t('settings.warehousePeriodForbidden'))
+      return
+    }
+    if (
+      !(await confirm({
+        message: tf('settings.confirmCloseWarehousePeriod', {
+          month: formatMonthTitle(month, locale),
+        }),
+        danger: true,
+      }))
+    ) {
+      return
+    }
+    try {
+      const res = await onSetWarehouseMonthClosed(month, true)
+      if (res && typeof res === 'object' && res.ok === false) {
+        showNotice('error', res.error || t('settings.err.generic'))
+        return
+      }
+      showNotice('success', t('settings.warehousePeriodClosed'))
+    } catch (err) {
+      showNotice('error', err instanceof Error ? err.message : t('settings.err.generic'))
+    }
+  }
+
+  async function handleReopenWarehousePeriod(month: string) {
+    if (!canReopenWhPeriod) {
+      showNotice('error', t('settings.warehousePeriodForbidden'))
+      return
+    }
+    const reason = window.prompt(t('settings.warehousePeriodReopenReasonPrompt'))
+    if (reason == null) return
+    const trimmed = reason.trim()
+    if (!trimmed) {
+      showNotice('error', t('settings.warehousePeriodReopenReasonRequired'))
+      return
+    }
+    if (
+      !(await confirm({
+        message: tf('settings.confirmReopenWarehousePeriod', {
+          month: formatMonthTitle(month, locale),
+        }),
+        danger: true,
+      }))
+    ) {
+      return
+    }
+    try {
+      const res = await onSetWarehouseMonthClosed(month, false, trimmed)
+      if (res && typeof res === 'object' && res.ok === false) {
+        showNotice('error', res.error || t('settings.err.generic'))
+        return
+      }
+      showNotice('success', t('settings.warehousePeriodOpened'))
+    } catch (err) {
+      showNotice('error', err instanceof Error ? err.message : t('settings.err.generic'))
+    }
+  }
+
   const dailyBackups = listDailyBackups()
   const signatures = store.settings.signatures ?? {}
 
@@ -304,7 +390,7 @@ export function SettingsPage({
         />
       )}
 
-      {!isWeb && currentUser && canManageAccess(currentUser) && (
+      {showWarehousePeriods && (
         <section className="rounded-sm border border-grid bg-white p-5 shadow-sm">
           <h3 className="text-sm font-bold uppercase tracking-wide text-ink-muted">
             {t('settings.warehousePeriods')}
@@ -314,8 +400,7 @@ export function SettingsPage({
             className="mt-4 flex flex-wrap items-end gap-3"
             onSubmit={(e) => {
               e.preventDefault()
-              onSetWarehouseMonthClosed(newWhPeriod, true)
-              showNotice('success', t('settings.warehousePeriodClosed'))
+              void handleCloseWarehousePeriod(newWhPeriod)
             }}
           >
             <label className="text-xs font-medium text-stone-500">
@@ -329,31 +414,39 @@ export function SettingsPage({
             </label>
             <button
               type="submit"
-              className="rounded-sm bg-stone-800 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-900"
+              disabled={!canCloseWhPeriod}
+              className="rounded-sm bg-stone-800 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('settings.warehousePeriodClose')}
             </button>
           </form>
           {closedWhMonths.length > 0 ? (
             <ul className="mt-4 space-y-2 text-sm">
-              {closedWhMonths.map((month) => (
-                <li key={month} className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium capitalize">{formatMonthTitle(month, locale)}</span>
-                  <span className="rounded-sm bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">
-                    {t('settings.warehousePeriodClosedBadge')}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-xs text-accent hover:underline"
-                    onClick={() => {
-                      onSetWarehouseMonthClosed(month, false)
-                      showNotice('success', t('settings.warehousePeriodOpened'))
-                    }}
-                  >
-                    {t('settings.warehousePeriodOpen')}
-                  </button>
-                </li>
-              ))}
+              {closedWhMonths.map((month) => {
+                const meta = periodActorLabel(month)
+                return (
+                  <li key={month} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium capitalize">{formatMonthTitle(month, locale)}</span>
+                    <span className="rounded-sm bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">
+                      {t('settings.warehousePeriodClosedBadge')}
+                    </span>
+                    {meta ? (
+                      <span className="text-xs text-stone-500">
+                        {meta.who}
+                        {meta.at ? ` · ${meta.at.slice(0, 16).replace('T', ' ')}` : ''}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={!canReopenWhPeriod}
+                      className="text-xs text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+                      onClick={() => void handleReopenWarehousePeriod(month)}
+                    >
+                      {t('settings.warehousePeriodOpen')}
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <p className="mt-3 text-sm text-stone-400">{t('settings.warehousePeriodsEmpty')}</p>

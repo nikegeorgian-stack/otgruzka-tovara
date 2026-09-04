@@ -22,7 +22,7 @@ type Props = {
     warehouseId: string
     comment?: string
     lines: OpeningInventoryLineInput[]
-  }) => PostDocumentResult
+  }) => PostDocumentResult | Promise<PostDocumentResult>
   onPost: (input: {
     id?: string
     documentId?: string
@@ -31,7 +31,7 @@ type Props = {
     warehouseId: string
     comment?: string
     lines: OpeningInventoryLineInput[]
-  }) => PostDocumentResult
+  }) => PostDocumentResult | Promise<PostDocumentResult>
 }
 
 export function WarehouseOpeningInventoryPanel({
@@ -110,7 +110,7 @@ export function WarehouseOpeningInventoryPanel({
     }))
   }
 
-  function handleSaveDraft() {
+  async function handleSaveDraft() {
     if (!whId) {
       setNotice(t('warehouse.accounting.pickWarehouse'))
       return
@@ -119,14 +119,16 @@ export function WarehouseOpeningInventoryPanel({
       setNotice(t('warehouse.accounting.openingEmpty'))
       return
     }
-    const result = onSaveDraft({
-      id: draftId,
-      number,
-      date,
-      warehouseId: whId,
-      comment: comment || undefined,
-      lines: buildLines(),
-    })
+    const result = await Promise.resolve(
+      onSaveDraft({
+        id: draftId,
+        number,
+        date,
+        warehouseId: whId,
+        comment: comment || undefined,
+        lines: buildLines(),
+      }),
+    )
     if (!result.ok) {
       setNotice(t(result.error) || result.error)
       return
@@ -147,17 +149,19 @@ export function WarehouseOpeningInventoryPanel({
     setConfirmOpen(true)
   }
 
-  function handlePost() {
+  async function handlePost() {
     setConfirmOpen(false)
-    const result = onPost({
-      id: draftId,
-      documentId: draftId,
-      number,
-      date,
-      warehouseId: whId,
-      comment: comment || undefined,
-      lines: buildLines(),
-    })
+    const result = await Promise.resolve(
+      onPost({
+        id: draftId,
+        documentId: draftId,
+        number,
+        date,
+        warehouseId: whId,
+        comment: comment || undefined,
+        lines: buildLines(),
+      }),
+    )
     if (!result.ok) {
       setNotice(t(result.error) || result.error)
       return

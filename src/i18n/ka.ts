@@ -2960,6 +2960,11 @@ export const ka: Dict = {
   'settings.warehousePeriodClosed': 'საწყობის პერიოდი დახურულია.',
   'settings.warehousePeriodOpened': 'საწყობის პერიოდი გახსნილია.',
   'settings.warehousePeriodClosedBadge': 'დახურული',
+  'settings.warehousePeriodForbidden': 'საწყობის პერიოდის დახურვა/გახსნა აკრძალულია.',
+  'settings.confirmCloseWarehousePeriod': 'დავხუროთ საწყობის პერიოდი „{month}“? ამ თვეში გატარება აიკრძალება.',
+  'settings.confirmReopenWarehousePeriod': 'გავხსნათ საწყობის პერიოდი „{month}“ ხელახლა?',
+  'settings.warehousePeriodReopenReasonPrompt': 'მიუთითეთ პერიოდის ხელახალი გახსნის მიზეზი:',
+  'settings.warehousePeriodReopenReasonRequired': 'პერიოდის გახსნისთვის სავალდებულოა მიზეზი.',
   'settings.colWhPeriod': 'თვე',
   'settings.monthsHint': 'მიმდინარე და შემდეგი თვე თავად იქმნება ტაბელის გახსნისას (‹ ›). ქვემოთ ღილაკი — შორეული თვეებისთვის. არქივული თვის წასაშლელად ამოიღეთ «არქივი».',
   'settings.archiveBootstrapTitle': 'არქივული შეყვანა (გაშვების მომზადება)',
@@ -5684,6 +5689,10 @@ export const ka: Dict = {
   'warehouse.g1.errUnsupportedType':
     'სერვერული G1 ჩატარება ჯერ მხოლოდ შემოსვლასა და გასვლას უჭერს მხარს.',
   'warehouse.g1.errServer': 'საწყობის სერვერული ჩატარება მიუწვდომელია. სცადეთ მოგვიანებით.',
+  'warehouse.g2.errServer': 'საწყობის სერვერული ბრძანება მიუწვდომელია. სცადეთ მოგვიანებით.',
+  'warehouse.g2.errPeriodClosed': 'საწყობის პერიოდი დახურულია. ოპერაცია აკრძალულია.',
+  'warehouse.g2.errRevisionConflict':
+    'საწყობის ვერსიის კონფლიქტი. განაახლეთ მონაცემები და გაიმეორეთ.',
   'warehouse.doc.errPostedImmutable':
     'ჩატარებული ან გაუქმებული დოკუმენტის რედაქტირება შეუძლებელია. გამოიყენეთ სტორნო.',
   'warehouse.doc.errBareMovementBlocked':

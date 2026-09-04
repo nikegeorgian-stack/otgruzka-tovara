@@ -612,7 +612,7 @@ export function WarehouseMovementsTab({
           title={docType === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
           dirty={docDirty}
           onSaveDirty={async () => {
-            const ok = docEditorRef.current?.saveDraft()
+            const ok = await Promise.resolve(docEditorRef.current?.saveDraft())
             if (ok === false) throw new Error('draft_save_failed')
           }}
           onClose={() => {
@@ -656,8 +656,8 @@ export function WarehouseMovementsTab({
               }}
               onPostTransfer={
                 onPostTransfer
-                  ? (doc) => {
-                      const result = onPostTransfer(doc)
+                  ? async (doc) => {
+                      const result = await Promise.resolve(onPostTransfer(doc))
                       if (result.ok) {
                         setDocType(null)
                         setDocDirty(false)
@@ -668,8 +668,8 @@ export function WarehouseMovementsTab({
               }
               onSaveDraft={
                 onSaveDocumentDraft
-                  ? (doc) => {
-                      const result = onSaveDocumentDraft(doc)
+                  ? async (doc) => {
+                      const result = await Promise.resolve(onSaveDocumentDraft(doc))
                       if (result.ok) {
                         setDocType(null)
                         setDocDirty(false)

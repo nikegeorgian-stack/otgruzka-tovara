@@ -65,19 +65,23 @@ export type WarehousePageProps = {
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string
     },
-  ) => PostDocumentResult
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onCancelDocument?: (
     documentId: string,
     args?: { reason?: string },
-  ) => CancelDocumentResult
+  ) => CancelDocumentResult | Promise<CancelDocumentResult>
   /** Сохранить документ черновиком (без движений) */
-  onSaveDocumentDraft?: (doc: SaveDraftInput) => PostDocumentResult
+  onSaveDocumentDraft?: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
   /** Провести существующий черновик/документ */
-  onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  onPostExistingDocument?: (
+    documentId: string,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   /** Снять проведение (вернуть в черновик) */
   onUnpostDocument?: (documentId: string) => UnpostDocumentResult
   /** Удалить черновик документа */
-  onRemoveDocumentDraft?: (documentId: string) => UnpostDocumentResult
+  onRemoveDocumentDraft?: (
+    documentId: string,
+  ) => UnpostDocumentResult | Promise<UnpostDocumentResult>
   onMergeInvoiceRegistry: (registry: import('@/lib/warehouse/types').GeorgianInvoice[]) => void
   onRunInventory: (args: {
     itemId: string
@@ -91,7 +95,9 @@ export type WarehousePageProps = {
     date: string
     comment?: string
     lines: { itemId: string; counted: number }[]
-  }) => { applied: number; skipped: number; unchanged: number }
+  }) =>
+    | { applied: number; skipped: number; unchanged: number; error?: string }
+    | Promise<{ applied: number; skipped: number; unchanged: number; error?: string }>
   onPostOpeningBalances: (args: {
     warehouseId: string
     date: string
@@ -106,7 +112,7 @@ export type WarehousePageProps = {
     warehouseId: string
     comment?: string
     lines: { itemId: string; countedQty: number; comment?: string }[]
-  }) => PostDocumentResult
+  }) => PostDocumentResult | Promise<PostDocumentResult>
   /** PHASE W0.5 — провести начальную инвентаризацию и активировать склад */
   onPostOpeningInventory?: (input: {
     id?: string
@@ -116,7 +122,7 @@ export type WarehousePageProps = {
     warehouseId: string
     comment?: string
     lines: { itemId: string; countedQty: number; comment?: string }[]
-  }) => PostDocumentResult
+  }) => PostDocumentResult | Promise<PostDocumentResult>
   onAcquireDocumentLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }
@@ -146,7 +152,9 @@ export type WarehousePageProps = {
   onPostDailyIssueSession?: (
     sessionId: string,
     options?: { allowNegativeStock?: boolean },
-  ) => import('@/lib/warehouse/dailyIssue').PostDailyIssueResult
+  ) =>
+    | import('@/lib/warehouse/dailyIssue').PostDailyIssueResult
+    | Promise<import('@/lib/warehouse/dailyIssue').PostDailyIssueResult>
   onResolveWarehouseItemRequest?: (
     requestId: string,
     status: 'fulfilled' | 'rejected',

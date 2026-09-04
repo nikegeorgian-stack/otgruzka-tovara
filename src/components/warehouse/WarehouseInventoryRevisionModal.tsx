@@ -32,8 +32,8 @@ export function WarehouseInventoryRevisionModal({
       { confirmUnsaved },
       {
         isDirty: () => editorRef.current?.isDirty() ?? false,
-        save: () => {
-          const result = editorRef.current?.saveDraft()
+        save: async () => {
+          const result = await Promise.resolve(editorRef.current?.saveDraft())
           return result?.ok === true
         },
         close: onClose,
@@ -50,7 +50,7 @@ export function WarehouseInventoryRevisionModal({
       zIndex={zIndex}
       // Enter в ячейке факта игнорируется (data-modal-ignore-enter); Ctrl+Enter сохраняет черновик.
       onPrimaryAction={() => {
-        editorRef.current?.saveDraft()
+        void Promise.resolve(editorRef.current?.saveDraft())
       }}
       initialFocus="none"
     >

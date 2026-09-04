@@ -24,7 +24,10 @@ type Baseline = {
 
 export type InventoryRevisionEditorHandle = {
   isDirty: () => boolean
-  saveDraft: () => PostDocumentResult | { ok: false; error: string }
+  saveDraft: () =>
+    | PostDocumentResult
+    | { ok: false; error: string }
+    | Promise<PostDocumentResult | { ok: false; error: string }>
 }
 
 type Props = {
@@ -35,14 +38,16 @@ type Props = {
   keeperId?: string
   keeperName?: string
   readOnly?: boolean
-  onSaveDraft: (doc: SaveDraftInput) => PostDocumentResult
-  onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  onSaveDraft: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
+  onPostExistingDocument?: (
+    documentId: string,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   /** @deprecated W1 — unused; use onCancelDocument */
   onUnpostDocument?: (documentId: string) => { ok: boolean; error?: string }
   onCancelDocument?: (
     documentId: string,
     args?: { reason?: string },
-  ) => { ok: boolean; error?: string }
+  ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onAcquireLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }
@@ -288,25 +293,27 @@ ref,
     return out
   }
 
-  const saveDraft = useCallback(() => {
+  const saveDraft = useCallback(async () => {
     flushFocusedCountedLine(linesRef)
     const docLines = buildDocumentLines()
     if (docLines.length === 0) {
       setError(t('warehouse.inventory.revisionEmpty'))
       return { ok: false as const, error: 'empty' }
     }
-    const result = onSaveDraft({
-      id: docId,
-      type: 'inventory',
-      number: number.trim(),
-      date,
-      warehouseId: whId,
-      purpose: 'other',
-      comment: comment.trim() || undefined,
-      lines: docLines,
-      keeperId,
-      keeperName,
-    })
+    const result = await Promise.resolve(
+      onSaveDraft({
+        id: docId,
+        type: 'inventory',
+        number: number.trim(),
+        date,
+        warehouseId: whId,
+        purpose: 'other',
+        comment: comment.trim() || undefined,
+        lines: docLines,
+        keeperId,
+        keeperName,
+      }),
+    )
     if (result.ok) {
       setDocId(result.documentId)
       setError(null)
@@ -344,7 +351,7 @@ ref,
 
   async function handlePost() {
     let id = docId
-    const saved = saveDraft()
+    const saved = await saveDraft()
     if (!saved.ok) return
     id = saved.documentId
     if (!id || !onPostExistingDocument) return
@@ -356,7 +363,7 @@ ref,
     ) {
       return
     }
-    const result = onPostExistingDocument(id)
+    const result = await Promise.resolve(onPostExistingDocument(id))
     if (result.ok) {
       setNotice(t('warehouse.doc.postSuccess'))
       onCancel()
@@ -491,9 +498,12 @@ ref,
                 setNotice(t('warehouse.doc.errCancelReasonRequired'))
                 return
               }
-              const res = onCancelDocument(docId, { reason: reason.trim() })
-              setNotice(
-                res.ok ? t('warehouse.doc.cancelSuccess') : t(res.error ?? 'unknown'),
+              void Promise.resolve(onCancelDocument(docId, { reason: reason.trim() })).then(
+                (res) => {
+                  setNotice(
+                    res.ok ? t('warehouse.doc.cancelSuccess') : t(res.error ?? 'unknown'),
+                  )
+                },
               )
             }}
           >

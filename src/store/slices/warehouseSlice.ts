@@ -96,6 +96,11 @@ import {
   mirrorAuthoritativeWarehousePost,
   resolveAuthoritativeWarehouseOverlay,
 } from '@/lib/warehouse/g1ServerClient'
+import {
+  g2WarehouseCommand,
+  isG2WebAuthoritativePath,
+  mirrorG2WarehouseAck,
+} from '@/lib/warehouse/g2ServerClient'
 
 export function cancelWarehouseDocumentGroupKind(
   documentId: string,
@@ -386,31 +391,70 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       })
     },
 
-    saveWarehouseDocDraft(
+    async saveWarehouseDocDraft(
       doc: SaveDraftInput,
       actor?: { actorId?: string; actorName?: string },
-    ): PostDocumentResult {
-      let result: PostDocumentResult = { ok: false, error: 'unknown' }
+    ): Promise<PostDocumentResult> {
       const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
-      patchWarehouse(setStore, (w) => {
-        const out = saveWarehouseDocumentDraft(w, enriched, actor)
-        result = out.result
-        return out.store
+      if (!isG2WebAuthoritativePath()) {
+        let result: PostDocumentResult = { ok: false, error: 'unknown' }
+        patchWarehouse(setStore, (w) => {
+          const out = saveWarehouseDocumentDraft(w, enriched, actor)
+          result = out.result
+          return out.store
+        })
+        return result
+      }
+      const idempotencyKey =
+        typeof enriched.idempotencyKey === 'string' && enriched.idempotencyKey.trim()
+          ? `g2-draft-${enriched.idempotencyKey.trim()}`
+          : `g2-draft-${enriched.id ?? crypto.randomUUID()}-${enriched.revision ?? 0}`
+      const server = await g2WarehouseCommand({
+        idempotencyKey,
+        commandType: 'warehouse.draft.save',
+        command: {
+          documentId: enriched.id,
+          type: enriched.type,
+          warehouseId: enriched.warehouseId,
+          date: enriched.date,
+          lines: enriched.lines,
+          purpose: enriched.purpose,
+          docRole: enriched.docRole,
+          comment: enriched.comment,
+          targetWarehouseId: enriched.targetWarehouseId,
+          clientDraftKey: enriched.idempotencyKey,
+        },
       })
-      return result
+      if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return { ok: true, documentId: String(server.data.documentId ?? '') }
     },
 
-    postExistingWarehouseDoc(
+    async postExistingWarehouseDoc(
       documentId: string,
-      actor?: { actorId?: string; actorName?: string },
-    ): PostDocumentResult {
-      let result: PostDocumentResult = { ok: false, error: 'unknown' }
-      patchWarehouse(setStore, (w) => {
-        const out = postExistingWarehouseDocument(w, documentId, actor)
-        result = out.result
-        return out.store
+      _actor?: { actorId?: string; actorName?: string },
+    ): Promise<PostDocumentResult> {
+      if (!isG2WebAuthoritativePath()) {
+        let result: PostDocumentResult = { ok: false, error: 'unknown' }
+        patchWarehouse(setStore, (w) => {
+          const out = postExistingWarehouseDocument(w, documentId, _actor)
+          result = out.result
+          return out.store
+        })
+        return result
+      }
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-post-existing-${documentId}`,
+        commandType: 'warehouse.document.postExisting',
+        command: { documentId },
       })
-      return result
+      if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return {
+        ok: true,
+        documentId: String(server.data.documentId ?? documentId),
+        idempotent: server.data.idempotent,
+      }
     },
 
     unpostWarehouseDoc(
@@ -426,23 +470,37 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       return result
     },
 
-    removeWarehouseDraft(
+    async removeWarehouseDraft(
       documentId: string,
       actor?: { actorId?: string; actorName?: string },
-    ): UnpostDocumentResult {
-      let result: UnpostDocumentResult = { ok: false, error: 'unknown' }
-      patchWarehouse(setStore, (w) => {
-        const out = removeWarehouseDraftDocument(w, documentId, actor)
-        result = out.result
-        return out.store
-      })
-      if (result.ok) {
-        recordSliceExplicitDelete('warehouse.documents', documentId, {
-          actorId: actor?.actorId ?? getActor?.()?.id,
-          actorName: actor?.actorName ?? getActor?.()?.name,
+    ): Promise<UnpostDocumentResult> {
+      if (!isG2WebAuthoritativePath()) {
+        let result: UnpostDocumentResult = { ok: false, error: 'unknown' }
+        patchWarehouse(setStore, (w) => {
+          const out = removeWarehouseDraftDocument(w, documentId, actor)
+          result = out.result
+          return out.store
         })
+        if (result.ok) {
+          recordSliceExplicitDelete('warehouse.documents', documentId, {
+            actorId: actor?.actorId ?? getActor?.()?.id,
+            actorName: actor?.actorName ?? getActor?.()?.name,
+          })
+        }
+        return result
       }
-      return result
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-draft-del-${documentId}`,
+        commandType: 'warehouse.draft.delete',
+        command: { documentId },
+      })
+      if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      recordSliceExplicitDelete('warehouse.documents', documentId, {
+        actorId: actor?.actorId ?? getActor?.()?.id,
+        actorName: actor?.actorName ?? getActor?.()?.name,
+      })
+      return { ok: true }
     },
 
     acquireWarehouseDocumentLock(
@@ -464,35 +522,70 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       patchWarehouse(setStore, (w) => releaseDocLockInStore(w, documentId, actorId))
     },
 
-    postWarehouseTransfer(
+    async postWarehouseTransfer(
       doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
         targetWarehouseId: string
       },
-    ): PostDocumentResult {
-      let result: PostDocumentResult = { ok: false, error: 'unknown' }
+    ): Promise<PostDocumentResult> {
       const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
-      const sessionRev = `${enriched.date ?? ''}:${enriched.number ?? ''}:${enriched.warehouseId}:${enriched.targetWarehouseId}`
-      const groupId = warehouseTransactionGroupId({
-        kind: 'warehouse_transfer',
-        sourceId: `${enriched.warehouseId}→${enriched.targetWarehouseId}:${enriched.number ?? 'xfer'}`,
-        revision: sessionRev,
+      if (!isG2WebAuthoritativePath()) {
+        let result: PostDocumentResult = { ok: false, error: 'unknown' }
+        const sessionRev = `${enriched.date ?? ''}:${enriched.number ?? ''}:${enriched.warehouseId}:${enriched.targetWarehouseId}`
+        const groupId = warehouseTransactionGroupId({
+          kind: 'warehouse_transfer',
+          sourceId: `${enriched.warehouseId}→${enriched.targetWarehouseId}:${enriched.number ?? 'xfer'}`,
+          revision: sessionRev,
+        })
+        patchWarehouse(
+          setStore,
+          (w) => {
+            const out = postWarehouseTransfer(w, enriched)
+            result = out.result
+            return out.store
+          },
+          {
+            origin: 'user',
+            atomic: true,
+            transactionGroupId: groupId,
+            transactionGroupKind: 'warehouse_transfer',
+            transactionGroupLabel: 'Перемещение между складами',
+          },
+        )
+        return result
+      }
+      const idempotencyKey =
+        typeof enriched.idempotencyKey === 'string' && enriched.idempotencyKey.trim()
+          ? enriched.idempotencyKey.trim()
+          : `g2-xfer-${crypto.randomUUID()}`
+      const server = await g2WarehouseCommand({
+        idempotencyKey,
+        commandType: 'warehouse.transfer.post',
+        command: {
+          warehouseId: enriched.warehouseId,
+          targetWarehouseId: enriched.targetWarehouseId,
+          date: enriched.date,
+          lines: enriched.lines,
+          comment: enriched.comment,
+          purpose: enriched.purpose ?? 'transfer',
+        },
       })
-      patchWarehouse(
-        setStore,
-        (w) => {
-          const out = postWarehouseTransfer(w, enriched)
-          result = out.result
-          return out.store
-        },
-        {
-          origin: 'user',
-          atomic: true,
-          transactionGroupId: groupId,
-          transactionGroupKind: 'warehouse_transfer',
-          transactionGroupLabel: 'Перемещение между складами',
-        },
-      )
-      return result
+      if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse), {
+        origin: 'user',
+        atomic: true,
+        transactionGroupId: warehouseTransactionGroupId({
+          kind: 'warehouse_transfer',
+          sourceId: String(server.data.documentId ?? 'xfer'),
+          revision: String(server.data.criticalRevision ?? 1),
+        }),
+        transactionGroupKind: 'warehouse_transfer',
+        transactionGroupLabel: 'G2 authoritative transfer',
+      })
+      return {
+        ok: true,
+        documentId: String(server.data.documentId ?? ''),
+        idempotent: server.data.idempotent,
+      }
     },
 
     transferProductionOrderMaterials(
@@ -568,10 +661,25 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       patchWarehouse(setStore, (w) => upsertProductionLineBinding(w, binding))
     },
 
-    cancelWarehouseDocument(
+    async cancelWarehouseDocument(
       documentId: string,
       args?: { cancelledBy?: string; cancelledByName?: string; reason?: string },
-    ): CancelDocumentResult {
+    ): Promise<CancelDocumentResult> {
+      if (isG2WebAuthoritativePath()) {
+        const reason = args?.reason?.trim()
+        if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
+        const server = await g2WarehouseCommand({
+          idempotencyKey: `g2-cancel-${documentId}`,
+          commandType: 'warehouse.document.cancel',
+          command: { documentId, reason },
+        })
+        if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+        patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+        const reversalIds = Array.isArray((server.data as { reversalIds?: string[] }).reversalIds)
+          ? ((server.data as { reversalIds?: string[] }).reversalIds as string[])
+          : []
+        return { ok: true, reversalIds }
+      }
       let result: CancelDocumentResult = { ok: false, error: 'unknown' }
       const current = getStore()
       const existing = current.warehouse.documents.find((d) => d.id === documentId)
@@ -671,14 +779,37 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       patchWarehouse(setStore, (w) => runInventoryCount(w, args))
     },
 
-    postWarehouseInventoryRevision(args: Parameters<typeof postInventoryRevision>[1]) {
-      let result = { applied: 0, skipped: 0, unchanged: 0 }
-      patchWarehouse(setStore, (w) => {
-        const out = postInventoryRevision(w, args)
-        result = out.result
-        return out.store
+    async postWarehouseInventoryRevision(args: Parameters<typeof postInventoryRevision>[1]) {
+      if (!isG2WebAuthoritativePath()) {
+        let result = { applied: 0, skipped: 0, unchanged: 0 }
+        patchWarehouse(setStore, (w) => {
+          const out = postInventoryRevision(w, args)
+          result = out.result
+          return out.store
+        })
+        return result
+      }
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-inv-${args.warehouseId}-${args.date}-${crypto.randomUUID()}`,
+        commandType: 'warehouse.inventory.post',
+        command: {
+          warehouseId: args.warehouseId,
+          date: args.date,
+          comment: args.comment,
+          lines: args.lines.map((l) => ({ itemId: l.itemId, counted: l.counted })),
+        },
       })
-      return result
+      if (!server.ok) {
+        return {
+          applied: 0,
+          skipped: args.lines.length,
+          unchanged: 0,
+          error: server.error || 'warehouse.g2.errServer',
+        }
+      }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      const applied = Number((server.data as { applied?: number }).applied ?? 0)
+      return { applied, skipped: 0, unchanged: Math.max(0, args.lines.length - applied) }
     },
 
     postWarehouseOpeningBalances(args: Parameters<typeof postOpeningBalances>[1]) {
@@ -704,32 +835,51 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       return result
     },
 
-    postOpeningInventory(
+    async postOpeningInventory(
       input: OpeningInventoryDraftInput & { documentId?: string },
       actor?: { actorId?: string; actorName?: string },
-    ): PostDocumentResult {
-      let result: PostDocumentResult = { ok: false, error: 'warehouse.doc.errGeneric' }
-      const groupId = warehouseTransactionGroupId({
-        kind: 'opening_inventory',
-        sourceId: input.warehouseId,
-        revision: openingInventorySourceKey(input.warehouseId),
+    ): Promise<PostDocumentResult> {
+      if (!isG2WebAuthoritativePath()) {
+        let result: PostDocumentResult = { ok: false, error: 'warehouse.doc.errGeneric' }
+        const groupId = warehouseTransactionGroupId({
+          kind: 'opening_inventory',
+          sourceId: input.warehouseId,
+          revision: openingInventorySourceKey(input.warehouseId),
+        })
+        patchWarehouse(
+          setStore,
+          (w) => {
+            const out = postOpeningInventory(w, input, actor)
+            result = out.result
+            return out.store
+          },
+          {
+            origin: 'user',
+            atomic: true,
+            transactionGroupId: groupId,
+            transactionGroupKind: 'opening_inventory',
+            transactionGroupLabel: 'Начальные остатки (инвентаризация)',
+          },
+        )
+        return result
+      }
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-opening-${input.warehouseId}`,
+        commandType: 'warehouse.opening.post',
+        command: {
+          warehouseId: input.warehouseId,
+          date: input.date,
+          lines: input.lines.map((l) => ({
+            itemId: l.itemId,
+            quantity: l.countedQty,
+            inputUnit: l.inputUnit,
+          })),
+          documentId: input.documentId,
+        },
       })
-      patchWarehouse(
-        setStore,
-        (w) => {
-          const out = postOpeningInventory(w, input, actor)
-          result = out.result
-          return out.store
-        },
-        {
-          origin: 'user',
-          atomic: true,
-          transactionGroupId: groupId,
-          transactionGroupKind: 'opening_inventory',
-          transactionGroupLabel: 'Начальные остатки (инвентаризация)',
-        },
-      )
-      return result
+      if (!server.ok) return { ok: false, error: server.error || 'warehouse.g2.errServer' }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return { ok: true, documentId: String(server.data.documentId ?? '') }
     },
 
     async importWarehouseExcel(file: File, warehouseId?: string) {
@@ -738,21 +888,77 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         getStore().warehouse,
         warehouseId,
       )
-      if (imported.result.draftsCreated > 0) {
-        setStore((s) => ({ ...s, warehouse: imported.store }))
+      if (!isG2WebAuthoritativePath()) {
+        if (imported.result.draftsCreated > 0) {
+          setStore((s) => ({ ...s, warehouse: imported.store }))
+        }
+        return imported.result
       }
-      return imported.result
+      // Server path: send only draft receipts; never post movements from Excel.
+      const draftReceipts = (imported.store.documents ?? [])
+        .filter((d) => d.status === 'draft' && d.type === 'receipt')
+        .filter((d) => !(getStore().warehouse.documents ?? []).some((x) => x.id === d.id))
+      if (draftReceipts.length === 0) return imported.result
+      const whId = warehouseId || draftReceipts[0]?.warehouseId
+      if (!whId) return imported.result
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-excel-${file.name}-${file.size}-${file.lastModified}`,
+        commandType: 'warehouse.excel.importDrafts',
+        command: {
+          warehouseId: whId,
+          date: draftReceipts[0]?.date,
+          receipts: draftReceipts.map((d) => ({
+            lines: d.lines,
+            comment: d.comment ?? `excel:${file.name}`,
+          })),
+        },
+      })
+      if (!server.ok) {
+        return {
+          ...imported.result,
+          draftsCreated: 0,
+          error: server.error || 'warehouse.g2.errServer',
+        }
+      }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return {
+        ...imported.result,
+        draftsCreated: Number((server.data as { count?: number }).count ?? draftReceipts.length),
+      }
     },
 
     setWarehouseStore(warehouse: WarehouseStore) {
       setStore((s) => ({ ...s, warehouse }))
     },
 
-    setWarehouseMonthClosed(month: string, closed: boolean) {
-      patchWarehouse(setStore, (w) => ({
-        ...w,
-        closedMonths: toggleClosedMonth(w.closedMonths, month, closed),
-      }))
+    async setWarehouseMonthClosed(month: string, closed: boolean, reason?: string) {
+      if (!isG2WebAuthoritativePath()) {
+        patchWarehouse(setStore, (w) => ({
+          ...w,
+          closedMonths: toggleClosedMonth(w.closedMonths, month, closed),
+        }))
+        return { ok: true as const }
+      }
+      if (closed) {
+        const server = await g2WarehouseCommand({
+          idempotencyKey: `g2-period-close-${month}`,
+          commandType: 'warehouse.period.close',
+          command: { month },
+        })
+        if (!server.ok) return { ok: false as const, error: server.error }
+        patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+        return { ok: true as const }
+      }
+      const reopenReason = String(reason ?? '').trim()
+      if (!reopenReason) return { ok: false as const, error: 'reopen_reason_required' }
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-period-reopen-${month}-${reopenReason.slice(0, 24)}`,
+        commandType: 'warehouse.period.reopen',
+        command: { month, reason: reopenReason },
+      })
+      if (!server.ok) return { ok: false as const, error: server.error }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return { ok: true as const }
     },
 
     openDailyIssueSession(args: Parameters<typeof openOrResumeDailyIssue>[1]) {
@@ -773,20 +979,51 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       patchWarehouse(setStore, (w) => setDailyIssueComment(w, sessionId, comment))
     },
 
-    postDailyIssueSession(
+    async postDailyIssueSession(
       sessionId: string,
       options?: { allowNegativeStock?: boolean },
     ) {
-      let result: ReturnType<typeof postDailyIssueSession>['result'] = {
-        ok: false,
-        reason: 'not_found',
+      if (!isG2WebAuthoritativePath()) {
+        let result: ReturnType<typeof postDailyIssueSession>['result'] = {
+          ok: false,
+          reason: 'not_found',
+        }
+        patchWarehouse(setStore, (w) => {
+          const out = postDailyIssueSession(w, sessionId, options)
+          result = out.result
+          return out.store
+        })
+        return result
       }
-      patchWarehouse(setStore, (w) => {
-        const out = postDailyIssueSession(w, sessionId, options)
-        result = out.result
-        return out.store
+      const session = getStore().warehouse.dailyIssueSessions?.find((s) => s.id === sessionId)
+      if (!session) return { ok: false as const, reason: 'not_found' as const }
+      const lines = (session.lines ?? [])
+        .filter((l) => Number(l.quantity) > 0)
+        .map((l) => ({
+          itemId: l.itemId,
+          quantity: Number(l.quantity),
+          lineId: crypto.randomUUID(),
+        }))
+      if (lines.length === 0) return { ok: false as const, reason: 'empty' as const }
+      const server = await g2WarehouseCommand({
+        idempotencyKey: `g2-daily-${sessionId}`,
+        commandType: 'warehouse.dailyIssue.post',
+        command: {
+          sessionId,
+          warehouseId: session.warehouseId,
+          date: session.date,
+          lines,
+        },
       })
-      return result
+      if (!server.ok) {
+        return { ok: false as const, reason: 'stock' as const, detail: server.error }
+      }
+      patchWarehouse(setStore, (w) => mirrorG2WarehouseAck(w, server.data.warehouse))
+      return {
+        ok: true as const,
+        documentId: String(server.data.documentId ?? ''),
+        documentNumber: String((server.data as { number?: string }).number ?? ''),
+      }
     },
 
     createWarehouseItemRequest(input: CreateItemRequestInput) {

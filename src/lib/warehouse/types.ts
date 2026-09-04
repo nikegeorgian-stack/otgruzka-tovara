@@ -619,6 +619,16 @@ export type WarehouseStore = {
   loadingShipments?: LoadingShipment[]
   /** Закрытые учётные периоды склада (YYYY-MM) — проводки запрещены */
   closedMonths?: string[]
+  /** PHASE G2 — история закрытия/открытия периодов */
+  periodHistory?: Array<{
+    id: string
+    month: string
+    action: 'close' | 'reopen'
+    at: string
+    actorUid: string
+    actorEmail?: string
+    reason?: string
+  }>
   /**
    * PHASE W0.5 — статус достоверности учёта по каждому складу.
    * Отсутствие записи = uninitialized (legacy).

@@ -409,9 +409,11 @@ function WarehouseDocOverlay({
           onPost={async (posted) => {
             const draftId = mode === 'edit' ? doc.id : undefined
             if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
-              const saved = onSaveDocumentDraft({ ...posted, id: draftId })
+              const saved = await Promise.resolve(
+                onSaveDocumentDraft({ ...posted, id: draftId }),
+              )
               if (!saved.ok) return saved
-              const result = onPostExistingDocument(draftId)
+              const result = await Promise.resolve(onPostExistingDocument(draftId))
               if (result.ok) {
                 setNotice(t('warehouse.doc.postSuccess'))
                 onClose()
@@ -424,8 +426,8 @@ function WarehouseDocOverlay({
           }}
           onSaveDraft={
             onSaveDocumentDraft && mode !== 'view'
-              ? (draft) => {
-                  const result = onSaveDocumentDraft(draft)
+              ? async (draft) => {
+                  const result = await Promise.resolve(onSaveDocumentDraft(draft))
                   if (result.ok) {
                     setNotice(t('warehouse.doc.draftSaved'))
                     onClose()
@@ -434,11 +436,12 @@ function WarehouseDocOverlay({
                 }
               : undefined
           }
-          onPostTransfer={(transferDoc) => {
-            const result = onPostTransfer?.(transferDoc) ?? {
-              ok: false as const,
-              error: 'unknown',
-            }
+          onPostTransfer={async (transferDoc) => {
+            const result =
+              (await Promise.resolve(onPostTransfer?.(transferDoc))) ?? {
+                ok: false as const,
+                error: 'unknown',
+              }
             if (result.ok) onClose()
             return result
           }}
