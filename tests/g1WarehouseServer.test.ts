@@ -131,6 +131,7 @@ describe('G1 critical helpers', () => {
       'sales',
       'planning',
       'procurement',
+      'capacity',
     ])
   })
 

@@ -87,6 +87,12 @@ export function defaultWarehouseCapabilities(partial = {}) {
       out[key] = true
     }
   }
+  // PHASE G6 — capacity planning capabilities
+  for (const [key, value] of Object.entries(partial)) {
+    if (key.startsWith('capacity.') && value === true) {
+      out[key] = true
+    }
+  }
   if (Array.isArray(partial.productionLineIds)) {
     out.productionLineIds = partial.productionLineIds.map(String)
   }

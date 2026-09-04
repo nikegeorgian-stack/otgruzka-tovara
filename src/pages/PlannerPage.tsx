@@ -127,6 +127,8 @@ type Props = {
    * Default false — parent must pass true for sysadmin/admin.
    */
   canActivateG5?: boolean
+  /** PHASE G6 — capacity domain activate from MRP Capacity tab. */
+  canActivateG6?: boolean
 }
 
 type PlannerWorkspaceDraft = {
@@ -181,6 +183,7 @@ export function PlannerPage({
   onCreateWorkTask,
   store = null,
   canActivateG5 = false,
+  canActivateG6 = false,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -1337,7 +1340,7 @@ export function PlannerPage({
 
       {tab === 'materials' && (
         <>
-        <G5MrpHorizonBanner />
+        <G5MrpHorizonBanner store={store} />
         <PlannerMaterialsPanel
           orders={orders}
           warehouseItems={warehouseItems}
@@ -1388,6 +1391,7 @@ export function PlannerPage({
             access={access}
             currentUser={currentUser}
             onCreateWorkTask={onCreateWorkTask}
+            canActivateG6={canActivateG6 || canActivateG5}
           />
         </div>
       )}

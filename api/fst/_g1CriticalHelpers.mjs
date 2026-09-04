@@ -4,10 +4,11 @@
  * Domain activation is per-domain / feature, not bare revision.
  */
 
-export const G1_CRITICAL_SCHEMA_VERSION = 4
+export const G1_CRITICAL_SCHEMA_VERSION = 5
 /**
  * Shared FstCriticalStore domains. Empty domain ≠ authoritative without active marker.
  * G5: masterData, sales, planning, procurement — activated separately from WH/prod/pack.
+ * G6: capacity — feature flag under production.features.capacityPlanning; data in domains.capacity.
  */
 export const G1_ALLOWED_DOMAINS = Object.freeze([
   'warehouse',
@@ -16,6 +17,7 @@ export const G1_ALLOWED_DOMAINS = Object.freeze([
   'sales',
   'planning',
   'procurement',
+  'capacity',
 ])
 
 export const G2_MAX_DOCUMENT_LINES = 500
@@ -98,6 +100,16 @@ const PROCUREMENT_KNOWN = new Set([
   'auditLog',
 ])
 
+const CAPACITY_KNOWN = new Set([
+  'norms',
+  'calendars',
+  'calendarTemplates',
+  'downtimes',
+  'runs',
+  'schedules',
+  'auditLog',
+])
+
 export function emptyWarehouseStore() {
   return {
     items: [],
@@ -170,6 +182,19 @@ export function emptyProcurementStore() {
   }
 }
 
+/** PHASE G6 — capacity norms / calendars / runs / schedules (not authoritative until feature active). */
+export function emptyCapacityStore() {
+  return {
+    norms: [],
+    calendars: [],
+    calendarTemplates: [],
+    downtimes: [],
+    runs: [],
+    schedules: [],
+    auditLog: [],
+  }
+}
+
 export function emptyDomainMeta() {
   return {
     warehouse: { active: false, version: 0 },
@@ -193,6 +218,7 @@ export function emptyCriticalPayload() {
       sales: emptySalesStore(),
       planning: emptyPlanningStore(),
       procurement: emptyProcurementStore(),
+      capacity: emptyCapacityStore(),
     },
   }
 }
@@ -291,6 +317,20 @@ function normalizeProcurement(raw) {
     orders: asArray(src.orders),
     unassignedShortages: asArray(src.unassignedShortages),
     payments: asArray(src.payments),
+    auditLog: asArray(src.auditLog),
+  }
+}
+
+function normalizeCapacity(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, CAPACITY_KNOWN),
+    norms: asArray(src.norms),
+    calendars: asArray(src.calendars),
+    calendarTemplates: asArray(src.calendarTemplates),
+    downtimes: asArray(src.downtimes),
+    runs: asArray(src.runs),
+    schedules: asArray(src.schedules),
     auditLog: asArray(src.auditLog),
   }
 }
@@ -394,7 +434,7 @@ export function isPackagingQcFeatureActive(payload) {
   return payload?.domainMeta?.production?.features?.packagingQc?.active === true
 }
 
-export function markPackagingQcFeatureActive(payload, actorUid, now = new Date().toISOString()) {
+function markProductionFeatureActive(payload, featureKey, actorUid, now = new Date().toISOString()) {
   const meta = {
     ...(payload.domainMeta && typeof payload.domainMeta === 'object'
       ? payload.domainMeta
@@ -407,10 +447,10 @@ export function markPackagingQcFeatureActive(payload, actorUid, now = new Date()
   const prevFeatures =
     prevProd.features && typeof prevProd.features === 'object' ? { ...prevProd.features } : {}
   const prevFeat =
-    prevFeatures.packagingQc && typeof prevFeatures.packagingQc === 'object'
-      ? prevFeatures.packagingQc
+    prevFeatures[featureKey] && typeof prevFeatures[featureKey] === 'object'
+      ? prevFeatures[featureKey]
       : {}
-  prevFeatures.packagingQc = {
+  prevFeatures[featureKey] = {
     ...prevFeat,
     active: true,
     version: Math.max(1, Number(prevFeat.version) || 0) + (prevFeat.active === true ? 0 : 1),
@@ -422,6 +462,22 @@ export function markPackagingQcFeatureActive(payload, actorUid, now = new Date()
     features: prevFeatures,
   }
   return { ...payload, domainMeta: meta }
+}
+
+export function markPackagingQcFeatureActive(payload, actorUid, now = new Date().toISOString()) {
+  return markProductionFeatureActive(payload, 'packagingQc', actorUid, now)
+}
+
+/**
+ * PHASE G6 — capacity planning feature flag under production.features.
+ * Production/G5 activation alone must NOT make empty capacity authoritative.
+ */
+export function isCapacityPlanningFeatureActive(payload) {
+  return payload?.domainMeta?.production?.features?.capacityPlanning?.active === true
+}
+
+export function markCapacityPlanningFeatureActive(payload, actorUid, now = new Date().toISOString()) {
+  return markProductionFeatureActive(payload, 'capacityPlanning', actorUid, now)
 }
 
 export function markWarehouseDomainActive(payload, actorUid, now = new Date().toISOString()) {
@@ -546,6 +602,9 @@ export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {
   const procurement = Object.prototype.hasOwnProperty.call(domains, 'procurement')
     ? normalizeProcurement(domains.procurement)
     : emptyProcurementStore()
+  const capacity = Object.prototype.hasOwnProperty.call(domains, 'capacity')
+    ? normalizeCapacity(domains.capacity)
+    : emptyCapacityStore()
 
   const domainMeta = Object.prototype.hasOwnProperty.call(raw, 'domainMeta')
     ? normalizeDomainMeta(raw.domainMeta)
@@ -572,6 +631,7 @@ export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {
         sales,
         planning,
         procurement,
+        capacity,
       },
     },
   }

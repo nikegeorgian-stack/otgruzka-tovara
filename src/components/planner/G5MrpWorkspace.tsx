@@ -31,6 +31,7 @@ import type { AppStore } from '@/lib/types'
 import type { WorkTaskDraft } from '@/lib/tasks/types'
 import { formatQty } from '@/lib/warehouse/stock'
 import { shortContentHash } from '@/lib/planner/g5PackagingBom'
+import { G6CapacityWorkspace } from '@/components/planner/G6CapacityWorkspace'
 
 type WarehouseItemLite = {
   id: string
@@ -197,6 +198,9 @@ export type G5MrpWorkspaceProps = {
   access?: AccessStore | unknown
   currentUser?: AppUser | null | unknown
   canViewPayment?: boolean
+  /** PHASE G6 — allow capacity.domain.activate from Capacity tab. */
+  canActivateG6?: boolean
+  onG6StoreMirrored?: (next: AppStore) => void
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -326,6 +330,8 @@ export function G5MrpWorkspace({
   onOpenProductionOrder,
   onNavigateToDirectory,
   canViewPayment = false,
+  canActivateG6 = false,
+  onG6StoreMirrored,
 }: G5MrpWorkspaceProps) {
   const { t, tf } = useI18n()
   const [section, setSection] = useState<WorkspaceSection>('horizon')
@@ -1760,13 +1766,13 @@ export function G5MrpWorkspace({
       )}
 
       {section === 'capacity' && (
-        <section
-          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950"
-          role="status"
-        >
-          <div className="font-medium">{t('g5.mrp.section.capacity')}</div>
-          <div className="mt-1 opacity-90">{t('g5.mrp.capacityNotCalculated')}</div>
-        </section>
+        <G6CapacityWorkspace
+          store={store}
+          asOfDate={asOfDate}
+          finishedProducts={finishedProducts}
+          canActivateG6={canActivateG6}
+          onStoreMirrored={onG6StoreMirrored}
+        />
       )}
     </div>
   )

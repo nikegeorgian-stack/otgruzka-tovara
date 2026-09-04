@@ -28,6 +28,10 @@ import {
   filterG5AuthoritativeDirtyOps,
   restoreG5AuthoritativeDomains,
 } from './g5AuthoritativeStrip'
+import {
+  filterG6AuthoritativeDirtyOps,
+  restoreG6AuthoritativeDomains,
+} from './g6AuthoritativeStrip'
 
 export type CloudSaveBuildInput = {
   remote: AppStore
@@ -109,8 +113,11 @@ export function mergeStoreForCloudSave(input: {
   appliedOperationIds: string[]
   completedDeleteOperationIds: string[]
 } {
-  const userOps = filterG5AuthoritativeDirtyOps(
-    input.operations.filter((op) => op.origin === 'user'),
+  const userOps = filterG6AuthoritativeDirtyOps(
+    filterG5AuthoritativeDirtyOps(
+      input.operations.filter((op) => op.origin === 'user'),
+      input.local,
+    ),
     input.local,
   )
   const monthOps = userOps.filter(isMonthsGranularOp)
@@ -203,7 +210,10 @@ export function mergeStoreForCloudSave(input: {
   }
 
   const privilegeSafe = clampClientPrivilegeFields(
-    restoreG5AuthoritativeDomains(input.remote, acc),
+    restoreG6AuthoritativeDomains(
+      input.remote,
+      restoreG5AuthoritativeDomains(input.remote, acc),
+    ),
     input.remote,
     input.actorEmail ?? null,
   )
@@ -220,8 +230,11 @@ export function mergeStoreForCloudSave(input: {
 
 /** Build payload: fresh remote + conservative user changes + granular months ops. */
 export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuildResult {
-  const filteredOps = filterG5AuthoritativeDirtyOps(
-    input.operations.filter((op) => op.origin === 'user'),
+  const filteredOps = filterG6AuthoritativeDirtyOps(
+    filterG5AuthoritativeDirtyOps(
+      input.operations.filter((op) => op.origin === 'user'),
+      input.local,
+    ),
     input.local,
   )
   const gate = canCloudWriteNow(filteredOps.length > 0)

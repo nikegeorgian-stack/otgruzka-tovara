@@ -416,8 +416,13 @@ async function casCommitG5(
       sales: sales !== undefined ? sales : prev.sales,
       planning: planning !== undefined ? planning : prev.planning,
       procurement: procurement !== undefined ? procurement : prev.procurement,
+      // G6 — never drop capacity sibling
+      capacity: prev.capacity,
     },
   }
+
+  // bump schema so G6 capacity domain round-trips
+  nextPayload.schemaVersion = Math.max(Number(nextPayload.schemaVersion) || 0, 5)
 
   if (activateMasterData || isMasterDataDomainActive(critical.payload)) {
     nextPayload = markMasterDataDomainActive(nextPayload, actorUid)
@@ -570,15 +575,25 @@ function applyProductUpsert(masterData, command, actor, now) {
   if (!code || !name) return fail('invalid_input', 400)
   if (codeTaken(masterData.finishedProducts, code, id)) return fail('duplicate_code', 409)
   const existing = findById(masterData.finishedProducts, id)
+  const validProductionLineIds = Array.isArray(command.validProductionLineIds)
+    ? command.validProductionLineIds.map(str).filter(Boolean)
+    : existing?.validProductionLineIds
+  const validPackagingLineIds = Array.isArray(command.validPackagingLineIds)
+    ? command.validPackagingLineIds.map(str).filter(Boolean)
+    : existing?.validPackagingLineIds
+  // validLineIds is legacy-only storage for scan/preview — never the sole authoritative mapping write
+  const validLineIds = Array.isArray(command.validLineIds)
+    ? command.validLineIds.map(str).filter(Boolean)
+    : existing?.validLineIds
   const product = {
     ...(existing ?? {}),
     id,
     code,
     name,
     baseUnit: 'm2',
-    validLineIds: Array.isArray(command.validLineIds)
-      ? command.validLineIds.map(str).filter(Boolean)
-      : existing?.validLineIds,
+    validProductionLineIds,
+    validPackagingLineIds,
+    validLineIds,
     formulationRecipeId:
       command.formulationRecipeId != null
         ? str(command.formulationRecipeId) || undefined

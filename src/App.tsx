@@ -125,9 +125,12 @@ export default function App() {
   const fstAuth = useFstAuthOptional()
   const webEmail = fstAuth?.user?.email?.trim().toLowerCase()
   const [passwordGateDismissed, setPasswordGateDismissed] = useState(false)
-  useEffect(() => {
+  const [passwordGateEmail, setPasswordGateEmail] = useState(webEmail)
+  // Reset dismiss flag when the signed-in email changes (render-time adjust, not effect).
+  if (webEmail !== passwordGateEmail) {
+    setPasswordGateEmail(webEmail)
     setPasswordGateDismissed(false)
-  }, [webEmail])
+  }
   const passwordCheckPending =
     isFstWeb &&
     Boolean(webEmail) &&
@@ -337,7 +340,7 @@ export default function App() {
         actorId: app.currentUser?.id,
         actorName: app.currentUser?.displayName,
       }),
-    onUnpostDocument: (_documentId: string) => {
+    onUnpostDocument: () => {
       // PHASE W1 — destructive unpost removed; UI should use onCancelDocument.
       return { ok: false as const, error: 'warehouse.doc.errUnpostRemoved' }
     },
@@ -1142,6 +1145,15 @@ export default function App() {
               onCreateWorkTask={app.createWorkTask}
               store={app.store}
               canActivateG5={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.access?.users?.some(
+                  (u) =>
+                    u.id === app.currentUser?.id &&
+                    u.roleId === 'sysadmin' &&
+                    u.active !== false,
+                ) === true
+              }
+              canActivateG6={
                 app.currentUser?.roleId === 'sysadmin' ||
                 app.access?.users?.some(
                   (u) =>

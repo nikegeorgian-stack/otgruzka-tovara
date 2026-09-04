@@ -413,6 +413,25 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
                 domainMeta: g1.data.domainMeta,
               })
             }
+            // PHASE G6 — capacity planning feature flag from domainMeta.production.features.
+            {
+              const { withG6ActivationOnStore, readG6Activation } = await import(
+                '@/lib/planner/g6ServerClient'
+              )
+              const fromMeta = readG6Activation(g1.data.domainMeta)
+              const capacityPlanningActive =
+                (g1.data as { capacityPlanningActive?: boolean }).capacityPlanningActive ===
+                  true || fromMeta.capacityPlanningActive
+              next = withG6ActivationOnStore(next, {
+                capacityPlanningActive,
+                domainMeta: g1.data.domainMeta,
+              })
+              const capacity = (g1.data as { capacity?: unknown }).capacity
+              if (capacity && typeof capacity === 'object') {
+                const { withCapacityOnStore } = await import('@/lib/cloud/g6AuthoritativeStrip')
+                next = withCapacityOnStore(next, capacity as Parameters<typeof withCapacityOnStore>[1])
+              }
+            }
             if (next !== local) {
               applyCloud(next)
               if (!cloudDirtyTracker.hasPendingUserOperations()) {
