@@ -14,6 +14,7 @@ import { ProcurementContainersTab } from '@/components/procurement/ProcurementCo
 import { ProcurementStockTab } from '@/components/procurement/ProcurementStockTab'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { KanbanViewToggle, type KanbanViewMode } from '@/components/kanban'
+import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import {
   PROCUREMENT_TABS,
@@ -32,12 +33,19 @@ import type {
   PurchaseOrderStatus,
   TransportMode,
 } from '@/lib/procurement/types'
+import {
+  purchaseOrderReceiptsHistoryToPrintModel,
+  purchaseOrderToPrintModel,
+  reversalToPrintModel,
+} from '@/lib/print/g5PrintFromDomain'
 
 export function ProcurementPage(
   props: ProcurementPageProps & {
     webProcurementMode?: boolean
     focusOrderId?: string | null
     onJournalFocusConsumed?: () => void
+    /** Commercial ACL for G5 print prices (default false). */
+    canViewCommercial?: boolean
   },
 ) {
   const {
@@ -58,6 +66,7 @@ export function ProcurementPage(
     webProcurementMode = false,
     focusOrderId,
     onJournalFocusConsumed,
+    canViewCommercial = false,
   } = props
 
   const { t } = useI18n()
@@ -86,6 +95,7 @@ export function ProcurementPage(
   const [editOrder, setEditOrder] = useState<PurchaseOrder | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [ordersView, setOrdersView] = useState<KanbanViewMode>('list')
+  const [printModel, setPrintModel] = useState<G5DocumentPrintModel | null>(null)
 
   useEffect(() => {
     if (!focusOrderId) return
@@ -141,6 +151,132 @@ export function ProcurementPage(
       ),
     [counterparties.items],
   )
+
+  const printDirectories = useMemo(
+    () => ({
+      suppliers: counterparties.items.map((c) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+      })),
+      items: warehouse.items.map((i) => ({
+        id: i.id,
+        internalCode: i.internalCode,
+        sku: i.sku,
+        name: i.name,
+      })),
+      warehouses: warehouse.locations.map((l) => ({ id: l.id, name: l.name })),
+    }),
+    [counterparties.items, warehouse.items, warehouse.locations],
+  )
+
+  function openPoPrint(
+    order: PurchaseOrder,
+    opts: { showPrices: boolean },
+  ) {
+    setPrintModel(
+      purchaseOrderToPrintModel(order as unknown as Record<string, unknown>, {
+        showPrices: opts.showPrices,
+        directories: printDirectories,
+        title: t('g5.print.purchaseOrder.title'),
+      }),
+    )
+  }
+
+  function openPoChangePrint(
+    order: PurchaseOrder,
+    opts: { showPrices: boolean; statusChanged: boolean },
+  ) {
+    setPrintModel(
+      reversalToPrintModel({
+        kind: 'change',
+        id: `${order.id}-change`,
+        number: order.orderNumber,
+        originalDocRef: order.orderNumber || order.id,
+        revision: Number((order as { revision?: number }).revision) || (opts.statusChanged ? 2 : 1),
+        reason: opts.statusChanged ? `status→${order.status}` : undefined,
+        order: order as unknown as Record<string, unknown>,
+        directories: printDirectories,
+        showPrices: opts.showPrices,
+        title: t('g5.print.reversal.title'),
+      }),
+    )
+  }
+
+  function openPoCancelPrint(order: PurchaseOrder, opts: { showPrices: boolean }) {
+    setPrintModel(
+      reversalToPrintModel({
+        kind: 'storno',
+        id: `${order.id}-cancel`,
+        number: order.orderNumber,
+        originalDocRef: order.orderNumber || order.id,
+        revision: Number((order as { revision?: number }).revision) || 1,
+        reason: 'cancelled',
+        order: order as unknown as Record<string, unknown>,
+        directories: printDirectories,
+        showPrices: opts.showPrices,
+        title: t('g5.print.reversal.title'),
+      }),
+    )
+  }
+
+  function openPoReceiptsPrint(order: PurchaseOrder, opts: { showPrices: boolean }) {
+    const docs = warehouse.documents.filter(
+      (d) =>
+        d.purchaseOrderId === order.id ||
+        order.warehouseDocumentIds.includes(d.id),
+    )
+    const embedded = (order as { receipts?: Record<string, unknown>[] }).receipts
+    const sources =
+      docs.length > 0
+        ? docs
+        : Array.isArray(embedded) && embedded.length > 0
+          ? embedded
+          : []
+    if (sources.length === 0) {
+      // Still open a receipt shell from PO open qty snapshot
+      setPrintModel(
+        purchaseOrderReceiptsHistoryToPrintModel(
+          order as unknown as Record<string, unknown>,
+          [
+            {
+              id: `rcpt-from-${order.id}`,
+              purchaseOrderId: order.id,
+              number: `${order.orderNumber}-RCPT`,
+              lines: order.lines
+                .filter((l) => (l.receivedQty ?? 0) > 0)
+                .map((l) => ({
+                  id: l.id,
+                  lineId: l.id,
+                  itemId: l.warehouseItemId,
+                  itemNameSnapshot: l.name,
+                  unit: l.unit,
+                  receivedQty: l.receivedQty,
+                  quantity: l.receivedQty,
+                })),
+            },
+          ],
+          {
+            showPrices: opts.showPrices,
+            directories: printDirectories,
+            title: t('g5.print.receipt.title'),
+          },
+        ),
+      )
+      return
+    }
+    setPrintModel(
+      purchaseOrderReceiptsHistoryToPrintModel(
+        order as unknown as Record<string, unknown>,
+        sources as unknown as Record<string, unknown>[],
+        {
+          showPrices: opts.showPrices,
+          directories: printDirectories,
+          title: t('g5.print.receipt.title'),
+        },
+      ),
+    )
+  }
 
   function openNew() {
     const { orderNumber } = allocateOrderNumber(procurement)
@@ -407,6 +543,8 @@ export function ProcurementPage(
           warehouse={warehouse}
           categories={procurement.categories}
           routePoints={procurement.routePoints}
+          canViewOrder
+          canViewCommercial={canViewCommercial}
           onClose={() => {
             setEditOrder(null)
             setIsNew(false)
@@ -416,8 +554,19 @@ export function ProcurementPage(
           onNavigateToDirectory={onNavigateToDirectory}
           onSave={saveOrder}
           onSyncPersist={persistTrackingSync}
+          onPrintOrder={(o, opts) => openPoPrint(o, opts)}
+          onPrintChange={(o, opts) => openPoChangePrint(o, opts)}
+          onPrintCancel={(o, opts) => openPoCancelPrint(o, opts)}
+          onPrintReceipts={(o, opts) => openPoReceiptsPrint(o, opts)}
         />
       )}
+      {printModel ? (
+        <G5DocumentPrintModal
+          model={printModel}
+          onClose={() => setPrintModel(null)}
+          showCommercial={canViewCommercial}
+        />
+      ) : null}
     </PageLayout>
   )
 }

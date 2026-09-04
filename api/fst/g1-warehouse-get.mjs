@@ -44,10 +44,17 @@ export default async function handler(req, res) {
     revision: result.revision,
     warehouse: result.warehouse,
     production: result.production,
+    masterData: result.masterData,
+    sales: result.sales,
+    planning: result.planning,
+    procurement: result.procurement,
     domainMeta: result.domainMeta,
     warehouseActive: result.warehouseActive,
     productionActive: result.productionActive,
     packagingQcActive: result.packagingQcActive === true,
+    masterDataActive: result.masterDataActive === true,
+    salesPlanningActive: result.salesPlanningActive === true,
+    procurementActive: result.procurementActive === true,
     source: 'fst_critical_store',
   })
 }

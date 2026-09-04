@@ -120,7 +120,31 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
   }
 
   return {
-    upsertWarehouseItem(item: WarehouseItem) {
+    async upsertWarehouseItem(item: WarehouseItem) {
+      const { isG5MasterDataActive } = await import('@/lib/planner/g5Activation')
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, g5MasterdataItemUpsert, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const conf = await g5MasterdataItemUpsert({
+            idempotencyKey: `g5-item-${item.id}-${Date.now()}`,
+            command: {
+              id: item.id,
+              code: item.internalCode,
+              name: item.name,
+              unit: item.unit,
+              active: item.active !== false,
+            },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       const roleId = actorRoleId()
       const actor = getActor?.()
       patchWarehouse(setStore, (w) => {
@@ -145,7 +169,25 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       })
     },
 
-    archiveWarehouseItem(id: string, archived: boolean) {
+    async archiveWarehouseItem(id: string, archived: boolean) {
+      const { isG5MasterDataActive } = await import('@/lib/planner/g5Activation')
+      if (isG5MasterDataActive(getStore()) && archived) {
+        const { isG5WebPath, g5MasterdataItemArchive, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const conf = await g5MasterdataItemArchive({
+            idempotencyKey: `g5-item-archive-${id}-${Date.now()}`,
+            command: { id },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       patchWarehouse(setStore, (w) => {
         const item = w.items.find((i) => i.id === id)
         if (!item) return w
@@ -325,6 +367,13 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
           return out.store
         })
         return result
+      }
+      // PHASE G5.1 — purchase receipts go through G5 once procurement is active.
+      {
+        const { isG5ProcurementActive } = await import('@/lib/planner/g5Activation')
+        if (doc.purpose === 'purchase' && isG5ProcurementActive(getStore())) {
+          return { ok: false, error: 'g5.error.use_g5_gateway' }
+        }
       }
       if (doc.type !== 'receipt' && doc.type !== 'issue') {
         return { ok: false, error: 'warehouse.g1.errUnsupportedType' }
@@ -787,6 +836,32 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         return Array.isArray(docIds) && docIds.includes(documentId)
       })
       if (loadingShipmentForG4) {
+        const { isG5SalesPlanningActive } = await import('@/lib/planner/g5Activation')
+        if (isG5SalesPlanningActive(currentForG4)) {
+          const { isG5WebPath, g5SalesShipmentCancel, mirrorG5Ack } = await import(
+            '@/lib/planner/g5ServerClient'
+          )
+          if (isG5WebPath()) {
+            const reason = args?.reason?.trim()
+            if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
+            const server = await g5SalesShipmentCancel({
+              idempotencyKey: `g5-ship-cancel-${loadingShipmentForG4.id}`,
+              command: {
+                shipmentId: loadingShipmentForG4.id,
+                reason,
+                cancellationReason: reason,
+              },
+            })
+            if (!server.ok) return { ok: false, error: server.error || server.message }
+            setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' })
+            const reversalIds = Array.isArray(
+              (server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds,
+            )
+              ? ((server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds as string[])
+              : []
+            return { ok: true, reversalIds }
+          }
+        }
         const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
           await import('@/lib/production/g4ServerClient')
         if (
@@ -1302,6 +1377,57 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       shipmentId: string,
       args?: { keeperId?: string; keeperName?: string },
     ) {
+      const storeNow = getStore()
+      const { isG5SalesPlanningActive } = await import('@/lib/planner/g5Activation')
+      if (isG5SalesPlanningActive(storeNow)) {
+        const { isG5WebPath, g5SalesShipmentPost, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const shipment = storeNow.warehouse.loadingShipments?.find((s) => s.id === shipmentId)
+          if (!shipment) {
+            return { ok: false as const, error: 'warehouse.loading.errNotFound' }
+          }
+          const lots = storeNow.production.finishedGoodsLots ?? []
+          const usages = resolveLoadingShipmentLotUsages(shipment.lines, lots)
+          if (!usages.ok) return { ok: false as const, error: usages.error }
+          if (usages.usages.length === 0) {
+            return { ok: false as const, error: 'warehouse.loading.errEmpty' }
+          }
+          let lastNumber = shipment.number
+          for (const usage of usages.usages) {
+            const lot = lots.find((l) => l.id === usage.lotId)
+            if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
+            const lineShipmentId =
+              usages.usages.length === 1 ? shipmentId : `${shipmentId}::${usage.lineId}`
+            const server = await g5SalesShipmentPost({
+              idempotencyKey: `g5-ship-post-${lineShipmentId}`,
+              command: {
+                shipmentId: lineShipmentId,
+                finishedProductId: lot.finishedProductId,
+                finishedGoodsLotId: usage.lotId,
+                lotId: usage.lotId,
+                quantity: usage.quantity,
+                warehouseId: shipment.warehouseId || lot.warehouseId,
+                salesOrderId: shipment.salesOrderId,
+                date: shipment.date,
+                counterpartyId: shipment.counterpartyId,
+                keeperId: args?.keeperId ?? shipment.keeperId,
+                keeperName: args?.keeperName ?? shipment.keeperName,
+              },
+            })
+            if (!server.ok) {
+              return { ok: false as const, error: server.error || server.message }
+            }
+            setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' })
+            lastNumber =
+              (server.data as { number?: string }).number ??
+              String((server.data as { shipmentId?: string }).shipmentId ?? lastNumber)
+          }
+          return { ok: true as const, number: lastNumber }
+        }
+      }
+
       const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
         await import('@/lib/production/g4ServerClient')
       if (

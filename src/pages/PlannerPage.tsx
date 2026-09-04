@@ -4,6 +4,9 @@ import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { PlannerMaterialsPanel } from '@/components/planner/PlannerMaterialsPanel'
 import { PlannerOrderForm } from '@/components/planner/PlannerOrderForm'
 import { PlannerOrdersKanban } from '@/components/planner/PlannerOrdersKanban'
+import { G5ActivationWizard } from '@/components/planner/G5ActivationWizard'
+import { G5MrpHorizonBanner } from '@/components/planner/G5MrpHorizonBanner'
+import { G5MrpWorkspace } from '@/components/planner/G5MrpWorkspace'
 import { MaterialStockHint } from '@/components/planner/MaterialStockHint'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
@@ -29,6 +32,7 @@ import {
 import type { FormulationRecipe } from '@/lib/formulations/types'
 import { formulationCategoryLabel } from '@/lib/formulations/types'
 import { inheritPackagingFromProduct } from '@/lib/packaging/inherit'
+import { shortContentHash } from '@/lib/planner/g5PackagingBom'
 import type { BoxRecipe, PackagingRecipe } from '@/lib/packaging/types'
 import {
   lineAllocationForDate,
@@ -55,6 +59,7 @@ import {
 import type { AppUser, AccessStore } from '@/lib/access/types'
 import type { WorkTaskDraft } from '@/lib/tasks/types'
 import type { ProductionOrder, PlannerOrderStatus } from '@/lib/planner/types'
+import type { AppStore } from '@/lib/types'
 import { formatNum, weekdayLabel } from '@/lib/production/stats'
 import { PRODUCTION_LINES } from '@/lib/production/types'
 import type { ProductionRequest } from '@/lib/production/types'
@@ -73,7 +78,7 @@ import {
   type ProductionSalesLink,
 } from '@/lib/sales/plannerLink'
 
-type Tab = 'orders' | 'calendar' | 'reports' | 'materials'
+type Tab = 'orders' | 'calendar' | 'reports' | 'materials' | 'mrp'
 
 type Props = {
   orders: ProductionOrder[]
@@ -115,6 +120,13 @@ type Props = {
   access?: AccessStore
   currentUser?: AppUser | null
   onCreateWorkTask?: (draft: WorkTaskDraft) => string
+  /** Full AppStore for G5 activation scan (optional). */
+  store?: AppStore | null
+  /**
+   * Admin-only G5 activation wizard controls.
+   * Default false — parent must pass true for sysadmin/admin.
+   */
+  canActivateG5?: boolean
 }
 
 type PlannerWorkspaceDraft = {
@@ -167,6 +179,8 @@ export function PlannerPage({
   access,
   currentUser,
   onCreateWorkTask,
+  store = null,
+  canActivateG5 = false,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -546,6 +560,7 @@ export function PlannerPage({
                   ? `${t('planner.tab.materials')} (${materialShortageCount})`
                   : 'planner.tab.materials',
               ],
+              ['mrp', 'planner.tab.mrp'],
             ] as const
           ).map(([id, key]) => ({
             id,
@@ -877,6 +892,34 @@ export function PlannerPage({
                             })}
                           </p>
                         )}
+                      </div>
+                    )}
+                    {selected.packagingBomSnapshot && (
+                      <div className="rounded-sm border border-sky-200 bg-sky-50/50 px-3 py-2 text-sm sm:col-span-2">
+                        <p className="text-xs font-bold uppercase text-sky-900">
+                          {t('g5.production.bom.title')}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-600">{t('g5.production.bom.readOnly')}</p>
+                        <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-3">
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.version')}</dt>
+                            <dd className="font-mono">{selected.packagingBomSnapshot.version}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.hash')}</dt>
+                            <dd className="font-mono" title={selected.packagingBomSnapshot.contentHash}>
+                              {shortContentHash(selected.packagingBomSnapshot.contentHash)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.snapshotDate')}</dt>
+                            <dd className="font-mono">
+                              {selected.packagingBomSnapshot.asOfDate ??
+                                selected.packagingBomSnapshot.snapshotAt?.slice(0, 10) ??
+                                '—'}
+                            </dd>
+                          </div>
+                        </dl>
                       </div>
                     )}
                   </div>
@@ -1293,6 +1336,8 @@ export function PlannerPage({
       )}
 
       {tab === 'materials' && (
+        <>
+        <G5MrpHorizonBanner />
         <PlannerMaterialsPanel
           orders={orders}
           warehouseItems={warehouseItems}
@@ -1313,6 +1358,38 @@ export function PlannerPage({
           currentUser={currentUser}
           onCreateWorkTask={onCreateWorkTask}
         />
+        </>
+      )}
+
+      {tab === 'mrp' && (
+        <div className="space-y-4">
+          <G5ActivationWizard
+            store={store}
+            access={access}
+            currentUser={currentUser}
+            canActivateG5={canActivateG5}
+          />
+          <G5MrpWorkspace
+            asOfDate={activeMonth.length === 7 ? `${activeMonth}-01` : activeMonth}
+            salesOrders={salesOrders}
+            warehouseItems={warehouseItems}
+            finishedProducts={finishedProducts}
+            counterparties={counterparties}
+            store={store}
+            onOpenSalesOrder={() => onOpenSalesOrder?.()}
+            onOpenProductionOrder={(id) => {
+              const order = orders.find((o) => o.id === id)
+              if (order) {
+                openOrder(order)
+                setTab('orders')
+              }
+            }}
+            onNavigateToDirectory={onNavigateToDirectory}
+            access={access}
+            currentUser={currentUser}
+            onCreateWorkTask={onCreateWorkTask}
+          />
+        </div>
       )}
 
       {tab === 'reports' && (

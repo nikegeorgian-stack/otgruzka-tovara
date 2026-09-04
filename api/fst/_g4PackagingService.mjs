@@ -28,6 +28,8 @@ import {
   isPackagingQcFeatureActive,
   isPeriodClosed,
   isProductionDomainActive,
+  isMasterDataDomainActive,
+  isSalesPlanningActive,
   markPackagingQcFeatureActive,
   nextReversalNumber,
   nextServerDocumentNumber,
@@ -45,6 +47,7 @@ import { hasCapability, normalizeCapabilities } from './_g2Capabilities.mjs'
 import { hasLineScope } from './_g3Capabilities.mjs'
 import { casCommitDomains } from './_g3ProductionService.mjs'
 import { G4_CAPS, hasWarehouseScope } from './_g4Capabilities.mjs'
+import { comparePackagingActualToNorm } from './_g5PackagingBomHelpers.mjs'
 import {
   getQcDataConnect,
   insertQcLotDecision,
@@ -125,6 +128,11 @@ function stripClientTrusted(command) {
     qcDecisions: _decisions,
     packagingReports: _reports,
     loadingShipments: _shipments,
+    packagingBomSnapshot: _pbs,
+    packagingBomId: _pbi,
+    packagingBomVersion: _pbv,
+    packagingBomContentHash: _pbh,
+    componentNorms: _cn,
     ...rest
   } = command && typeof command === 'object' ? command : {}
   return rest
@@ -648,6 +656,7 @@ function applyPackagingDraftDelete(production, command, actor, now) {
  */
 function applyPackagingConfirm(production, warehouse, command, actor, now, options = {}) {
   const correction = options.correction ?? null
+  const masterDataActive = options.masterDataActive === true
   const orderId = str(command.productionOrderId ?? command.orderId)
   const lineId = normalizePackLineId(command.lineId ?? PACK_LINE_ID)
   const reportDate = str(command.reportDate ?? command.date ?? now).slice(0, 10)
@@ -704,6 +713,35 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
   if (wip.lines.length === 0) return fail('wip_lines_required', 400)
   const materials = sanitizePackagingLines(command.materialLines, { itemKey: 'itemId' })
   if (!materials.ok) return fail(materials.error, 400)
+
+  // G5.4: when masterData active, norms come ONLY from order.packagingBomSnapshot
+  // (never live BOM, never client snapshot). Corrections inherit original report BOM.
+  let packagingBomAnalysis = null
+  if (masterDataActive) {
+    const snap = correction?.packagingBomSnapshot ?? order.packagingBomSnapshot ?? null
+    if (!snap || !str(snap.packagingBomId) || !str(snap.contentHash)) {
+      return fail('packaging_bom_snapshot_required', 409)
+    }
+    const compared = comparePackagingActualToNorm(snap, outputM2, materials.lines, {
+      excessReason: command.excessReason ?? command.deviationReason ?? command.reason,
+    })
+    if (!compared.ok) {
+      return fail(compared.error, compared.status || 400, {
+        itemId: compared.itemId,
+        expectedUnit: compared.expectedUnit,
+        actualUnit: compared.actualUnit,
+        components: compared.components,
+      })
+    }
+    packagingBomAnalysis = {
+      packagingBomId: compared.packagingBomId,
+      version: compared.version,
+      contentHash: compared.contentHash,
+      componentNorms: compared.components,
+      excessReason: compared.excessReason,
+      snapshotAsOfDate: snap.asOfDate,
+    }
+  }
 
   // WIP availability is recomputed from the ledger at the pack location and bound to
   // the production order; the report's own WIP status claims are ignored.
@@ -962,6 +1000,16 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
     correctionReason: correction?.reason ?? undefined,
     reverseDocumentIds: correction?.reverseDocumentIds ?? undefined,
     carriedShippedQty: carryShipped > 0 ? carryShipped : undefined,
+    packagingBomId: packagingBomAnalysis?.packagingBomId,
+    packagingBomVersion: packagingBomAnalysis?.version,
+    packagingBomContentHash: packagingBomAnalysis?.contentHash,
+    packagingComponentNorms: packagingBomAnalysis?.componentNorms,
+    packagingExcessReason: packagingBomAnalysis?.excessReason,
+    packagingBomSnapshotAsOfDate: packagingBomAnalysis?.snapshotAsOfDate,
+    packagingBomSnapshot:
+      packagingBomAnalysis != null
+        ? (correction?.packagingBomSnapshot ?? order.packagingBomSnapshot)
+        : undefined,
     confirmedAt: now,
     confirmedBy: actor.uid,
     confirmedByName: actor.email ?? actor.uid,
@@ -1072,7 +1120,8 @@ function applyPackagingCreateCorrection(production, command, actor, now) {
   })
 }
 
-function applyPackagingConfirmCorrection(production, warehouse, command, actor, now) {
+function applyPackagingConfirmCorrection(production, warehouse, command, actor, now, options = {}) {
+  const masterDataActive = options.masterDataActive === true
   const originalReportId = str(command.originalReportId ?? command.correctsReportId)
   const reason = str(command.correctionReason ?? command.reason)
   if (!originalReportId || !reason) return fail('correction_reason_required', 400)
@@ -1208,12 +1257,18 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
     actor,
     now,
     {
+      masterDataActive,
       correction: {
         originalReportId,
         reason,
         carryShippedQty: shippedQty,
         reverseDocumentIds,
         supersededLotId: oldLot?.id,
+        // Keep the original report/order BOM version — never switch to a newer live BOM.
+        packagingBomSnapshot:
+          original.packagingBomSnapshot ??
+          (production.orders ?? []).find((o) => o.id === original.productionOrderId)
+            ?.packagingBomSnapshot,
       },
     },
   )
@@ -2573,11 +2628,15 @@ export async function executeG4Command(input) {
   } else if (commandType === 'packaging.report.draft.delete') {
     applied = applyPackagingDraftDelete(production, rawCommand, actor, now)
   } else if (commandType === 'packaging.report.confirm') {
-    applied = applyPackagingConfirm(production, warehouse, rawCommand, actor, now)
+    applied = applyPackagingConfirm(production, warehouse, rawCommand, actor, now, {
+      masterDataActive: isMasterDataDomainActive(critical.payload),
+    })
   } else if (commandType === 'packaging.report.createCorrection') {
     applied = applyPackagingCreateCorrection(production, rawCommand, actor, now)
   } else if (commandType === 'packaging.report.confirmCorrection') {
-    applied = applyPackagingConfirmCorrection(production, warehouse, rawCommand, actor, now)
+    applied = applyPackagingConfirmCorrection(production, warehouse, rawCommand, actor, now, {
+      masterDataActive: isMasterDataDomainActive(critical.payload),
+    })
   } else if (commandType === 'qc.review.start') {
     applied = applyQcReviewStart(production, rawCommand, actor, now)
   } else if (commandType === 'qc.release') {
@@ -2596,10 +2655,20 @@ export async function executeG4Command(input) {
     applied = applyShipmentDraftSave(warehouse, rawCommand, actor, now)
   } else if (commandType === 'shipment.draft.delete') {
     applied = applyShipmentDraftDelete(warehouse, rawCommand, actor, now)
-  } else if (commandType === 'shipment.post') {
-    applied = applyShipmentPost(production, warehouse, rawCommand, actor, now)
-  } else if (commandType === 'shipment.cancel') {
-    applied = applyShipmentCancel(production, warehouse, rawCommand, actor, now)
+  } else if (commandType === 'shipment.post' || commandType === 'shipment.cancel') {
+    // PHASE G5.1 — after salesPlanning activation, sales-linked shipments use G5 CAS.
+    // Standalone emergency still allowed for sysadmin with emergencyReason.
+    if (isSalesPlanningActive(critical.payload)) {
+      const emergency =
+        isSysadminActor(actor) && String(rawCommand.emergencyReason ?? '').trim().length >= 8
+      if (!emergency) {
+        return fail('use_g5_gateway', 409)
+      }
+    }
+    applied =
+      commandType === 'shipment.post'
+        ? applyShipmentPost(production, warehouse, rawCommand, actor, now)
+        : applyShipmentCancel(production, warehouse, rawCommand, actor, now)
   } else {
     return fail('unknown_command', 400)
   }

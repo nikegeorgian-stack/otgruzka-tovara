@@ -741,6 +741,7 @@ export function useAppStore() {
     patchFinishedProductCatalog: directories.patchFinishedProductCatalog,
     removeFinishedProduct: directories.removeFinishedProduct,
     upsertPackagingRecipe: directories.upsertPackagingRecipe,
+    approvePackagingBom: directories.approvePackagingBom,
     removePackagingRecipe: directories.removePackagingRecipe,
     upsertBoxRecipe: directories.upsertBoxRecipe,
     removeBoxRecipe: directories.removeBoxRecipe,

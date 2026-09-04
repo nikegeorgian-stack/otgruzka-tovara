@@ -105,19 +105,33 @@ describe('G1 critical helpers', () => {
     const bad = h.parseCriticalPayload(
       JSON.stringify({
         schemaVersion: 1,
-        domains: { warehouse: h.emptyWarehouseStore(), sales: {} },
+        domains: { warehouse: h.emptyWarehouseStore(), employees: {} },
       }),
     )
     expect(bad.ok).toBe(false)
     expect(bad.error).toBe('domain_not_allowed')
     const good = h.parseCriticalPayload(
       JSON.stringify({
-        schemaVersion: 3,
-        domains: { warehouse: h.emptyWarehouseStore(), production: h.emptyProductionStore() },
+        schemaVersion: 4,
+        domains: {
+          warehouse: h.emptyWarehouseStore(),
+          production: h.emptyProductionStore(),
+          masterData: h.emptyMasterDataStore(),
+          sales: h.emptySalesStore(),
+          planning: h.emptyPlanningStore(),
+          procurement: h.emptyProcurementStore(),
+        },
       }),
     )
     expect(good.ok).toBe(true)
-    expect(h.G1_ALLOWED_DOMAINS).toEqual(['warehouse', 'production'])
+    expect(h.G1_ALLOWED_DOMAINS).toEqual([
+      'warehouse',
+      'production',
+      'masterData',
+      'sales',
+      'planning',
+      'procurement',
+    ])
   })
 
   it('server recomputes balance from movements (ignores client balances)', async () => {

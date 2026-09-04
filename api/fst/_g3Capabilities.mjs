@@ -10,6 +10,7 @@ export const G3_CAPS = Object.freeze({
   ORDER_EDIT: 'production.order.edit',
   ORDER_CONFIRM: 'production.order.confirm',
   ORDER_CANCEL: 'production.order.cancel',
+  ORDER_PACKAGING_BOM_SNAPSHOT_MIGRATE: 'production.order.packagingBomSnapshot.migrate',
   RESERVATION_REALLOCATE: 'production.reservation.reallocate',
   MATERIAL_ISSUE: 'production.material.issue',
   MATERIAL_RETURN: 'production.material.return',

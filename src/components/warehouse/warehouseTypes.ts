@@ -40,7 +40,7 @@ export type WarehousePageProps = {
   webWarehouseMode?: boolean
   webUserName?: string
   /** Полный стор для пакетов Balance / шапок бланков */
-  exportStore?: import('@/lib/types').AppStore
+  exportStore?: import('@/lib/types').AppStore | null
   /** Отметить складские документы выгруженными */
   onMarkWarehouseDocsExported?: (documentIds: string[], actor?: { id?: string; name?: string }) => void
   printMeta?: {

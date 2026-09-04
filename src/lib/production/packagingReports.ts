@@ -84,6 +84,14 @@ export type ProductionPackagingReport = {
   transactionGroupId?: string
   correctsReportId?: string
   correctionReason?: string
+  /** G5.4 — BOM traceability from order snapshot at confirm */
+  packagingBomId?: string
+  packagingBomVersion?: number
+  packagingBomContentHash?: string
+  packagingComponentNorms?: import('@/lib/planner/g5PackagingBom').PackagingComponentNorm[]
+  packagingExcessReason?: string
+  packagingBomSnapshotAsOfDate?: string
+  packagingBomSnapshot?: import('@/lib/planner/g5PackagingBom').PackagingBomSnapshot
 }
 
 export const PACK_FORBIDDEN = 'production.pack.errForbidden' as const

@@ -48,6 +48,16 @@ import { DirectorActionQueue } from '@/components/director/DirectorActionQueue'
 import { DirectorOrderQuickCard } from '@/components/director/DirectorOrderQuickCard'
 import { SalesOrderKanban } from '@/components/director/SalesOrderKanban'
 import { KanbanViewToggle } from '@/components/kanban'
+import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
+import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
+import {
+  isCancelledStatus,
+  reversalToPrintModel,
+  salesOrderToPrintModel,
+  shouldPrintChange,
+  warehouseDocToReversalPrintModel,
+} from '@/lib/print/g5PrintFromDomain'
+import type { AppStore } from '@/lib/types'
 
 type Tab = 'dashboard' | 'queue' | 'orders' | 'planning'
 type OrdersView = 'list' | 'kanban'
@@ -60,7 +70,7 @@ type Props = {
   finishedProducts: FinishedProduct[]
   warehouse: WarehouseStore
   webUserName?: string
-  onUpsertSalesOrder: (order: SalesOrder) => SalesOrder
+  onUpsertSalesOrder: (order: SalesOrder) => SalesOrder | Promise<SalesOrder>
   onUpsertCounterparty: (c: Counterparty) => void
   onOpenCounterpartiesJournal?: () => void
   onRemoveSalesOrder: (id: string) => void
@@ -94,6 +104,12 @@ type Props = {
   onErpNavigate?: (view: import('@/lib/types').ViewId) => void
   /** Гендиректор: только отчёты, без заказов/планирования. */
   reportOnly?: boolean
+  /** Optional full store for G5 activation flags (master-data / sales planning). */
+  store?: AppStore | null
+  /** Commercial ACL for G5 print prices (default false). */
+  canViewCommercial?: boolean
+  /** Alias kept for callers; defaults false. */
+  showCommercial?: boolean
 }
 
 function lineNeedsEnsure(line: SalesOrder['lines'][number]): boolean {
@@ -154,8 +170,14 @@ export function DirectorPage({
   otc,
   onErpNavigate,
   reportOnly = false,
+  store = null,
+  canViewCommercial = false,
+  showCommercial = false,
 }: Props) {
   const { t, tf, locale } = useI18n()
+  const g5Flags = g5FlagsFromStore(store)
+  const commercialPrint = canViewCommercial || showCommercial
+  const [printModel, setPrintModel] = useState<G5DocumentPrintModel | null>(null)
   const { confirm } = useConfirm()
   const asOf = useAsOfSnapshot()
   const {
@@ -941,6 +963,34 @@ export function DirectorPage({
             onOpenPlanner={onOpenPlanner}
             onOpenProduction={onOpenProduction}
             onOpenOrder={(o) => setEditing(o)}
+            onPrintShipmentReversal={(o) => {
+              const cancelDoc = warehouse.documents.find(
+                (d) =>
+                  (d as { salesOrderId?: string }).salesOrderId === o.id &&
+                  (String((d as { docRole?: string }).docRole ?? '') ===
+                    'finished_goods_shipment_cancel' ||
+                    Boolean(d.reversesDocumentId)),
+              )
+              if (cancelDoc) {
+                setPrintModel(
+                  warehouseDocToReversalPrintModel(
+                    cancelDoc as unknown as Record<string, unknown>,
+                    {
+                      showPrices: commercialPrint,
+                      directories: {
+                        items: warehouse.items.map((i) => ({
+                          id: i.id,
+                          internalCode: i.internalCode,
+                          sku: i.sku,
+                          name: i.name,
+                        })),
+                      },
+                      reason: cancelDoc.cancellationReason || 'shipment_cancel',
+                    },
+                  ),
+                )
+              }
+            }}
             statusBadge={statusBadge}
             fulfillmentBadge={fulfillmentBadge}
           />
@@ -952,15 +1002,137 @@ export function DirectorPage({
           order={editing}
           counterparties={counterparties}
           finishedProducts={finishedProducts}
-          onUpsertCounterparty={onUpsertCounterparty}
+          authoritativeMasterData={g5Flags.masterDataActive || g5Flags.salesPlanningActive}
+          onUpsertCounterparty={
+            g5Flags.masterDataActive || g5Flags.salesPlanningActive
+              ? undefined
+              : onUpsertCounterparty
+          }
           onOpenCounterpartiesJournal={onOpenCounterpartiesJournal}
+          showPrintChange={shouldPrintChange(editing as unknown as Record<string, unknown>)}
+          showPrintReversal={
+            isCancelledStatus(editing.commercialStatus ?? editing.status) ||
+            warehouse.documents.some(
+              (d) =>
+                (d as { salesOrderId?: string }).salesOrderId === editing.id &&
+                (String((d as { docRole?: string }).docRole ?? '') ===
+                  'finished_goods_shipment_cancel' ||
+                  Boolean(d.reversesDocumentId)),
+            )
+          }
+          onPrint={(o) => {
+            setPrintModel(
+              salesOrderToPrintModel(o as unknown as Record<string, unknown>, {
+                showPrices: commercialPrint,
+                directories: {
+                  customers: counterparties.map((c) => ({
+                    id: c.id,
+                    code: c.code,
+                    name: c.name,
+                  })),
+                  products: finishedProducts.map((f) => ({
+                    id: f.id,
+                    code: f.code,
+                    name: f.name,
+                  })),
+                },
+                actorName: webUserName,
+                at: new Date().toISOString(),
+                title: t('g5.print.salesOrder.title'),
+              }),
+            )
+          }}
+          onPrintChange={(o) => {
+            setPrintModel(
+              reversalToPrintModel({
+                kind: 'change',
+                id: `${o.id}-change`,
+                number: o.orderNumber,
+                originalDocRef: o.orderNumber || o.id,
+                revision: Number((o as { revision?: number }).revision) || 2,
+                reason: 'commercial_change',
+                order: o as unknown as Record<string, unknown>,
+                directories: {
+                  customers: counterparties.map((c) => ({
+                    id: c.id,
+                    code: c.code,
+                    name: c.name,
+                  })),
+                  products: finishedProducts.map((f) => ({
+                    id: f.id,
+                    code: f.code,
+                    name: f.name,
+                  })),
+                },
+                actorName: webUserName,
+                at: new Date().toISOString(),
+                showPrices: commercialPrint,
+                title: t('g5.print.reversal.title'),
+              }),
+            )
+          }}
+          onPrintReversal={(o) => {
+            const cancelDoc = warehouse.documents.find(
+              (d) =>
+                (d as { salesOrderId?: string }).salesOrderId === o.id &&
+                (String((d as { docRole?: string }).docRole ?? '') ===
+                  'finished_goods_shipment_cancel' ||
+                  Boolean(d.reversesDocumentId)),
+            )
+            if (cancelDoc) {
+              setPrintModel(
+                warehouseDocToReversalPrintModel(cancelDoc as unknown as Record<string, unknown>, {
+                  showPrices: commercialPrint,
+                  directories: {
+                    items: warehouse.items.map((i) => ({
+                      id: i.id,
+                      internalCode: i.internalCode,
+                      sku: i.sku,
+                      name: i.name,
+                    })),
+                  },
+                  reason: cancelDoc.cancellationReason || 'shipment_cancel',
+                }),
+              )
+              return
+            }
+            setPrintModel(
+              reversalToPrintModel({
+                kind: 'storno',
+                id: `${o.id}-storno`,
+                number: o.orderNumber,
+                originalDocRef: o.orderNumber || o.id,
+                revision: Number((o as { revision?: number }).revision) || 1,
+                reason: 'order_cancelled',
+                order: o as unknown as Record<string, unknown>,
+                directories: {
+                  products: finishedProducts.map((f) => ({
+                    id: f.id,
+                    code: f.code,
+                    name: f.name,
+                  })),
+                },
+                actorName: webUserName,
+                at: new Date().toISOString(),
+                showPrices: commercialPrint,
+                title: t('g5.print.reversal.title'),
+              }),
+            )
+          }}
           onSave={(o) => {
-            onUpsertSalesOrder(o)
+            void onUpsertSalesOrder(o)
             setEditing(null)
           }}
           onClose={() => setEditing(null)}
         />
       )}
+      {printModel ? (
+        <G5DocumentPrintModal
+          model={printModel}
+          onClose={() => setPrintModel(null)}
+          showCommercial={commercialPrint}
+        />
+      ) : null}
     </PageLayout>
   )
 }
@@ -984,6 +1156,7 @@ type PlanningTabProps = {
   onOpenPlanner?: (productionOrderId: string) => void
   onOpenProduction?: () => void
   onOpenOrder: (order: SalesOrder) => void
+  onPrintShipmentReversal?: (order: SalesOrder) => void
   statusBadge: (status: SalesOrderStatus) => ReactNode
   fulfillmentBadge: (order: SalesOrder) => ReactNode
 }
@@ -1118,6 +1291,7 @@ function PlanningTab({
   onOpenPlanner,
   onOpenProduction,
   onOpenOrder,
+  onPrintShipmentReversal,
   statusBadge,
   fulfillmentBadge,
 }: PlanningTabProps) {
@@ -1250,6 +1424,22 @@ function PlanningTab({
                   {t('director.plan.calcCombinedOnly')}
                 </span>
               )}
+              {onPrintShipmentReversal &&
+                warehouse.documents.some(
+                  (d) =>
+                    (d as { salesOrderId?: string }).salesOrderId === o.id &&
+                    (String((d as { docRole?: string }).docRole ?? '') ===
+                      'finished_goods_shipment_cancel' ||
+                      Boolean(d.reversesDocumentId)),
+                ) && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onPrintShipmentReversal(o)}
+                  >
+                    {t('g5.print.action.printShipmentReversal')}
+                  </Button>
+                )}
             </div>
             <div className="space-y-2">
               {o.lines.map((line) => {

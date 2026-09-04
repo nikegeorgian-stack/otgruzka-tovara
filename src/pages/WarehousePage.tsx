@@ -154,6 +154,7 @@ export function WarehousePage(props: WarehousePageProps) {
     access,
     currentUser,
     onCreateWorkTask,
+    exportStore,
   } = props
 
   const { t, tf } = useI18n()
@@ -834,6 +835,7 @@ export function WarehousePage(props: WarehousePageProps) {
           productionRequests={productionRequests}
           keeperId={keeperId}
           keeperName={keeperName}
+          exportStore={exportStore}
           onPostDocument={onPostDocument}
           onPostTransfer={onPostTransfer}
           onCancelDocument={onCancelDocument}

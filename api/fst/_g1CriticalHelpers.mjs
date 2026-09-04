@@ -1,12 +1,22 @@
 /**
- * PHASE G1/G2/G3.1 — shared critical-store helpers (server .mjs + tests).
+ * PHASE G1/G2/G3.1/G4/G5 — shared critical-store helpers (server .mjs + tests).
  * Allowed domains only; unknown envelope/domain fields are preserved.
- * Domain activation is per-domain (warehouse vs production), not bare revision.
+ * Domain activation is per-domain / feature, not bare revision.
  */
 
-export const G1_CRITICAL_SCHEMA_VERSION = 3
-/** PHASE G3 — warehouse + production share one FstCriticalStore revision/CAS. */
-export const G1_ALLOWED_DOMAINS = Object.freeze(['warehouse', 'production'])
+export const G1_CRITICAL_SCHEMA_VERSION = 4
+/**
+ * Shared FstCriticalStore domains. Empty domain ≠ authoritative without active marker.
+ * G5: masterData, sales, planning, procurement — activated separately from WH/prod/pack.
+ */
+export const G1_ALLOWED_DOMAINS = Object.freeze([
+  'warehouse',
+  'production',
+  'masterData',
+  'sales',
+  'planning',
+  'procurement',
+])
 
 export const G2_MAX_DOCUMENT_LINES = 500
 export const G2_MAX_BODY_BYTES = 256 * 1024
@@ -62,6 +72,32 @@ const PRODUCTION_KNOWN = new Set([
   'qcDecisions',
 ])
 
+const MASTER_DATA_KNOWN = new Set([
+  'items',
+  'finishedProducts',
+  'suppliers',
+  'customers',
+  'packagingBoms',
+  'auditLog',
+])
+
+const SALES_KNOWN = new Set(['orders', 'auditLog'])
+
+const PLANNING_KNOWN = new Set([
+  'productionRecommendations',
+  'planningRuns',
+  'shortages',
+  'masterDataErrors',
+  'auditLog',
+])
+
+const PROCUREMENT_KNOWN = new Set([
+  'orders',
+  'unassignedShortages',
+  'payments',
+  'auditLog',
+])
+
 export function emptyWarehouseStore() {
   return {
     items: [],
@@ -96,10 +132,52 @@ export function emptyProductionStore() {
   }
 }
 
+/** PHASE G5 — server master-data subset (not AppStore directories / finishedProducts blob). */
+export function emptyMasterDataStore() {
+  return {
+    items: [],
+    finishedProducts: [],
+    suppliers: [],
+    customers: [],
+    packagingBoms: [],
+    auditLog: [],
+  }
+}
+
+export function emptySalesStore() {
+  return {
+    orders: [],
+    auditLog: [],
+  }
+}
+
+export function emptyPlanningStore() {
+  return {
+    productionRecommendations: [],
+    planningRuns: [],
+    shortages: [],
+    masterDataErrors: [],
+    auditLog: [],
+  }
+}
+
+export function emptyProcurementStore() {
+  return {
+    orders: [],
+    unassignedShortages: [],
+    payments: [],
+    auditLog: [],
+  }
+}
+
 export function emptyDomainMeta() {
   return {
     warehouse: { active: false, version: 0 },
     production: { active: false, version: 0 },
+    // G5 — separate activation; bare critical revision does NOT enable these
+    masterData: { active: false, version: 0 },
+    salesPlanning: { active: false, version: 0 },
+    procurement: { active: false, version: 0 },
   }
 }
 
@@ -111,6 +189,10 @@ export function emptyCriticalPayload() {
     domains: {
       warehouse: emptyWarehouseStore(),
       production: emptyProductionStore(),
+      masterData: emptyMasterDataStore(),
+      sales: emptySalesStore(),
+      planning: emptyPlanningStore(),
+      procurement: emptyProcurementStore(),
     },
   }
 }
@@ -168,6 +250,51 @@ function normalizeProduction(raw) {
   }
 }
 
+function normalizeMasterData(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, MASTER_DATA_KNOWN),
+    items: asArray(src.items),
+    finishedProducts: asArray(src.finishedProducts),
+    suppliers: asArray(src.suppliers),
+    customers: asArray(src.customers),
+    packagingBoms: asArray(src.packagingBoms),
+    auditLog: asArray(src.auditLog),
+  }
+}
+
+function normalizeSales(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, SALES_KNOWN),
+    orders: asArray(src.orders),
+    auditLog: asArray(src.auditLog),
+  }
+}
+
+function normalizePlanning(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, PLANNING_KNOWN),
+    productionRecommendations: asArray(src.productionRecommendations),
+    planningRuns: asArray(src.planningRuns),
+    shortages: asArray(src.shortages),
+    masterDataErrors: asArray(src.masterDataErrors),
+    auditLog: asArray(src.auditLog),
+  }
+}
+
+function normalizeProcurement(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, PROCUREMENT_KNOWN),
+    orders: asArray(src.orders),
+    unassignedShortages: asArray(src.unassignedShortages),
+    payments: asArray(src.payments),
+    auditLog: asArray(src.auditLog),
+  }
+}
+
 function normalizeFeatureMeta(raw) {
   if (!raw || typeof raw !== 'object') return undefined
   const out = {}
@@ -185,6 +312,17 @@ function normalizeFeatureMeta(raw) {
     }
   }
   return out
+}
+
+function normalizeDomainSlot(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...pickUnknown(src, new Set(['active', 'version', 'activatedAt', 'activatedBy'])),
+    active: src.active === true,
+    version: Number(src.version) || (src.active === true ? 1 : 0),
+    activatedAt: src.activatedAt,
+    activatedBy: src.activatedBy,
+  }
 }
 
 function normalizeDomainMeta(raw) {
@@ -210,6 +348,9 @@ function normalizeDomainMeta(raw) {
       activatedBy: prod.activatedBy,
       ...(features ? { features } : {}),
     },
+    masterData: normalizeDomainSlot(raw.masterData),
+    salesPlanning: normalizeDomainSlot(raw.salesPlanning),
+    procurement: normalizeDomainSlot(raw.procurement),
   }
 }
 
@@ -323,6 +464,52 @@ export function markProductionDomainActive(payload, actorUid, now = new Date().t
   return { ...payload, domainMeta: meta }
 }
 
+function markNamedDomainActive(payload, slotKey, actorUid, now = new Date().toISOString()) {
+  const meta = {
+    ...(payload.domainMeta && typeof payload.domainMeta === 'object'
+      ? { ...payload.domainMeta }
+      : emptyDomainMeta()),
+  }
+  const prev = meta[slotKey] && typeof meta[slotKey] === 'object' ? meta[slotKey] : {}
+  meta[slotKey] = {
+    ...prev,
+    active: true,
+    version: Math.max(1, Number(prev.version) || 0) + (prev.active === true ? 0 : 1),
+    activatedAt: prev.activatedAt ?? now,
+    activatedBy: prev.activatedBy ?? actorUid,
+  }
+  return { ...payload, domainMeta: meta }
+}
+
+/** PHASE G5 — master-data domain (items/products/customers/suppliers/BOM). */
+export function isMasterDataDomainActive(payload) {
+  return payload?.domainMeta?.masterData?.active === true
+}
+
+export function markMasterDataDomainActive(payload, actorUid, now = new Date().toISOString()) {
+  return markNamedDomainActive(payload, 'masterData', actorUid, now)
+}
+
+/**
+ * PHASE G5 — sales + planning/MRP share one activation flag (salesPlanning).
+ * Empty sales/planning domains are not authoritative until this is true.
+ */
+export function isSalesPlanningActive(payload) {
+  return payload?.domainMeta?.salesPlanning?.active === true
+}
+
+export function markSalesPlanningActive(payload, actorUid, now = new Date().toISOString()) {
+  return markNamedDomainActive(payload, 'salesPlanning', actorUid, now)
+}
+
+export function isProcurementDomainActive(payload) {
+  return payload?.domainMeta?.procurement?.active === true
+}
+
+export function markProcurementDomainActive(payload, actorUid, now = new Date().toISOString()) {
+  return markNamedDomainActive(payload, 'procurement', actorUid, now)
+}
+
 export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {
   let raw
   try {
@@ -344,10 +531,21 @@ export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {
 
   const hasProductionKey = Object.prototype.hasOwnProperty.call(domains, 'production')
   const warehouse = normalizeWarehouse(domains.warehouse)
-  // v1/v2 without production key: keep absent as empty in memory but do not imply active
   const production = hasProductionKey
     ? normalizeProduction(domains.production)
     : emptyProductionStore()
+  const masterData = Object.prototype.hasOwnProperty.call(domains, 'masterData')
+    ? normalizeMasterData(domains.masterData)
+    : emptyMasterDataStore()
+  const sales = Object.prototype.hasOwnProperty.call(domains, 'sales')
+    ? normalizeSales(domains.sales)
+    : emptySalesStore()
+  const planning = Object.prototype.hasOwnProperty.call(domains, 'planning')
+    ? normalizePlanning(domains.planning)
+    : emptyPlanningStore()
+  const procurement = Object.prototype.hasOwnProperty.call(domains, 'procurement')
+    ? normalizeProcurement(domains.procurement)
+    : emptyProcurementStore()
 
   const domainMeta = Object.prototype.hasOwnProperty.call(raw, 'domainMeta')
     ? normalizeDomainMeta(raw.domainMeta)
@@ -370,6 +568,10 @@ export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {
       domains: {
         warehouse,
         production,
+        masterData,
+        sales,
+        planning,
+        procurement,
       },
     },
   }

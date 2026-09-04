@@ -30,17 +30,53 @@ import type { BoxRecipe, PackagingRecipe } from '@/lib/packaging/types'
 import { actorAuditFields } from './actorAuditFields'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import type { StoreSliceDeps } from '../storeApi'
+import { isG5MasterDataActive } from '@/lib/planner/g5Activation'
 
-export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
+export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   const who = () => actorAuditFields(getActor)
 
   return {
-    upsertCounterparty(entry: Counterparty) {
+    async upsertCounterparty(entry: Counterparty) {
       const normalized = normalizeCounterparty({
         ...entry,
         updatedAt: new Date().toISOString(),
         createdAt: entry.createdAt || new Date().toISOString(),
       })
+
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const role = normalized.role
+          const run = async (commandType: 'masterdata.customer.upsert' | 'masterdata.supplier.upsert') => {
+            const conf = await executeG5Command({
+              idempotencyKey: `g5-cp-${commandType}-${normalized.id}-${normalized.updatedAt}`,
+              commandType,
+              command: {
+                id: normalized.id,
+                code: normalized.code,
+                name: normalized.name,
+                active: normalized.active,
+              },
+            })
+            if (!conf.ok) {
+              throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+            }
+            return conf.data
+          }
+          let ack =
+            role === 'supplier'
+              ? await run('masterdata.supplier.upsert')
+              : await run('masterdata.customer.upsert')
+          if (role === 'both') {
+            ack = { ...ack, ...(await run('masterdata.supplier.upsert')) }
+          }
+          setStore((s) => mirrorG5Ack(s, ack), { origin: 'system' })
+          return
+        }
+      }
+
       setStore((s) => {
         const exists = s.counterparties.items.some((c) => c.id === normalized.id)
         const items = exists
@@ -60,7 +96,37 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
       })
     },
 
-    removeCounterparty(id: string) {
+    async removeCounterparty(id: string) {
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const cp = getStore().counterparties.items.find((c) => c.id === id)
+          const role = cp?.role
+          const run = async (commandType: 'masterdata.customer.archive' | 'masterdata.supplier.archive') => {
+            const conf = await executeG5Command({
+              idempotencyKey: `g5-cp-archive-${commandType}-${id}-${Date.now()}`,
+              commandType,
+              command: { id },
+            })
+            if (!conf.ok) {
+              throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+            }
+            return conf.data
+          }
+          let ack =
+            role === 'supplier'
+              ? await run('masterdata.supplier.archive')
+              : await run('masterdata.customer.archive')
+          if (role === 'both') {
+            ack = { ...ack, ...(await run('masterdata.supplier.archive')) }
+          }
+          setStore((s) => mirrorG5Ack(s, ack), { origin: 'system' })
+          return
+        }
+      }
+
       recordSliceExplicitDelete('counterparties.items', id, actorFromGetter(getActor))
       setStore((s) => {
         const cp = s.counterparties.items.find((c) => c.id === id)
@@ -101,7 +167,7 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
       })
     },
 
-    upsertFinishedProduct(entry: FinishedProduct) {
+    async upsertFinishedProduct(entry: FinishedProduct) {
       const withNames = withSuggestedLocalizedNames(
         {
           ...entry,
@@ -112,6 +178,32 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
         'product',
       )
       const normalized = normalizeFinishedProduct(withNames)
+
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-fp-${normalized.id}-${normalized.updatedAt}`,
+            commandType: 'masterdata.product.upsert',
+            command: {
+              id: normalized.id,
+              code: normalized.code,
+              name: normalized.name,
+              active: normalized.active,
+              formulationRecipeId: normalized.defaultFormulationRecipeId,
+              packagingBomId: normalized.defaultPackagingRecipeId,
+            },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       setStore((s) => {
         const exists = s.finishedProducts.items.some((p) => p.id === normalized.id)
         const items = exists
@@ -171,7 +263,25 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
       }))
     },
 
-    removeFinishedProduct(id: string) {
+    async removeFinishedProduct(id: string) {
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-fp-archive-${id}-${Date.now()}`,
+            commandType: 'masterdata.product.archive',
+            command: { id },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       recordSliceExplicitDelete('finishedProducts.items', id, actorFromGetter(getActor))
       setStore((s) => {
         const fp = s.finishedProducts.items.find((p) => p.id === id)
@@ -204,12 +314,70 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
       })
     },
 
-    upsertPackagingRecipe(entry: PackagingRecipe) {
+    async upsertPackagingRecipe(entry: PackagingRecipe) {
       const normalized = normalizePackagingRecipe({
         ...entry,
         updatedAt: new Date().toISOString(),
         createdAt: entry.createdAt || new Date().toISOString(),
       })
+
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const { packagingRecipeToBomComponents } = await import('@/lib/planner/g5PackagingBom')
+          const store = getStore()
+          const finishedProductId =
+            String(
+              (entry as PackagingRecipe & { finishedProductId?: string }).finishedProductId ?? '',
+            ).trim() ||
+            store.finishedProducts.items.find((p) => p.defaultPackagingRecipeId === normalized.id)
+              ?.id
+          const components = packagingRecipeToBomComponents(
+            entry as PackagingRecipe & {
+              components?: Array<{
+                itemId: string
+                quantity: number
+                unit: string
+                warehouseItemId?: string
+                conversionFactor?: number
+                wasteFactor?: number
+                note?: string
+              }>
+            },
+          )
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-bom-${normalized.id}-${normalized.updatedAt}`,
+            commandType: 'masterdata.bom.upsert',
+            command: {
+              id: normalized.id,
+              packagingBomId: normalized.id,
+              code: normalized.code,
+              name: normalized.name,
+              active: normalized.active,
+              finishedProductId,
+              baseOutputQty: 1,
+              components: components.map((c) => ({
+                itemId: c.itemId,
+                warehouseItemId: c.warehouseItemId ?? c.itemId,
+                quantity: c.quantity,
+                qty: c.quantity,
+                unit: c.unit,
+                ...(c.conversionFactor != null ? { conversionFactor: c.conversionFactor } : {}),
+                ...(c.wasteFactor != null ? { wasteFactor: c.wasteFactor } : {}),
+                ...(c.note ? { note: c.note } : {}),
+              })),
+            },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       setStore((s) => {
         const exists = s.packagingRecipes.items.some((i) => i.id === normalized.id)
         const items = exists
@@ -298,7 +466,47 @@ export function createDirectoriesSlice({ setStore, getActor }: StoreSliceDeps) {
       })
     },
 
-    removePackagingRecipe(id: string) {
+    async approvePackagingBom(id: string) {
+      if (!isG5MasterDataActive(getStore())) {
+        throw new Error('g5.error.masterdata_inactive')
+      }
+      const { isG5WebPath, g5MasterdataBomApprove, mirrorG5AckIfOk } = await import(
+        '@/lib/planner/g5ServerClient'
+      )
+      if (!isG5WebPath()) {
+        throw new Error('g5.error.use_g5_gateway')
+      }
+      const conf = await g5MasterdataBomApprove({
+        idempotencyKey: `g5-bom-approve-${id}-${Date.now()}`,
+        command: { id, packagingBomId: id },
+      })
+      if (!conf.ok) {
+        throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+      }
+      setStore((s) => {
+        const next = mirrorG5AckIfOk(s, conf)
+        return next ?? s
+      }, { origin: 'system' })
+    },
+
+    async removePackagingRecipe(id: string) {
+      if (isG5MasterDataActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-bom-archive-${id}-${Date.now()}`,
+            commandType: 'masterdata.bom.archive',
+            command: { id },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
       recordSliceExplicitDelete('packagingRecipes.items', id, actorFromGetter(getActor))
       setStore((s) => ({
         ...s,

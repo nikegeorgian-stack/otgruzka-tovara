@@ -24,6 +24,9 @@ import {
   isPackagingQcFeatureActive,
   isProductionDomainActive,
   isWarehouseDomainActive,
+  isMasterDataDomainActive,
+  isSalesPlanningActive,
+  isProcurementDomainActive,
   markWarehouseDomainActive,
   monthKeyFromDate,
   nextReversalNumber,
@@ -172,10 +175,17 @@ export async function getAuthoritativeCriticalStore(storeId) {
       payload: empty,
       warehouse: empty.domains.warehouse,
       production: empty.domains.production,
+      masterData: empty.domains.masterData,
+      sales: empty.domains.sales,
+      planning: empty.domains.planning,
+      procurement: empty.domains.procurement,
       domainMeta: empty.domainMeta,
       warehouseActive: false,
       productionActive: false,
       packagingQcActive: false,
+      masterDataActive: false,
+      salesPlanningActive: false,
+      procurementActive: false,
       authoritative: true,
     })
   }
@@ -188,10 +198,17 @@ export async function getAuthoritativeCriticalStore(storeId) {
     payload: parsed.payload,
     warehouse: parsed.payload.domains.warehouse,
     production: parsed.payload.domains.production ?? emptyCriticalPayload().domains.production,
+    masterData: parsed.payload.domains.masterData ?? emptyCriticalPayload().domains.masterData,
+    sales: parsed.payload.domains.sales ?? emptyCriticalPayload().domains.sales,
+    planning: parsed.payload.domains.planning ?? emptyCriticalPayload().domains.planning,
+    procurement: parsed.payload.domains.procurement ?? emptyCriticalPayload().domains.procurement,
     domainMeta: parsed.payload.domainMeta,
     warehouseActive: isWarehouseDomainActive(parsed.payload, revision),
     productionActive: isProductionDomainActive(parsed.payload, revision),
     packagingQcActive: isPackagingQcFeatureActive(parsed.payload),
+    masterDataActive: isMasterDataDomainActive(parsed.payload),
+    salesPlanningActive: isSalesPlanningActive(parsed.payload),
+    procurementActive: isProcurementDomainActive(parsed.payload),
     fingerprint: row.fingerprint,
     updatedByUid: row.updatedByUid,
     authoritative: true,
@@ -674,10 +691,20 @@ export async function executeG2Command(input) {
     resultPayload = applyDraftSave(warehouse, rawCommand, actor, now)
   } else if (commandType === 'warehouse.draft.delete') {
     resultPayload = applyDraftDelete(warehouse, rawCommand, actor, now)
-  } else if (commandType === 'warehouse.document.post') {
-    resultPayload = applyDocumentPost(warehouse, rawCommand, actor, now, { existingDraft: false })
-  } else if (commandType === 'warehouse.document.postExisting') {
-    resultPayload = applyDocumentPost(warehouse, rawCommand, actor, now, { existingDraft: true })
+  } else if (commandType === 'warehouse.document.post' || commandType === 'warehouse.document.postExisting') {
+    // PHASE G5.1 — purchase receipts must use G5 gateway once procurement is active.
+    let purposeForGate = String(rawCommand.purpose ?? '').trim()
+    if (commandType === 'warehouse.document.postExisting') {
+      const draftId = String(rawCommand.documentId ?? '').trim()
+      const draft = warehouse.documents?.find((d) => d.id === draftId)
+      if (draft?.purpose) purposeForGate = String(draft.purpose)
+    }
+    if (isProcurementDomainActive(critical.payload) && purposeForGate === 'purchase') {
+      return fail('use_g5_gateway', 409)
+    }
+    resultPayload = applyDocumentPost(warehouse, rawCommand, actor, now, {
+      existingDraft: commandType === 'warehouse.document.postExisting',
+    })
   } else if (commandType === 'warehouse.transfer.post') {
     resultPayload = applyTransferPost(warehouse, rawCommand, actor, now)
   } else if (commandType === 'warehouse.inventory.post') {
@@ -869,6 +896,9 @@ function applyDocumentPost(warehouse, command, actor, now, { existingDraft }) {
 
   // Opening inventory must use dedicated command.
   if (purpose === 'opening_inventory') return fail('use_opening_command', 400)
+
+  // PHASE G5.1 — after procurement domain activation, purchase receipts go through G5 only.
+  // (Checked by callers that pass critical payload; see applyDocumentPostWithCriticalGate.)
 
   warehouse = ensureItemCatalog(warehouse, lines)
 

@@ -29,6 +29,9 @@ type Props = {
   categoryNames: Map<string, string>
   onSave: (r: PackagingRecipe) => void
   onRemove: (id: string) => void
+  /** G5: approve draft packaging BOM (immutable version). Optional — only when masterData active. */
+  onApproveBom?: (id: string) => void | Promise<void>
+  canApproveBom?: boolean
   onSaveBox: (r: BoxRecipe) => void
   onRemoveBox: (id: string) => void
   onOpenNomenclature: () => void
@@ -48,6 +51,8 @@ export function PackagingRecipesDirectoryPanel({
   categoryNames,
   onSave,
   onRemove,
+  onApproveBom,
+  canApproveBom = false,
   onSaveBox,
   onRemoveBox,
   onOpenNomenclature,
@@ -117,6 +122,8 @@ export function PackagingRecipesDirectoryPanel({
 
   useEffect(() => {
     const intent = consumeDirectoryOpenIntent('packagingRecipes')
+    // Intent is consumed once on mount — setState here is intentional bootstrap.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- directory open-intent bootstrap
     if (intent?.create) openNew()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -352,6 +359,24 @@ export function PackagingRecipesDirectoryPanel({
             <button type="button" className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white" onClick={save}>
               {t('common.save')}
             </button>
+            {canApproveBom && onApproveBom && editing.id && store.items.some((i) => i.id === editing.id) && (
+              <button
+                type="button"
+                data-testid="g5-bom-approve"
+                className="rounded-sm border border-teal-700 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-900"
+                onClick={async () => {
+                  if (!(await confirm({ message: t('g5.bom.approveConfirm') }))) return
+                  try {
+                    await onApproveBom(editing.id)
+                    setNotice(t('g5.bom.approveOk'))
+                  } catch (e) {
+                    setNotice(e instanceof Error ? e.message : t('g5.bom.approveFail'))
+                  }
+                }}
+              >
+                {t('g5.bom.approve')}
+              </button>
+            )}
             <button
               type="button"
               className="rounded-sm border border-grid px-4 py-2 text-sm"

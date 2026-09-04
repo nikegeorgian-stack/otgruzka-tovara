@@ -22,6 +22,18 @@ type Props = {
   onClose: () => void
   onUpsertCounterparty?: (c: Counterparty) => void
   onOpenCounterpartiesJournal?: () => void
+  /** When G5 master-data is active: no free-text customer/product create from order form. */
+  authoritativeMasterData?: boolean
+  /** Optional print opener (G5.2 snapshot print). */
+  onPrint?: (order: SalesOrder) => void
+  /** Print ИЗМЕНЕНИЕ reversal when revision>1 / commercial change. */
+  onPrintChange?: (order: SalesOrder) => void
+  /** Print СТОРНО for cancel / shipment reversal. */
+  onPrintReversal?: (order: SalesOrder) => void
+  /** Force-show change print (caller may pass true when revision>1). */
+  showPrintChange?: boolean
+  /** Force-show cancel/shipment reversal print. */
+  showPrintReversal?: boolean
 }
 
 function nextCustomerCode(items: Counterparty[]): string {
@@ -43,6 +55,12 @@ export function SalesOrderModal({
   onClose,
   onUpsertCounterparty,
   onOpenCounterpartiesJournal,
+  authoritativeMasterData = false,
+  onPrint,
+  onPrintChange,
+  onPrintReversal,
+  showPrintChange = false,
+  showPrintReversal = false,
 }: Props) {
   const { t, tf } = useI18n()
   const [draft, setDraft] = useState<SalesOrder>(order)
@@ -51,6 +69,17 @@ export function SalesOrderModal({
   const [customerMode, setCustomerMode] = useState<'select' | 'new'>('select')
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
+  const allowInlineCustomerCreate = Boolean(onUpsertCounterparty) && !authoritativeMasterData
+  const revision = Number((draft as { revision?: number }).revision) || 0
+  const commercialChanged =
+    (draft.commercialStatus ?? draft.status) !== (order.commercialStatus ?? order.status)
+  const canShowPrintChange =
+    Boolean(onPrintChange) && (showPrintChange || revision > 1 || commercialChanged)
+  const canShowPrintReversal =
+    Boolean(onPrintReversal) &&
+    (showPrintReversal ||
+      draft.commercialStatus === 'cancelled' ||
+      draft.status === 'cancelled')
 
   const customers = counterparties.filter(
     (c) => c.active && (c.role === 'customer' || c.role === 'both'),
@@ -201,6 +230,36 @@ export function SalesOrderModal({
             {error && <span className="font-medium text-red-600">{error}</span>}
           </div>
           <div className="flex gap-2">
+            {onPrint ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onPrint(draft)}
+                data-coach="director:orderPrint"
+              >
+                {t('g5.print.action.printOrder')}
+              </Button>
+            ) : null}
+            {onPrintChange && canShowPrintChange ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onPrintChange(draft)}
+                data-coach="director:orderPrintChange"
+              >
+                {t('g5.print.action.printChange')}
+              </Button>
+            ) : null}
+            {onPrintReversal && canShowPrintReversal ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onPrintReversal(draft)}
+                data-coach="director:orderPrintReversal"
+              >
+                {t('g5.print.action.printShipmentReversal')}
+              </Button>
+            ) : null}
             <Button variant="secondary" size="sm" onClick={onClose}>
               {t('common.cancel')}
             </Button>
@@ -231,7 +290,7 @@ export function SalesOrderModal({
                     onAdd={() => onOpenCounterpartiesJournal?.()}
                   />
                   <div className="mt-2 flex flex-wrap gap-3">
-                    {onUpsertCounterparty ? (
+                    {allowInlineCustomerCreate ? (
                       <button
                         type="button"
                         className="text-sm font-semibold text-teal-700 hover:underline"
@@ -243,6 +302,8 @@ export function SalesOrderModal({
                       >
                         + {t('sales.customer.createNew')}
                       </button>
+                    ) : authoritativeMasterData ? (
+                      <span className="text-xs text-stone-500">{t('g5.sales.noFreeTextCustomer')}</span>
                     ) : null}
                     {onOpenCounterpartiesJournal ? (
                       <button

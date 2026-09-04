@@ -24,6 +24,10 @@ import {
   overlayAtomicGroupOntoStore,
   partitionDirtyOperations,
 } from './transactionGroups'
+import {
+  filterG5AuthoritativeDirtyOps,
+  restoreG5AuthoritativeDomains,
+} from './g5AuthoritativeStrip'
 
 export type CloudSaveBuildInput = {
   remote: AppStore
@@ -105,7 +109,10 @@ export function mergeStoreForCloudSave(input: {
   appliedOperationIds: string[]
   completedDeleteOperationIds: string[]
 } {
-  const userOps = input.operations.filter((op) => op.origin === 'user')
+  const userOps = filterG5AuthoritativeDirtyOps(
+    input.operations.filter((op) => op.origin === 'user'),
+    input.local,
+  )
   const monthOps = userOps.filter(isMonthsGranularOp)
   const nonMonth = userOps.filter((op) => !isMonthsGranularOp(op))
   const { ungrouped, groups } = partitionDirtyOperations(nonMonth)
@@ -195,7 +202,11 @@ export function mergeStoreForCloudSave(input: {
     // no-op — handled above
   }
 
-  const privilegeSafe = clampClientPrivilegeFields(acc, input.remote, input.actorEmail ?? null)
+  const privilegeSafe = clampClientPrivilegeFields(
+    restoreG5AuthoritativeDomains(input.remote, acc),
+    input.remote,
+    input.actorEmail ?? null,
+  )
   assertNoMassStoreWipe(input.remote, privilegeSafe)
 
   return {
@@ -209,8 +220,11 @@ export function mergeStoreForCloudSave(input: {
 
 /** Build payload: fresh remote + conservative user changes + granular months ops. */
 export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuildResult {
-  const userOps = input.operations.filter((op) => op.origin === 'user')
-  const gate = canCloudWriteNow(userOps.length > 0)
+  const filteredOps = filterG5AuthoritativeDirtyOps(
+    input.operations.filter((op) => op.origin === 'user'),
+    input.local,
+  )
+  const gate = canCloudWriteNow(filteredOps.length > 0)
   if (!gate.ok) {
     return {
       allowed: false,
@@ -225,7 +239,7 @@ export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuil
     remote: input.remote,
     local: input.local,
     baseline: input.baseline,
-    operations: input.operations,
+    operations: filteredOps,
     actorEmail: input.actorEmail,
   })
 

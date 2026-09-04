@@ -75,6 +75,18 @@ export function defaultWarehouseCapabilities(partial = {}) {
       out[key] = true
     }
   }
+  // PHASE G5 — master-data / sales / planning / procurement capabilities
+  for (const [key, value] of Object.entries(partial)) {
+    if (
+      (key.startsWith('masterdata.') ||
+        key.startsWith('sales.') ||
+        key.startsWith('planning.') ||
+        key.startsWith('procurement.')) &&
+      value === true
+    ) {
+      out[key] = true
+    }
+  }
   if (Array.isArray(partial.productionLineIds)) {
     out.productionLineIds = partial.productionLineIds.map(String)
   }

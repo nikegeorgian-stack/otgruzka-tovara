@@ -17,6 +17,7 @@ import {
   emptyCriticalPayload,
   emptyProductionStore,
   fingerprintCriticalPayload,
+  isMasterDataDomainActive,
   isPeriodClosed,
   isProductionDomainActive,
   markPackagingQcFeatureActive,
@@ -35,6 +36,13 @@ import {
 } from './_g2BatchAllocation.mjs'
 import { G2_CAPS, hasCapability, normalizeCapabilities } from './_g2Capabilities.mjs'
 import { G3_CAPS, defaultProductionCapabilities, hasLineScope, parseLineScope } from './_g3Capabilities.mjs'
+import {
+  bomIsApprovedEffective,
+  buildPackagingBomSnapshot,
+  findById,
+  productRequiresPackagingBom,
+  selectApprovedPackagingBom,
+} from './_g5PackagingBomHelpers.mjs'
 
 function ok(data = {}) {
   return { ok: true, ...data }
@@ -249,6 +257,7 @@ function stripClientTrusted(command) {
     postedAt: _pa,
     movements: _m,
     recipeNormSnapshot: _snap,
+    packagingBomSnapshot: _pbs,
     actorUid: _au,
     criticalRevision: _cr,
     contentHash: _ch,
@@ -471,6 +480,17 @@ function applyOrderDraftSave(production, command, actor, now) {
   const orderId = String(command.orderId ?? '').trim() || `po-${crypto.randomUUID()}`
   const existing = (production.orders ?? []).find((o) => o.id === orderId)
   if (existing && existing.status !== 'draft') return fail('posted_immutable', 409)
+  // Trusted BOM *references* only (ids/hash). Never persist client packagingBomSnapshot.
+  const packagingBomId =
+    command.packagingBomId != null ? String(command.packagingBomId).trim() : existing?.packagingBomId
+  const packagingBomVersion =
+    command.packagingBomVersion != null
+      ? Number(command.packagingBomVersion)
+      : existing?.packagingBomVersion
+  const packagingBomContentHash =
+    command.packagingBomContentHash != null
+      ? String(command.packagingBomContentHash).trim()
+      : existing?.packagingBomContentHash
   const order = {
     ...(existing ?? {}),
     id: orderId,
@@ -486,11 +506,30 @@ function applyOrderDraftSave(production, command, actor, now) {
     status: 'draft',
     customer: String(command.customer ?? existing?.customer ?? ''),
     category: command.category ?? existing?.category ?? 'grid',
+    recommendationId:
+      command.recommendationId != null
+        ? String(command.recommendationId).trim()
+        : existing?.recommendationId,
+    planningRunId:
+      command.planningRunId != null ? String(command.planningRunId).trim() : existing?.planningRunId,
+    planningRunSourceRevision:
+      command.planningRunSourceRevision != null
+        ? Number(command.planningRunSourceRevision)
+        : existing?.planningRunSourceRevision,
+    packagingBomId: packagingBomId || undefined,
+    packagingBomVersion: Number.isFinite(packagingBomVersion) ? packagingBomVersion : undefined,
+    packagingBomContentHash: packagingBomContentHash || undefined,
+    salesOrderId:
+      command.salesOrderId != null ? String(command.salesOrderId).trim() : existing?.salesOrderId,
+    salesLineId:
+      command.salesLineId != null ? String(command.salesLineId).trim() : existing?.salesLineId,
     createdAt: existing?.createdAt ?? now,
     createdBy: existing?.createdBy ?? actor.uid,
     updatedAt: now,
     history: existing?.history ?? [],
   }
+  // Strip any accidental snapshot from prior merge
+  delete order.packagingBomSnapshot
   if (!order.finishedProductId || !order.formulationRecipeId || !order.lineId) {
     return fail('invalid_order', 400)
   }
@@ -506,7 +545,7 @@ function applyOrderDraftSave(production, command, actor, now) {
   })
 }
 
-function applyOrderConfirm(production, warehouse, command, actor, now) {
+function applyOrderConfirm(production, warehouse, command, actor, now, ctx = {}) {
   const orderId = String(command.orderId ?? '').trim()
   const rawWarehouseId = String(command.rawWarehouseId ?? '').trim()
   if (!orderId || !rawWarehouseId) return fail('invalid_input', 400)
@@ -518,7 +557,12 @@ function applyOrderConfirm(production, warehouse, command, actor, now) {
     return ok({
       production,
       warehouse,
-      result: { orderId, status: 'active', idempotent: true },
+      result: {
+        orderId,
+        status: 'active',
+        idempotent: true,
+        packagingBomSnapshot: order.packagingBomSnapshot ?? null,
+      },
     })
   }
   if (order.status !== 'draft' && order.status !== 'active') return fail('invalid_status', 409)
@@ -527,10 +571,38 @@ function applyOrderConfirm(production, warehouse, command, actor, now) {
   }
   const approved = getApprovedVersion(production, order.formulationRecipeId, now)
   if (!approved) return fail('recipe_not_approved', 409)
-  // Ignore client-supplied snapshot entirely
+  // Ignore client-supplied recipe / packaging snapshots entirely
   const snapshot = buildSnapshot(approved, now)
   const needs = materialNeedFromSnapshot(snapshot, order.totalQtyMp)
   const date = (order.startDate || now).slice(0, 10)
+
+  let packagingBomSnapshot
+  const masterDataActive = ctx.masterDataActive === true
+  const masterData = ctx.masterData
+  if (masterDataActive) {
+    const product = (masterData?.finishedProducts ?? []).find(
+      (p) => String(p.id) === String(order.finishedProductId),
+    )
+    if (!product || product.archived === true) return fail('product_not_found', 404)
+    const bom = selectApprovedPackagingBom(masterData, product, date)
+    const required = productRequiresPackagingBom(product)
+    if (!bom && required) return fail('packaging_bom_required', 409)
+    if (bom) {
+      if (order.packagingBomId || order.packagingBomContentHash) {
+        if (
+          String(order.packagingBomId || '') !== String(bom.id) ||
+          (order.packagingBomVersion != null &&
+            Number(order.packagingBomVersion) !== Number(bom.version)) ||
+          (order.packagingBomContentHash &&
+            String(order.packagingBomContentHash) !== String(bom.contentHash || ''))
+        ) {
+          return fail('packaging_bom_stale', 409)
+        }
+      }
+      packagingBomSnapshot = buildPackagingBomSnapshot(bom, product, actor, now, date)
+    }
+  }
+
   const reserveLines = []
   let wh = warehouse
   for (const need of needs) {
@@ -579,6 +651,10 @@ function applyOrderConfirm(production, warehouse, command, actor, now) {
     ...order,
     status: 'active',
     recipeNormSnapshot: snapshot,
+    packagingBomSnapshot: packagingBomSnapshot ?? undefined,
+    packagingBomId: packagingBomSnapshot?.packagingBomId ?? order.packagingBomId,
+    packagingBomVersion: packagingBomSnapshot?.version ?? order.packagingBomVersion,
+    packagingBomContentHash: packagingBomSnapshot?.contentHash ?? order.packagingBomContentHash,
     confirmedAt: now,
     confirmedBy: actor.uid,
     reservationDocumentId,
@@ -596,6 +672,16 @@ function applyOrderConfirm(production, warehouse, command, actor, now) {
         type: 'recipe_norm_snapshot',
         message: snapshot.contentHash,
       },
+      ...(packagingBomSnapshot
+        ? [
+            {
+              id: `h-${crypto.randomUUID()}`,
+              at: now,
+              type: 'packaging_bom_snapshot',
+              message: `${packagingBomSnapshot.packagingBomId}@${packagingBomSnapshot.version}:${packagingBomSnapshot.contentHash}`,
+            },
+          ]
+        : []),
     ],
   }
   list[idx] = confirmed
@@ -623,6 +709,191 @@ function applyOrderConfirm(production, warehouse, command, actor, now) {
       reservationDocumentId,
       snapshotVersionId: snapshot.recipeVersionId,
       reservedLines: reserveLines.length,
+      packagingBomId: packagingBomSnapshot?.packagingBomId,
+      packagingBomVersion: packagingBomSnapshot?.version,
+      packagingBomContentHash: packagingBomSnapshot?.contentHash,
+    },
+  })
+}
+
+/**
+ * G5.5 / G3 — list confirmed (active) orders missing immutable packagingBomSnapshot.
+ * Pure scan; does not mutate.
+ */
+function scanConfirmedOrdersMissingPackagingBomSnapshot(production, masterData, asOfDate) {
+  const asOf = String(asOfDate ?? new Date().toISOString()).slice(0, 10)
+  const boms = masterData?.packagingBoms ?? []
+  const products = masterData?.finishedProducts ?? []
+  const out = []
+  for (const order of production?.orders ?? []) {
+    if (String(order?.status ?? '') !== 'active') continue
+    const existingHash = String(order?.packagingBomSnapshot?.contentHash ?? '').trim()
+    if (existingHash) continue
+    const finishedProductId = String(order.finishedProductId ?? '').trim()
+    const product = products.find((p) => String(p.id) === finishedProductId) ?? null
+    const availableBoms = boms
+      .filter(
+        (b) =>
+          String(b.finishedProductId ?? '') === finishedProductId &&
+          bomIsApprovedEffective(b, asOf),
+      )
+      .map((b) => ({
+        packagingBomId: String(b.id ?? ''),
+        version: Number(b.version) || 1,
+        contentHash: String(b.contentHash ?? ''),
+        effectiveFrom: b.effectiveFrom != null ? String(b.effectiveFrom).slice(0, 10) : undefined,
+        effectiveTo: b.effectiveTo != null ? String(b.effectiveTo).slice(0, 10) : undefined,
+      }))
+      .filter((b) => b.packagingBomId)
+    const ambiguous = availableBoms.length > 1
+    let blockReason
+    if (!product || product.archived === true) blockReason = 'product_not_found'
+    else if (availableBoms.length === 0 && productRequiresPackagingBom(product)) {
+      blockReason = 'bom_not_found'
+    } else if (ambiguous) blockReason = 'ambiguous_bom'
+    out.push({
+      orderId: String(order.id),
+      finishedProductId,
+      confirmedAt: order.confirmedAt ?? null,
+      status: order.status,
+      availableBoms,
+      ambiguous,
+      ...(blockReason ? { blockReason } : {}),
+    })
+  }
+  return out
+}
+
+/**
+ * G5.5 / G3 — backfill packagingBomSnapshot on a confirmed order only.
+ * Never mutates quantity, status, reservations, or warehouse movements.
+ */
+function applyPackagingBomSnapshotMigrate(production, masterData, command, actor, now) {
+  const orderId = String(command.orderId ?? '').trim()
+  const packagingBomId = String(command.packagingBomId ?? '').trim()
+  const packagingBomVersion = Number(command.packagingBomVersion)
+  const reason = String(command.reason ?? '').trim()
+  const dryRun = command.dryRun === true
+  const asOf = String(command.asOfDate ?? now).slice(0, 10)
+
+  if (!orderId || !packagingBomId || !Number.isFinite(packagingBomVersion) || !reason) {
+    return fail('invalid_input', 400)
+  }
+
+  const list = [...(production.orders ?? [])]
+  const idx = list.findIndex((o) => o.id === orderId)
+  if (idx < 0) return fail('not_found', 404)
+  const order = list[idx]
+  if (order.status !== 'active') return fail('invalid_status', 409)
+
+  const existingSnap = order.packagingBomSnapshot
+  const existingHash = String(existingSnap?.contentHash ?? '').trim()
+  if (existingHash) {
+    // Idempotent success when same BOM id/version already frozen
+    if (
+      String(existingSnap.packagingBomId ?? '') === packagingBomId &&
+      Number(existingSnap.version) === packagingBomVersion
+    ) {
+      return ok({
+        production,
+        warehouse: null,
+        result: {
+          orderId,
+          packagingBomId,
+          version: packagingBomVersion,
+          contentHash: existingHash,
+          dryRun,
+          migrated: false,
+          idempotent: true,
+        },
+      })
+    }
+    return fail('snapshot_already_present', 409)
+  }
+
+  const bom = findById(masterData?.packagingBoms, packagingBomId)
+  if (!bom) return fail('bom_not_found', 404)
+  if (String(bom.finishedProductId ?? '') !== String(order.finishedProductId ?? '')) {
+    return fail('bom_not_found', 404)
+  }
+  if (!bomIsApprovedEffective(bom, asOf)) return fail('bom_not_effective', 409)
+  if (Number(bom.version) !== packagingBomVersion) return fail('bom_version_mismatch', 409)
+  const bomHash = String(bom.contentHash ?? '').trim()
+  if (!bomHash) return fail('bom_content_hash_required', 400)
+
+  const candidates = (masterData?.packagingBoms ?? []).filter(
+    (b) =>
+      String(b.finishedProductId ?? '') === String(order.finishedProductId ?? '') &&
+      bomIsApprovedEffective(b, asOf),
+  )
+  if (candidates.length > 1) {
+    const unique = candidates.filter(
+      (b) => String(b.id) === packagingBomId && Number(b.version) === packagingBomVersion,
+    )
+    if (unique.length !== 1) return fail('ambiguous_bom', 409)
+  } else if (candidates.length === 0) {
+    return fail('bom_not_found', 404)
+  } else if (String(candidates[0].id) !== packagingBomId) {
+    return fail('bom_not_found', 404)
+  }
+
+  const product =
+    (masterData?.finishedProducts ?? []).find(
+      (p) => String(p.id) === String(order.finishedProductId),
+    ) ?? { id: order.finishedProductId }
+  const packagingBomSnapshot = buildPackagingBomSnapshot(bom, product, actor, now, asOf)
+
+  if (dryRun) {
+    return ok({
+      production,
+      warehouse: null,
+      result: {
+        orderId,
+        packagingBomId: packagingBomSnapshot.packagingBomId,
+        version: packagingBomSnapshot.version,
+        contentHash: packagingBomSnapshot.contentHash,
+        dryRun: true,
+        migrated: false,
+      },
+    })
+  }
+
+  const migrated = {
+    ...order,
+    packagingBomSnapshot,
+    packagingBomId: packagingBomSnapshot.packagingBomId,
+    packagingBomVersion: packagingBomSnapshot.version,
+    packagingBomContentHash: packagingBomSnapshot.contentHash,
+    history: [
+      ...(order.history ?? []),
+      {
+        id: `h-${crypto.randomUUID()}`,
+        at: now,
+        type: 'packaging_bom_snapshot_migrate',
+        message: `${packagingBomSnapshot.packagingBomId}@${packagingBomSnapshot.version}:${packagingBomSnapshot.contentHash}`,
+        reason,
+      },
+    ],
+  }
+  list[idx] = migrated
+  let prod = { ...production, orders: list }
+  prod = appendProdAudit(prod, {
+    id: `aud-${crypto.randomUUID()}`,
+    at: now,
+    action: 'packaging_bom_snapshot_migrate',
+    actorUid: actor.uid,
+    detail: `${orderId} ${reason}`,
+  })
+  return ok({
+    production: prod,
+    warehouse: null,
+    result: {
+      orderId,
+      packagingBomId: packagingBomSnapshot.packagingBomId,
+      version: packagingBomSnapshot.version,
+      contentHash: packagingBomSnapshot.contentHash,
+      dryRun: false,
+      migrated: true,
     },
   })
 }
@@ -1961,6 +2232,8 @@ const CAP_BY_COMMAND = Object.freeze({
   'production.order.confirm': G3_CAPS.ORDER_CONFIRM,
   'production.order.change': G3_CAPS.ORDER_CONFIRM,
   'production.order.cancel': G3_CAPS.ORDER_CANCEL,
+  'production.order.packagingBomSnapshot.preview': G3_CAPS.ORDER_PACKAGING_BOM_SNAPSHOT_MIGRATE,
+  'production.order.packagingBomSnapshot.apply': G3_CAPS.ORDER_PACKAGING_BOM_SNAPSHOT_MIGRATE,
   'production.reservation.reallocate': G3_CAPS.RESERVATION_REALLOCATE,
   'production.material.issueToLine': G3_CAPS.MATERIAL_ISSUE,
   'production.material.returnFromLine': G3_CAPS.MATERIAL_RETURN,
@@ -2055,6 +2328,7 @@ export async function executeG3Command(input) {
   if (
     commandType !== 'production.domain.activate' &&
     commandType !== 'production.read' &&
+    commandType !== 'production.order.packagingBomSnapshot.preview' &&
     !productionActive
   ) {
     return fail('production_domain_inactive', 409)
@@ -2137,7 +2411,10 @@ export async function executeG3Command(input) {
   } else if (commandType === 'production.order.draft.delete') {
     applied = applyOrderDraftDelete(production, rawCommand, actor, now)
   } else if (commandType === 'production.order.confirm') {
-    applied = applyOrderConfirm(production, warehouse, rawCommand, actor, now)
+    applied = applyOrderConfirm(production, warehouse, rawCommand, actor, now, {
+      masterDataActive: isMasterDataDomainActive(critical.payload),
+      masterData: critical.payload.domains.masterData,
+    })
   } else if (commandType === 'production.order.change') {
     applied = applyOrderChange(production, warehouse, rawCommand, actor, now)
   } else if (commandType === 'production.order.cancel') {
@@ -2158,6 +2435,35 @@ export async function executeG3Command(input) {
     applied = applyShiftCreateCorrection(production, rawCommand, actor, now)
   } else if (commandType === 'production.shift.confirmCorrection') {
     applied = applyShiftConfirmCorrection(production, warehouse, rawCommand, actor, now)
+  } else if (commandType === 'production.order.packagingBomSnapshot.preview') {
+    const asOf = String(rawCommand.asOfDate ?? now).slice(0, 10)
+    let orders = scanConfirmedOrdersMissingPackagingBomSnapshot(
+      production,
+      critical.payload.domains.masterData,
+      asOf,
+    )
+    const filterOrderId = String(rawCommand.orderId ?? '').trim()
+    if (filterOrderId) orders = orders.filter((o) => o.orderId === filterOrderId)
+    return ok({
+      criticalRevision: critical.revision,
+      orders,
+      count: orders.length,
+      asOfDate: asOf,
+    })
+  } else if (commandType === 'production.order.packagingBomSnapshot.apply') {
+    applied = applyPackagingBomSnapshotMigrate(
+      production,
+      critical.payload.domains.masterData,
+      rawCommand,
+      actor,
+      now,
+    )
+    if (applied.ok && rawCommand.dryRun === true) {
+      return ok({
+        ...applied.result,
+        criticalRevision: critical.revision,
+      })
+    }
   } else if (commandType === 'production.read') {
     return ok({
       criticalRevision: critical.revision,
@@ -2227,8 +2533,20 @@ export async function getAuthoritativeCriticalDomains(storeId) {
     revision,
     warehouse: parsed.payload.domains.warehouse,
     production: parsed.payload.domains.production ?? emptyProductionStore(),
+    masterData: parsed.payload.domains.masterData,
+    sales: parsed.payload.domains.sales,
+    planning: parsed.payload.domains.planning,
+    procurement: parsed.payload.domains.procurement,
+    domainMeta: parsed.payload.domainMeta,
     source: revision > 0 ? 'fst_critical_store' : 'legacy_empty',
   })
 }
 
-export { casCommitDomains, hashRecipeContent, defaultProductionCapabilities, G3_CAPS }
+export {
+  casCommitDomains,
+  hashRecipeContent,
+  defaultProductionCapabilities,
+  G3_CAPS,
+  scanConfirmedOrdersMissingPackagingBomSnapshot,
+  applyPackagingBomSnapshotMigrate,
+}

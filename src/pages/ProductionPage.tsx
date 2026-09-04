@@ -35,7 +35,9 @@ import { ProductionShiftReportPanel } from '@/components/production/ProductionSh
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { listAvailableWipAtPackaging } from '@/lib/production/packagingReports'
+import type { ProductionPackagingReport } from '@/lib/production/packagingReports'
 import { buildPackagingReportPrintModel } from '@/lib/production/packagingReportPrint'
+import { shortContentHash } from '@/lib/planner/g5PackagingBom'
 import {
   formatNum,
   summarizeProductionMonth,
@@ -312,6 +314,26 @@ export function ProductionPage({
       attachments: productionStore.qcAttachments,
     })
   }, [activePackagingOrder, form.date, form.shift, productionStore.finishedGoodsLots, productionStore.packagingReports, productionStore.qcAttachments, warehouse])
+
+  const latestConfirmedPackagingReport = useMemo((): ProductionPackagingReport | null => {
+    if (!activePackagingOrder) return null
+    return (
+      [...(productionStore.packagingReports ?? [])]
+        .filter(
+          (row) =>
+            row.status === 'confirmed' &&
+            row.productionOrderId === activePackagingOrder.id &&
+            row.shiftDate === form.date &&
+            row.shift === form.shift &&
+            row.lineId === 'pack',
+        )
+        .sort(
+          (a, b) =>
+            (b.confirmedAt ?? b.updatedAt).localeCompare(a.confirmedAt ?? a.updatedAt) ||
+            b.createdAt.localeCompare(a.createdAt),
+        )[0] ?? null
+    )
+  }, [activePackagingOrder, form.date, form.shift, productionStore.packagingReports])
 
   function openPackagingPrintPreview(result: ConfirmPackagingReportResult) {
     if (!result.ok || !result.report) return
@@ -1615,6 +1637,98 @@ export function ProductionPage({
                   </div>
                 </div>
               </div>
+              {activePackagingOrder.packagingBomSnapshot && !latestConfirmedPackagingReport ? (
+                <div className="mt-4 rounded-sm border border-sky-200 bg-sky-50/60 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-900">
+                    {t('g5.production.bom.title')}
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-600">{t('g5.production.bom.readOnly')}</p>
+                  <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.version')}</dt>
+                      <dd className="font-mono">{activePackagingOrder.packagingBomSnapshot.version}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.hash')}</dt>
+                      <dd
+                        className="font-mono"
+                        title={activePackagingOrder.packagingBomSnapshot.contentHash}
+                      >
+                        {shortContentHash(activePackagingOrder.packagingBomSnapshot.contentHash)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.snapshotDate')}</dt>
+                      <dd className="font-mono">
+                        {activePackagingOrder.packagingBomSnapshot.asOfDate ??
+                          activePackagingOrder.packagingBomSnapshot.snapshotAt?.slice(0, 10) ??
+                          '—'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : null}
+              {(latestConfirmedPackagingReport?.packagingBomId ||
+                (latestConfirmedPackagingReport?.packagingComponentNorms?.length ?? 0) > 0) && (
+                <div className="mt-4 overflow-auto rounded-sm border border-grid">
+                  <div className="border-b border-grid bg-stone-50 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+                      {t('g5.packaging.bom.title')}
+                    </p>
+                    <p className="mt-0.5 font-mono text-[10px] text-stone-500">
+                      {latestConfirmedPackagingReport?.packagingBomId ?? '—'} · v
+                      {latestConfirmedPackagingReport?.packagingBomVersion ?? '—'} ·{' '}
+                      {shortContentHash(latestConfirmedPackagingReport?.packagingBomContentHash)}
+                    </p>
+                    {latestConfirmedPackagingReport?.packagingExcessReason ? (
+                      <p className="mt-1 text-xs text-amber-900">
+                        {t('g5.packaging.bom.excessReason')}:{' '}
+                        {latestConfirmedPackagingReport.packagingExcessReason}
+                      </p>
+                    ) : null}
+                  </div>
+                  <table className="fc-table min-w-full text-xs">
+                    <thead>
+                      <tr className="text-left uppercase text-stone-500">
+                        <th className="px-2 py-1.5">{t('g5.packaging.bom.col.item')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.norm')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.actual')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.deviation')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.tolerance')}</th>
+                        <th className="px-2 py-1.5">{t('g5.packaging.bom.col.reason')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(latestConfirmedPackagingReport?.packagingComponentNorms ?? []).map((row) => (
+                        <tr key={row.itemId} className="border-t border-grid">
+                          <td className="px-2 py-1 font-mono">{row.itemId}</td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {formatNum(row.normQty)} {row.unit}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {row.actualQty != null ? `${formatNum(row.actualQty)} ${row.unit}` : '—'}
+                          </td>
+                          <td
+                            className={`px-2 py-1 text-right font-mono ${
+                              row.overTolerance ? 'font-semibold text-amber-900' : ''
+                            }`}
+                          >
+                            {row.deviation != null ? formatNum(row.deviation) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {row.tolerance != null ? formatNum(row.tolerance) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-stone-600">
+                            {row.overTolerance
+                              ? latestConfirmedPackagingReport?.packagingExcessReason ?? '—'
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
           )}
 

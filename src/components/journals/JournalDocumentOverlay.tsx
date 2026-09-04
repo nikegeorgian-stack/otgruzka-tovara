@@ -109,7 +109,7 @@ type Props = {
   warehouse: WarehouseHandlers
   loading?: LoadingHandlers
   financeDocumentActions?: FinanceDocumentActions
-  onUpsertSalesOrder?: (order: SalesOrder) => void
+  onUpsertSalesOrder?: (order: SalesOrder) => void | SalesOrder | Promise<void | SalesOrder>
   activeMonth: string
 }
 

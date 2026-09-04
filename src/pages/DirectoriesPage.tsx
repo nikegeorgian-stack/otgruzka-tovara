@@ -71,6 +71,8 @@ export type DirectoriesPageProps = {
   onRemoveFinishedProduct: (id: string) => void
   onUpsertPackagingRecipe: (r: PackagingRecipe) => void
   onRemovePackagingRecipe: (id: string) => void
+  onApprovePackagingBom?: (id: string) => void | Promise<void>
+  canApprovePackagingBom?: boolean
   onUpsertBoxRecipe: (r: BoxRecipe) => void
   onRemoveBoxRecipe: (id: string) => void
   onUpsertFormulationRecipe: (r: FormulationRecipe) => void
@@ -149,6 +151,8 @@ export function DirectoriesPage({
   onRemoveFinishedProduct,
   onUpsertPackagingRecipe,
   onRemovePackagingRecipe,
+  onApprovePackagingBom,
+  canApprovePackagingBom = false,
   onUpsertBoxRecipe,
   onRemoveBoxRecipe,
   onUpsertFormulationRecipe,
@@ -304,6 +308,8 @@ export function DirectoriesPage({
           categoryNames={categoryNames}
           onSave={onUpsertPackagingRecipe}
           onRemove={onRemovePackagingRecipe}
+          onApproveBom={onApprovePackagingBom}
+          canApproveBom={canApprovePackagingBom}
           onSaveBox={onUpsertBoxRecipe}
           onRemoveBox={onRemoveBoxRecipe}
           onOpenNomenclature={() => setSection('nomenclature')}

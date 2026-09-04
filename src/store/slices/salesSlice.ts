@@ -37,6 +37,7 @@ import { actorAuditFields } from './actorAuditFields'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 import type { AppStore } from '@/lib/types'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
+import { isG5SalesPlanningActive } from '@/lib/planner/g5Activation'
 
 function historyEntry(
   type: SalesOrderHistoryEntry['type'],
@@ -132,9 +133,55 @@ function syncOrderAfterPlan(
   }
 }
 
-export function createSalesSlice({ setStore, getActor }: StoreSliceDeps) {
+export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   return {
-    upsertSalesOrder(order: SalesOrder): SalesOrder {
+    async upsertSalesOrder(order: SalesOrder): Promise<SalesOrder> {
+      if (isG5SalesPlanningActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const prev = getStore().sales.orders.find((o) => o.id === order.id)
+          const commercial = order.commercialStatus ?? order.status
+          const isDraft = !commercial || commercial === 'draft'
+          const priorityOnly =
+            !isDraft &&
+            prev &&
+            (prev.priority === 'urgent' ? 10 : 1) !== (order.priority === 'urgent' ? 10 : 1) &&
+            prev.counterpartyId === order.counterpartyId &&
+            JSON.stringify(prev.lines.map((l) => [l.id, l.finishedProductId, l.qtyMp])) ===
+              JSON.stringify(order.lines.map((l) => [l.id, l.finishedProductId, l.qtyMp]))
+          const commandType = priorityOnly
+            ? 'sales.order.priority.set'
+            : isDraft
+              ? 'sales.order.draft.save'
+              : 'sales.order.change'
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-so-${order.id}-${order.updatedAt || Date.now()}`,
+            commandType,
+            command: priorityOnly
+              ? { id: order.id, priority: order.priority === 'urgent' ? 10 : 1 }
+              : {
+                  id: order.id,
+                  customerId: order.counterpartyId,
+                  priority: order.priority === 'urgent' ? 10 : 1,
+                  lines: order.lines.map((l) => ({
+                    lineId: l.id,
+                    finishedProductId: l.finishedProductId,
+                    quantity: l.qtyMp,
+                    unit: 'm2',
+                    requestedShipDate: order.dueDate,
+                  })),
+                },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return getStore().sales.orders.find((o) => o.id === order.id) ?? order
+        }
+      }
+
       let saved = order
       patchStore(setStore, (s) => {
         const exists = s.sales.orders.some((o) => o.id === order.id)
@@ -166,7 +213,31 @@ export function createSalesSlice({ setStore, getActor }: StoreSliceDeps) {
       return saved
     },
 
-    removeSalesOrder(id: string) {
+    async removeSalesOrder(id: string) {
+      if (isG5SalesPlanningActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const order = getStore().sales.orders.find((o) => o.id === id)
+          const commercial = order?.commercialStatus ?? order?.status
+          const commandType =
+            !commercial || commercial === 'draft'
+              ? 'sales.order.draft.delete'
+              : 'sales.order.cancel'
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-so-remove-${id}-${Date.now()}`,
+            commandType,
+            command: { id },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       recordSliceExplicitDelete('sales.orders', id, actorFromGetter(getActor))
       patchStore(setStore, (s) => ({
         ...s,
@@ -179,7 +250,31 @@ export function createSalesSlice({ setStore, getActor }: StoreSliceDeps) {
       }))
     },
 
-    setSalesOrderStatus(id: string, status: SalesOrderStatus, message?: string) {
+    async setSalesOrderStatus(id: string, status: SalesOrderStatus, message?: string) {
+      if (isG5SalesPlanningActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const commandType =
+            status === 'confirmed'
+              ? 'sales.order.confirm'
+              : status === 'cancelled'
+                ? 'sales.order.cancel'
+                : 'sales.order.change'
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-so-status-${id}-${status}-${Date.now()}`,
+            commandType,
+            command: { id },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       patchStore(setStore, (s) => {
         const orders = s.sales.orders.map((o) => {
           if (o.id !== id) return o
@@ -356,8 +451,8 @@ export function createSalesSlice({ setStore, getActor }: StoreSliceDeps) {
         if (commercial !== 'confirmed') return s
 
         let warehouse = s.warehouse
-        let reservations = [...(s.sales.reservations ?? [])]
-        let allocations = [...(s.sales.allocations ?? [])]
+        const reservations = [...(s.sales.reservations ?? [])]
+        const allocations = [...(s.sales.allocations ?? [])]
         let lines = order.lines
         const newPos: ProductionOrder[] = []
         const historyMsgs: SalesOrderHistoryEntry[] = []

@@ -11,6 +11,7 @@ import type {
 } from '@/lib/procurement/types'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
+import { isG5ProcurementActive } from '@/lib/planner/g5Activation'
 
 function patchProcurement(
   setStore: StoreSliceDeps['setStore'],
@@ -22,9 +23,37 @@ function patchProcurement(
   }))
 }
 
-export function createProcurementSlice({ setStore, getActor }: StoreSliceDeps) {
+export function createProcurementSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   return {
-    upsertPurchaseOrder(order: PurchaseOrder, statusNote?: string) {
+    async upsertPurchaseOrder(order: PurchaseOrder, statusNote?: string) {
+      if (isG5ProcurementActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const isDraft = !order.status || order.status === 'draft'
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-po-${order.id}-${order.updatedAt || Date.now()}`,
+            commandType: isDraft ? 'procurement.draft.edit' : 'procurement.order.change',
+            command: {
+              id: order.id,
+              supplierId: order.counterpartyId,
+              lines: (order.lines ?? []).map((l) => ({
+                lineId: l.id,
+                itemId: l.warehouseItemId,
+                requestedQty: l.quantity,
+                unit: l.unit,
+              })),
+            },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       patchProcurement(setStore, (p) => {
         const existing = p.orders.find((o) => o.id === order.id)
         const exists = Boolean(existing)
@@ -50,12 +79,20 @@ export function createProcurementSlice({ setStore, getActor }: StoreSliceDeps) {
       })
     },
 
-    createPurchaseOrder(
+    async createPurchaseOrder(
       partial: Omit<PurchaseOrder, 'id' | 'orderNumber' | 'createdAt' | 'updatedAt'> & {
         id?: string
         orderNumber?: string
       },
-    ): string {
+    ): Promise<string> {
+      if (isG5ProcurementActive(getStore())) {
+        const { isG5WebPath } = await import('@/lib/planner/g5ServerClient')
+        if (isG5WebPath()) {
+          // Freehand PO create is not a G5 command — drafts come from MRP generateDraftsFromMrp.
+          throw new Error('g5.error.use_g5_gateway')
+        }
+      }
+
       let newId = ''
       patchProcurement(setStore, (p) => {
         const { orderNumber, nextOrderSeq } = allocateOrderNumber(p)
@@ -114,6 +151,9 @@ export function createProcurementSlice({ setStore, getActor }: StoreSliceDeps) {
       orderId: string,
       opts?: import('@/lib/procurement/receive').ReceiveOrderOpts,
     ): ReceiveOrderResult {
+      if (isG5ProcurementActive(getStore())) {
+        return { ok: false, error: 'g5.error.use_g5_gateway' }
+      }
       let result: ReceiveOrderResult = { ok: false, error: 'procurement.receive.errNotFound' }
       patchStore(setStore, (s) => {
         const out = receivePurchaseOrderInStore(s, orderId, opts)
@@ -123,7 +163,80 @@ export function createProcurementSlice({ setStore, getActor }: StoreSliceDeps) {
       return result
     },
 
-    setPurchaseOrderStatus(orderId: string, status: PurchaseOrder['status'], note?: string) {
+    async receivePurchaseOrderViaG5(
+      orderId: string,
+      opts: {
+        lines: Array<{
+          lineId: string
+          quantity: number
+          batchId?: string
+          expiryDate?: string
+          warehouseId?: string
+          locationId?: string
+        }>
+        note?: string
+      },
+    ) {
+      if (!isG5ProcurementActive(getStore())) {
+        throw new Error('g5.error.use_g5_gateway')
+      }
+      const { isG5WebPath, g5ProcurementReceiptPost, mirrorG5Ack } = await import(
+        '@/lib/planner/g5ServerClient'
+      )
+      if (!isG5WebPath()) {
+        throw new Error('g5.error.use_g5_gateway')
+      }
+      const conf = await g5ProcurementReceiptPost({
+        idempotencyKey: `g5-po-receipt-${orderId}-${Date.now()}`,
+        command: { id: orderId, orderId, lines: opts.lines, note: opts.note },
+      })
+      if (!conf.ok) {
+        throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+      }
+      setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+      return conf.data
+    },
+
+    async setPurchaseOrderStatus(
+      orderId: string,
+      status: PurchaseOrder['status'],
+      note?: string,
+    ) {
+      if (isG5ProcurementActive(getStore())) {
+        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
+          '@/lib/planner/g5ServerClient'
+        )
+        if (isG5WebPath()) {
+          const map: Record<string, string> = {
+            ordered: 'procurement.order.markOrdered',
+            submitted: 'procurement.order.submit',
+            approved: 'procurement.order.approve',
+            cancelled: 'procurement.order.cancel',
+          }
+          // Legacy status names → G5 commands where possible
+          const commandType =
+            map[status] ??
+            (status === 'received' || status === 'partial'
+              ? null
+              : status === 'draft'
+                ? 'procurement.draft.edit'
+                : 'procurement.order.change')
+          if (!commandType) {
+            throw new Error('g5.error.use_g5_gateway')
+          }
+          const conf = await executeG5Command({
+            idempotencyKey: `g5-po-status-${orderId}-${status}-${Date.now()}`,
+            commandType,
+            command: { id: orderId, note },
+          })
+          if (!conf.ok) {
+            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          return
+        }
+      }
+
       patchProcurement(setStore, (p) => ({
         ...p,
         orders: p.orders.map((o) => {

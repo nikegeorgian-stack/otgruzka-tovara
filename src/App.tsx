@@ -29,6 +29,7 @@ import { restoreDailyBackup } from '@/lib/backup'
 import { BULK_BLOCKED_MESSAGE } from '@/lib/cloud/bulkStoreOverwrite'
 import { buildProcurementPageProps } from '@/lib/app/procurementProps'
 import { isG1WebAuthoritativePath } from '@/lib/warehouse/g1ServerClient'
+import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
 import { buildWarehousePageProps } from '@/lib/app/warehouseProps'
 import { isSqlConnectPersistence } from '@/lib/sqlconnect/config'
 import type { SaveDraftInput } from '@/lib/warehouse/documents'
@@ -1139,6 +1140,16 @@ export default function App() {
               access={app.store.access}
               currentUser={app.currentUser}
               onCreateWorkTask={app.createWorkTask}
+              store={app.store}
+              canActivateG5={
+                app.currentUser?.roleId === 'sysadmin' ||
+                app.access?.users?.some(
+                  (u) =>
+                    u.id === app.currentUser?.id &&
+                    u.roleId === 'sysadmin' &&
+                    u.active !== false,
+                ) === true
+              }
             />
           )}
           {app.view === 'summary' && (
@@ -1179,6 +1190,8 @@ export default function App() {
               onRemoveFinishedProduct={app.removeFinishedProduct}
               onUpsertPackagingRecipe={app.upsertPackagingRecipe}
               onRemovePackagingRecipe={app.removePackagingRecipe}
+              onApprovePackagingBom={app.approvePackagingBom}
+              canApprovePackagingBom={g5FlagsFromStore(app.store).masterDataActive}
               onUpsertBoxRecipe={app.upsertBoxRecipe}
               onRemoveBoxRecipe={app.removeBoxRecipe}
               onUpsertFormulationRecipe={app.upsertFormulationRecipe}
@@ -1390,6 +1403,7 @@ export default function App() {
               counterparties={app.store.counterparties.items}
               finishedProducts={app.store.finishedProducts.items}
               warehouse={app.store.warehouse}
+              store={app.store}
               webUserName={webUserName}
               onUpsertSalesOrder={app.upsertSalesOrder}
               onUpsertCounterparty={app.upsertCounterparty}

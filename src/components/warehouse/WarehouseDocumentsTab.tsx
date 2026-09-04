@@ -18,6 +18,13 @@ import {
 } from '@/lib/warehouse/printDocument'
 import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssuePrintPreview'
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
+import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
+import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
+import {
+  isG5WarehousePrintDoc,
+  receiptToPrintModel,
+  warehouseDocToReversalPrintModel,
+} from '@/lib/print/g5PrintFromDomain'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
 import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
 import {
@@ -57,6 +64,7 @@ type Props = Pick<
   | 'productionRequests'
   | 'keeperId'
   | 'keeperName'
+  | 'exportStore'
 > & {
   warehouseId: string
   categoryNames: Map<string, string>
@@ -68,6 +76,8 @@ type Props = Pick<
   access?: AccessStore
   currentUser?: AppUser | null
   onCreateWorkTask?: (draft: WorkTaskDraft) => string
+  /** Commercial ACL for G5 print prices. */
+  canViewCommercial?: boolean
 }
 
 type DocModalState =
@@ -113,6 +123,8 @@ export function WarehouseDocumentsTab({
   access,
   currentUser,
   onCreateWorkTask,
+  exportStore = null,
+  canViewCommercial = false,
 }: Props) {
   const { t, tf } = useI18n()
   const docEditorRef = useRef<WarehouseDocumentEditorHandle>(null)
@@ -120,11 +132,32 @@ export function WarehouseDocumentsTab({
   const [docDirty, setDocDirty] = useState(false)
   const [receiptPrintPreview, setReceiptPrintPreview] = useState<ReceiptPrintModel | null>(null)
   const [issuePrintPreview, setIssuePrintPreview] = useState<IssuePrintModel | null>(null)
+  const [g5PrintModel, setG5PrintModel] = useState<G5DocumentPrintModel | null>(null)
   const [filterType, setFilterType] = useState<'all' | 'receipt' | 'issue' | 'inventory'>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'posted' | 'cancelled'>(
     'all',
   )
   const [filterPurpose, setFilterPurpose] = useState<WarehouseDocumentPurpose | 'all'>('all')
+  const g5Flags = g5FlagsFromStore(exportStore)
+  const preferG5Print = g5Flags.procurementActive
+
+  const printDirectories = useMemo(
+    () => ({
+      items: warehouse.items.map((i) => ({
+        id: i.id,
+        internalCode: i.internalCode,
+        sku: i.sku,
+        name: i.name,
+      })),
+      warehouses: warehouse.locations.map((l) => ({ id: l.id, name: l.name })),
+      suppliers: (exportStore?.counterparties?.items ?? []).map((c) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+      })),
+    }),
+    [warehouse.items, warehouse.locations, exportStore?.counterparties?.items],
+  )
   const [filterSource, setFilterSource] = useState<JournalSourceFilter>('all')
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -201,6 +234,11 @@ export function WarehouseDocumentsTab({
       setJournalNotice(t('warehouse.doc.reservationPrintNotice'))
       return
     }
+    const useG5 = preferG5Print || isG5WarehousePrintDoc(doc as unknown as Record<string, unknown>)
+    if (useG5) {
+      handleG5Print(doc)
+      return
+    }
     if (doc.type === 'receipt') {
       const model = buildReceiptPrintModelFromDocument(warehouse, doc, printMeta, {
         productionRequests,
@@ -214,6 +252,65 @@ export function WarehouseDocumentsTab({
       counterparties,
     })
     if (model) setIssuePrintPreview(model)
+  }
+
+  function handleG5Print(doc: WarehouseDocument) {
+    const loose = doc as unknown as Record<string, unknown>
+    const isReversal =
+      doc.status === 'cancelled' ||
+      Boolean(doc.reversesDocumentId) ||
+      strDocRole(doc) === 'reversal' ||
+      strDocRole(doc) === 'finished_goods_shipment_cancel'
+
+    if (isReversal) {
+      const original = doc.reversesDocumentId
+        ? warehouse.documents.find((x) => x.id === doc.reversesDocumentId)
+        : undefined
+      setG5PrintModel(
+        warehouseDocToReversalPrintModel(loose, {
+          showPrices: canViewCommercial,
+          directories: printDirectories,
+          originalDocRef: original?.number || doc.reversesDocumentId || doc.number,
+          reason: doc.cancellationReason,
+        }),
+      )
+      return
+    }
+
+    if (doc.type === 'receipt' && (doc.purchaseOrderId || doc.purpose === 'purchase')) {
+      const po = exportStore?.procurement?.orders?.find((o) => o.id === doc.purchaseOrderId)
+      setG5PrintModel(
+        receiptToPrintModel(loose, (po as unknown as Record<string, unknown>) ?? null, {
+          showPrices: canViewCommercial,
+          directories: printDirectories,
+          title: t('g5.print.receipt.title'),
+        }),
+      )
+      return
+    }
+
+    // Fallback: legacy print if G5 marker but not receipt/reversal
+    if (doc.type === 'receipt') {
+      const model = buildReceiptPrintModelFromDocument(warehouse, doc, printMeta!, {
+        productionRequests,
+        counterparties,
+      })
+      if (model) setReceiptPrintPreview(model)
+      return
+    }
+    const model = buildIssuePrintModelFromDocument(warehouse, doc, printMeta!, {
+      productionRequests,
+      counterparties,
+    })
+    if (model) setIssuePrintPreview(model)
+  }
+
+  function strDocRole(doc: WarehouseDocument): string {
+    return String((doc as { docRole?: string }).docRole ?? '')
+  }
+
+  function canG5Print(doc: WarehouseDocument): boolean {
+    return preferG5Print || isG5WarehousePrintDoc(doc as unknown as Record<string, unknown>)
   }
 
   function handleCancel(doc: WarehouseDocument) {
@@ -523,7 +620,13 @@ export function WarehouseDocumentsTab({
                           className="text-xs font-semibold text-teal-700 hover:underline text-left"
                           onClick={() => handlePrint(d)}
                         >
-                          {t('warehouse.print.previewBtn')}
+                          {canG5Print(d) &&
+                          (d.status === 'cancelled' || d.reversesDocumentId)
+                            ? t('g5.print.action.printCancel')
+                            : canG5Print(d) &&
+                                (d.purchaseOrderId || d.purpose === 'purchase')
+                              ? t('g5.print.action.printReceipt')
+                              : t('warehouse.print.previewBtn')}
                         </button>
                       )}
                       {d.status === 'draft' && onPostExistingDocument && (
@@ -753,6 +856,8 @@ export function WarehouseDocumentsTab({
               initialPickOpen={docModal.mode === 'new' ? Boolean(docModal.aiPick?.query) : false}
               existingDocument={docModal.mode !== 'new' ? docModal.doc : null}
               readOnly={docModal.mode === 'view'}
+              exportStore={exportStore}
+              canViewCommercial={canViewCommercial}
               onDirtyChange={setDocDirty}
               onPost={async (doc) => {
                 const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
@@ -820,6 +925,13 @@ export function WarehouseDocumentsTab({
           onClose={() => setIssuePrintPreview(null)}
         />
       )}
+      {g5PrintModel ? (
+        <G5DocumentPrintModal
+          model={g5PrintModel}
+          onClose={() => setG5PrintModel(null)}
+          showCommercial={canViewCommercial}
+        />
+      ) : null}
       {cancelTarget && (
         <AppDialog
           open

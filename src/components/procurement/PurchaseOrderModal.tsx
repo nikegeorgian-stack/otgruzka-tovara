@@ -56,6 +56,14 @@ type Props = {
   onNavigateToDirectory: (section: DirectorySection) => void
   onSave: (order: PurchaseOrder, statusNote?: string) => void
   onSyncPersist?: (order: PurchaseOrder) => void
+  /** ACL: show print actions when user can view the order. */
+  canViewOrder?: boolean
+  /** ACL: include commercial prices on print models. */
+  canViewCommercial?: boolean
+  onPrintOrder?: (order: PurchaseOrder, opts: { showPrices: boolean; statusChanged: boolean }) => void
+  onPrintChange?: (order: PurchaseOrder, opts: { showPrices: boolean; statusChanged: boolean }) => void
+  onPrintCancel?: (order: PurchaseOrder, opts: { showPrices: boolean }) => void
+  onPrintReceipts?: (order: PurchaseOrder, opts: { showPrices: boolean }) => void
 }
 
 const TRANSPORTS: TransportMode[] = ['truck', 'rail', 'sea', 'air', 'mixed']
@@ -93,6 +101,12 @@ export function PurchaseOrderModal({
   onNavigateToDirectory,
   onSave,
   onSyncPersist,
+  canViewOrder = true,
+  canViewCommercial = false,
+  onPrintOrder,
+  onPrintChange,
+  onPrintCancel,
+  onPrintReceipts,
 }: Props) {
   const { t, locale } = useI18n()
   const countryOptions = countriesSorted(locale)
@@ -1337,18 +1351,75 @@ export function PurchaseOrderModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-grid px-6 py-4">
-          <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
-            data-coach="procurement:orderSave"
-            onClick={save}
-          >
-            {t('common.save')}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-grid px-6 py-4">
+          <div className="flex flex-wrap gap-2">
+            {canViewOrder && onPrintOrder ? (
+              <button
+                type="button"
+                className="rounded-sm border border-grid px-3 py-2 text-sm font-medium hover:bg-stone-50"
+                data-coach="procurement:orderPrint"
+                onClick={() =>
+                  onPrintOrder(draft, {
+                    showPrices: canViewCommercial,
+                    statusChanged,
+                  })
+                }
+              >
+                {t('g5.print.action.printOrder')}
+              </button>
+            ) : null}
+            {canViewOrder &&
+            onPrintChange &&
+            (statusChanged || Number((draft as { revision?: number }).revision) > 1) ? (
+              <button
+                type="button"
+                className="rounded-sm border border-grid px-3 py-2 text-sm font-medium hover:bg-stone-50"
+                onClick={() =>
+                  onPrintChange(draft, {
+                    showPrices: canViewCommercial,
+                    statusChanged,
+                  })
+                }
+              >
+                {t('g5.print.action.printChange')}
+              </button>
+            ) : null}
+            {canViewOrder && onPrintCancel && draft.status === 'cancelled' ? (
+              <button
+                type="button"
+                className="rounded-sm border border-grid px-3 py-2 text-sm font-medium hover:bg-stone-50"
+                onClick={() => onPrintCancel(draft, { showPrices: canViewCommercial })}
+              >
+                {t('g5.print.action.printCancel')}
+              </button>
+            ) : null}
+            {canViewOrder &&
+            onPrintReceipts &&
+            (draft.warehouseDocumentIds.length > 0 ||
+              draft.status === 'partial' ||
+              draft.status === 'received') ? (
+              <button
+                type="button"
+                className="rounded-sm border border-grid px-3 py-2 text-sm font-medium hover:bg-stone-50"
+                onClick={() => onPrintReceipts(draft, { showPrices: canViewCommercial })}
+              >
+                {t('g5.print.action.printReceipts')}
+              </button>
+            ) : null}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="rounded-sm border border-grid px-4 py-2 text-sm" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
+              data-coach="procurement:orderSave"
+              onClick={save}
+            >
+              {t('common.save')}
+            </button>
+          </div>
         </div>
     </ModalBackdrop>
   )

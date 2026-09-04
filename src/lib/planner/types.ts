@@ -108,6 +108,12 @@ export type ProductionOrder = {
   m2PerRoll?: number
   /** Кэш расчёта по всему заказу */
   packagingPlan?: PackagingPlan
+  /** G5.4 — trusted BOM refs from MRP accept (pre-confirm) */
+  packagingBomId?: string
+  packagingBomVersion?: number
+  packagingBomContentHash?: string
+  /** G5.4 — immutable BOM snapshot frozen at G3 confirm */
+  packagingBomSnapshot?: import('@/lib/planner/g5PackagingBom').PackagingBomSnapshot
   dayPlans: PlannerDayPlan[]
   history: PlannerHistoryEntry[]
   createdAt: string

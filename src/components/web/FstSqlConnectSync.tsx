@@ -399,6 +399,20 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
                 } as typeof next.production,
               }
             }
+            // PHASE G5.1 — persist activation flags from critical domainMeta (fail-closed gates).
+            {
+              const { withG5ActivationOnStore, readG5Activation } = await import(
+                '@/lib/planner/g5ServerClient'
+              )
+              const fromMeta = readG5Activation(g1.data.domainMeta)
+              next = withG5ActivationOnStore(next, {
+                masterDataActive: g1.data.masterDataActive === true || fromMeta.masterDataActive,
+                salesPlanningActive:
+                  g1.data.salesPlanningActive === true || fromMeta.salesPlanningActive,
+                procurementActive: g1.data.procurementActive === true || fromMeta.procurementActive,
+                domainMeta: g1.data.domainMeta,
+              })
+            }
             if (next !== local) {
               applyCloud(next)
               if (!cloudDirtyTracker.hasPendingUserOperations()) {
