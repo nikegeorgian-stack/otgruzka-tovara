@@ -5679,6 +5679,11 @@ export const ka: Dict = {
   'warehouse.doc.errUnpostForbidden': 'ჩატარების გაუქმება მხოლოდ სისტემურ ადმინისტრატორს შეუძლია.',
   'warehouse.doc.errUnpostRemoved':
     'ჩატარების მოხსნა წაშლილია. გამოიყენეთ სტორნო (გაუქმება).',
+  'warehouse.g1.errUseAuthoritativePost':
+    'ვებ-ვერსიაზე დოკუმენტის ჩატარება მიდის სერვერული G1 gateway-ით. განაახლეთ გვერდი ან გაიმეორეთ.',
+  'warehouse.g1.errUnsupportedType':
+    'სერვერული G1 ჩატარება ჯერ მხოლოდ შემოსვლასა და გასვლას უჭერს მხარს.',
+  'warehouse.g1.errServer': 'საწყობის სერვერული ჩატარება მიუწვდომელია. სცადეთ მოგვიანებით.',
   'warehouse.doc.errPostedImmutable':
     'ჩატარებული ან გაუქმებული დოკუმენტის რედაქტირება შეუძლებელია. გამოიყენეთ სტორნო.',
   'warehouse.doc.errBareMovementBlocked':

@@ -750,7 +750,7 @@ export function WarehouseDocumentsTab({
               existingDocument={docModal.mode !== 'new' ? docModal.doc : null}
               readOnly={docModal.mode === 'view'}
               onDirtyChange={setDocDirty}
-              onPost={(doc) => {
+              onPost={async (doc) => {
                 const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
                 if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
                   const saved = onSaveDocumentDraft({ ...doc, id: draftId })
@@ -762,7 +762,7 @@ export function WarehouseDocumentsTab({
                   }
                   return result
                 }
-                const result = onPostDocument(doc)
+                const result = await Promise.resolve(onPostDocument(doc))
                 if (result.ok) {
                   closeDocModal()
                 }

@@ -406,7 +406,7 @@ function WarehouseDocOverlay({
           printMeta={printMeta}
           existingDocument={doc}
           readOnly={mode === 'view'}
-          onPost={(posted) => {
+          onPost={async (posted) => {
             const draftId = mode === 'edit' ? doc.id : undefined
             if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
               const saved = onSaveDocumentDraft({ ...posted, id: draftId })
@@ -418,7 +418,7 @@ function WarehouseDocOverlay({
               }
               return result
             }
-            const result = onPostDocument(posted)
+            const result = await Promise.resolve(onPostDocument(posted))
             if (result.ok) onClose()
             return result
           }}

@@ -95,7 +95,9 @@ type Props = {
   initialType?: 'receipt' | 'issue'
   initialPickSearch?: string
   initialPickOpen?: boolean
-  onPost: (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => PostDocumentResult
+  onPost: (
+    doc: Omit<WarehouseDocument, 'id' | 'createdAt'>,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   /** Сохранить черновик (без движений). Если не задан — кнопки черновика нет. */
   onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult
   onPostTransfer?: (
@@ -577,11 +579,13 @@ ref,
     }
 
     setFormError(null)
-    const result = onPost({
-      type,
-      ...buildDocBase(),
-      lines: parsed,
-    })
+    const result = await Promise.resolve(
+      onPost({
+        type,
+        ...buildDocBase(),
+        lines: parsed,
+      }),
+    )
     if (showPostError(result)) return
     resetForm()
   }

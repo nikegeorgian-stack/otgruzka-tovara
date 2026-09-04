@@ -8,9 +8,95 @@ export type Int64String = string;
 export type DateString = string;
 
 
+export interface FstCommandReceipt_Key {
+  id: string;
+  __typename?: 'FstCommandReceipt_Key';
+}
+
+export interface FstCriticalStore_Key {
+  id: string;
+  __typename?: 'FstCriticalStore_Key';
+}
+
+export interface FstPrincipalAccess_Key {
+  id: string;
+  __typename?: 'FstPrincipalAccess_Key';
+}
+
 export interface FstStore_Key {
   id: string;
   __typename?: 'FstStore_Key';
+}
+
+export interface GetFstCommandReceiptData {
+  fstCommandReceipt?: {
+    id: string;
+    storeId: string;
+    commandType: string;
+    actorUid: string;
+    resultJson: string;
+    criticalRevisionAfter: number;
+    createdAt: TimestampString;
+  } & FstCommandReceipt_Key;
+}
+
+export interface GetFstCommandReceiptVariables {
+  id: string;
+}
+
+export interface GetFstCriticalStoreData {
+  fstCriticalStore?: {
+    id: string;
+    revision: number;
+    payloadJson: string;
+    fingerprint?: string | null;
+    updatedAt: TimestampString;
+    updatedByUid: string;
+  } & FstCriticalStore_Key;
+}
+
+export interface GetFstCriticalStoreVariables {
+  id: string;
+}
+
+export interface GetFstPrincipalAccessByIdData {
+  fstPrincipalAccess?: {
+    id: string;
+    firebaseUid: string;
+    storeId: string;
+    roleId: string;
+    capabilitiesJson: string;
+    active: boolean;
+    revision: number;
+    createdByUid: string;
+    updatedByUid: string;
+    revokedAt?: TimestampString | null;
+    revokeReason?: string | null;
+  } & FstPrincipalAccess_Key;
+}
+
+export interface GetFstPrincipalAccessByIdVariables {
+  id: string;
+}
+
+export interface GetFstPrincipalAccessByUidStoreData {
+  fstPrincipalAccesses: ({
+    id: string;
+    firebaseUid: string;
+    storeId: string;
+    roleId: string;
+    capabilitiesJson: string;
+    active: boolean;
+    revision: number;
+    updatedAt: TimestampString;
+    revokedAt?: TimestampString | null;
+    revokeReason?: string | null;
+  } & FstPrincipalAccess_Key)[];
+}
+
+export interface GetFstPrincipalAccessByUidStoreVariables {
+  firebaseUid: string;
+  storeId: string;
 }
 
 export interface GetLatestQcLotDecisionData {
@@ -204,6 +290,19 @@ export interface GetQcPermissionByUidStoreVariables {
   storeId: string;
 }
 
+export interface InsertFstCommandReceiptData {
+  fstCommandReceipt_insert: FstCommandReceipt_Key;
+}
+
+export interface InsertFstCommandReceiptVariables {
+  id: string;
+  storeId: string;
+  commandType: string;
+  actorUid: string;
+  resultJson: string;
+  criticalRevisionAfter: number;
+}
+
 export interface InsertQcAttachmentRecordData {
   qcAttachmentRecord_insert: QcAttachmentRecord_Key;
 }
@@ -313,6 +412,19 @@ export interface QcPermission_Key {
   __typename?: 'QcPermission_Key';
 }
 
+export interface UpdateFstCriticalStoreCasData {
+  fstCriticalStore_updateMany: number;
+}
+
+export interface UpdateFstCriticalStoreCasVariables {
+  id: string;
+  expectedRevision: number;
+  revision: number;
+  payloadJson: string;
+  fingerprint?: string | null;
+  updatedByUid: string;
+}
+
 export interface UpdateQcAttachmentRecordData {
   qcAttachmentRecord_updateMany: number;
 }
@@ -339,6 +451,37 @@ export interface UpdateQcFinishedGoodsLotShippedVariables {
   revision: number;
   quantityShipped: number;
   updatedByUid: string;
+}
+
+export interface UpsertFstCriticalStoreData {
+  fstCriticalStore_upsert: FstCriticalStore_Key;
+}
+
+export interface UpsertFstCriticalStoreVariables {
+  id: string;
+  revision: number;
+  payloadJson: string;
+  fingerprint?: string | null;
+  updatedByUid: string;
+}
+
+export interface UpsertFstPrincipalAccessData {
+  fstPrincipalAccess_upsert: FstPrincipalAccess_Key;
+}
+
+export interface UpsertFstPrincipalAccessVariables {
+  id: string;
+  firebaseUid: string;
+  storeId: string;
+  roleId: string;
+  capabilitiesJson: string;
+  active: boolean;
+  revision: number;
+  createdByUid: string;
+  updatedByUid: string;
+  revokedAt?: TimestampString | null;
+  revokedByUid?: string | null;
+  revokeReason?: string | null;
 }
 
 export interface UpsertQcFinishedGoodsLotData {
@@ -412,6 +555,26 @@ export function insertQcLotDecision(dc: DataConnect, vars: InsertQcLotDecisionVa
 /** Generated Node Admin SDK operation action function for the 'InsertQcLotDecision' Mutation. Allow users to pass in custom DataConnect instances. */
 export function insertQcLotDecision(vars: InsertQcLotDecisionVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<InsertQcLotDecisionData>>;
 
+/** Generated Node Admin SDK operation action function for the 'UpsertFstPrincipalAccess' Mutation. Allow users to execute without passing in DataConnect. */
+export function upsertFstPrincipalAccess(dc: DataConnect, vars: UpsertFstPrincipalAccessVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpsertFstPrincipalAccessData>>;
+/** Generated Node Admin SDK operation action function for the 'UpsertFstPrincipalAccess' Mutation. Allow users to pass in custom DataConnect instances. */
+export function upsertFstPrincipalAccess(vars: UpsertFstPrincipalAccessVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpsertFstPrincipalAccessData>>;
+
+/** Generated Node Admin SDK operation action function for the 'UpsertFstCriticalStore' Mutation. Allow users to execute without passing in DataConnect. */
+export function upsertFstCriticalStore(dc: DataConnect, vars: UpsertFstCriticalStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpsertFstCriticalStoreData>>;
+/** Generated Node Admin SDK operation action function for the 'UpsertFstCriticalStore' Mutation. Allow users to pass in custom DataConnect instances. */
+export function upsertFstCriticalStore(vars: UpsertFstCriticalStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpsertFstCriticalStoreData>>;
+
+/** Generated Node Admin SDK operation action function for the 'UpdateFstCriticalStoreCas' Mutation. Allow users to execute without passing in DataConnect. */
+export function updateFstCriticalStoreCas(dc: DataConnect, vars: UpdateFstCriticalStoreCasVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpdateFstCriticalStoreCasData>>;
+/** Generated Node Admin SDK operation action function for the 'UpdateFstCriticalStoreCas' Mutation. Allow users to pass in custom DataConnect instances. */
+export function updateFstCriticalStoreCas(vars: UpdateFstCriticalStoreCasVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<UpdateFstCriticalStoreCasData>>;
+
+/** Generated Node Admin SDK operation action function for the 'InsertFstCommandReceipt' Mutation. Allow users to execute without passing in DataConnect. */
+export function insertFstCommandReceipt(dc: DataConnect, vars: InsertFstCommandReceiptVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<InsertFstCommandReceiptData>>;
+/** Generated Node Admin SDK operation action function for the 'InsertFstCommandReceipt' Mutation. Allow users to pass in custom DataConnect instances. */
+export function insertFstCommandReceipt(vars: InsertFstCommandReceiptVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<InsertFstCommandReceiptData>>;
+
 /** Generated Node Admin SDK operation action function for the 'GetQcPermissionByUidStore' Query. Allow users to execute without passing in DataConnect. */
 export function getQcPermissionByUidStore(dc: DataConnect, vars: GetQcPermissionByUidStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetQcPermissionByUidStoreData>>;
 /** Generated Node Admin SDK operation action function for the 'GetQcPermissionByUidStore' Query. Allow users to pass in custom DataConnect instances. */
@@ -461,4 +624,24 @@ export function getQcFinishedGoodsLot(vars: GetQcFinishedGoodsLotVariables, opti
 export function getQcLotDecisionByIdempotency(dc: DataConnect, vars: GetQcLotDecisionByIdempotencyVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetQcLotDecisionByIdempotencyData>>;
 /** Generated Node Admin SDK operation action function for the 'GetQcLotDecisionByIdempotency' Query. Allow users to pass in custom DataConnect instances. */
 export function getQcLotDecisionByIdempotency(vars: GetQcLotDecisionByIdempotencyVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetQcLotDecisionByIdempotencyData>>;
+
+/** Generated Node Admin SDK operation action function for the 'GetFstPrincipalAccessByUidStore' Query. Allow users to execute without passing in DataConnect. */
+export function getFstPrincipalAccessByUidStore(dc: DataConnect, vars: GetFstPrincipalAccessByUidStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstPrincipalAccessByUidStoreData>>;
+/** Generated Node Admin SDK operation action function for the 'GetFstPrincipalAccessByUidStore' Query. Allow users to pass in custom DataConnect instances. */
+export function getFstPrincipalAccessByUidStore(vars: GetFstPrincipalAccessByUidStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstPrincipalAccessByUidStoreData>>;
+
+/** Generated Node Admin SDK operation action function for the 'GetFstPrincipalAccessById' Query. Allow users to execute without passing in DataConnect. */
+export function getFstPrincipalAccessById(dc: DataConnect, vars: GetFstPrincipalAccessByIdVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstPrincipalAccessByIdData>>;
+/** Generated Node Admin SDK operation action function for the 'GetFstPrincipalAccessById' Query. Allow users to pass in custom DataConnect instances. */
+export function getFstPrincipalAccessById(vars: GetFstPrincipalAccessByIdVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstPrincipalAccessByIdData>>;
+
+/** Generated Node Admin SDK operation action function for the 'GetFstCriticalStore' Query. Allow users to execute without passing in DataConnect. */
+export function getFstCriticalStore(dc: DataConnect, vars: GetFstCriticalStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstCriticalStoreData>>;
+/** Generated Node Admin SDK operation action function for the 'GetFstCriticalStore' Query. Allow users to pass in custom DataConnect instances. */
+export function getFstCriticalStore(vars: GetFstCriticalStoreVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstCriticalStoreData>>;
+
+/** Generated Node Admin SDK operation action function for the 'GetFstCommandReceipt' Query. Allow users to execute without passing in DataConnect. */
+export function getFstCommandReceipt(dc: DataConnect, vars: GetFstCommandReceiptVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstCommandReceiptData>>;
+/** Generated Node Admin SDK operation action function for the 'GetFstCommandReceipt' Query. Allow users to pass in custom DataConnect instances. */
+export function getFstCommandReceipt(vars: GetFstCommandReceiptVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetFstCommandReceiptData>>;
 

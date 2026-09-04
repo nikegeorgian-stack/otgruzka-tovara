@@ -90,6 +90,12 @@ import { patchWarehouse, type StoreSliceDeps } from '../storeApi'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { syncSalesOrderLoadingInStore, markSalesOrderShippedIfFullyLoaded } from '@/lib/sales/loadingLink'
 import { applyShipmentToLot, reverseShipmentOnLot } from '@/lib/production/shipmentGate'
+import {
+  g1PostWarehouseDocument,
+  isG1WebAuthoritativePath,
+  mirrorAuthoritativeWarehousePost,
+  resolveAuthoritativeWarehouseOverlay,
+} from '@/lib/warehouse/g1ServerClient'
 
 export function cancelWarehouseDocumentGroupKind(
   documentId: string,
@@ -279,6 +285,14 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     },
 
     postWarehouseDoc(doc: Omit<WarehouseDocument, 'id' | 'createdAt'>): PostDocumentResult {
+      // Web cloud path: sync local post is LEGACY / not authoritative for G1.
+      // Use postWarehouseDocAuthoritative() for server-trusted stock.
+      if (isG1WebAuthoritativePath()) {
+        return {
+          ok: false,
+          error: 'warehouse.g1.errUseAuthoritativePost',
+        }
+      }
       let result: PostDocumentResult = { ok: false, error: 'unknown' }
       const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
       patchWarehouse(setStore, (w) => {
@@ -287,6 +301,89 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         return out.store
       })
       return result
+    },
+
+    /**
+     * PHASE G1 — server-authoritative document post (web).
+     * Local/offline desktop continues to use postWarehouseDoc.
+     */
+    async postWarehouseDocAuthoritative(
+      doc: Omit<WarehouseDocument, 'id' | 'createdAt'> & { idempotencyKey: string },
+    ): Promise<PostDocumentResult & { criticalRevision?: number; source?: string }> {
+      // Desktop / local: keep offline domain post (not G1 cloud path).
+      if (!isG1WebAuthoritativePath()) {
+        let result: PostDocumentResult = { ok: false, error: 'unknown' }
+        const enriched = enrichDocumentCounterparty(doc, getStore().counterparties.items)
+        patchWarehouse(setStore, (w) => {
+          const out = postWarehouseDocument(w, enriched)
+          result = out.result
+          return out.store
+        })
+        return result
+      }
+      if (doc.type !== 'receipt' && doc.type !== 'issue') {
+        return { ok: false, error: 'warehouse.g1.errUnsupportedType' }
+      }
+      const server = await g1PostWarehouseDocument({
+        idempotencyKey: doc.idempotencyKey,
+        command: {
+          type: doc.type,
+          warehouseId: doc.warehouseId,
+          date: doc.date,
+          number: doc.number,
+          lines: doc.lines.map((line) => ({
+            itemId: line.itemId,
+            quantity: line.quantity,
+            lineId: line.lineId,
+            itemNameSnapshot: line.itemNameSnapshot,
+            itemCodeSnapshot: line.itemCodeSnapshot,
+            unitSnapshot: line.unitSnapshot,
+            inputUnit: line.inputUnit,
+          })),
+          purpose: doc.purpose,
+          docRole: doc.docRole,
+        },
+      })
+      if (!server.ok) {
+        return { ok: false, error: server.error || 'warehouse.g1.errServer' }
+      }
+      patchWarehouse(
+        setStore,
+        (w) => mirrorAuthoritativeWarehousePost(w, server.data.warehouse),
+        {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: warehouseTransactionGroupId({
+            kind: 'warehouse_transfer',
+            sourceId: server.data.documentId,
+            revision: String(server.data.criticalRevision ?? 1),
+          }),
+          transactionGroupKind: 'warehouse_transfer',
+          transactionGroupLabel: 'G1 authoritative post',
+        },
+      )
+      return {
+        ok: true,
+        documentId: server.data.documentId,
+        idempotent: server.data.idempotent,
+        criticalRevision: server.data.criticalRevision,
+        source: 'fst_critical_store',
+      }
+    },
+
+    /** Overlay authoritative warehouse from G1 critical store after reload. */
+    applyAuthoritativeWarehouseOverlay(input: {
+      criticalWarehouse: WarehouseStore
+      criticalRevision: number
+    }) {
+      patchWarehouse(setStore, (w) => {
+        const out = resolveAuthoritativeWarehouseOverlay({
+          legacyWarehouse: w,
+          criticalWarehouse: input.criticalWarehouse,
+          criticalRevision: input.criticalRevision,
+        })
+        return out.warehouse
+      })
     },
 
     saveWarehouseDocDraft(

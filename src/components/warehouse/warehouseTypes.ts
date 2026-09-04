@@ -58,7 +58,9 @@ export type WarehousePageProps = {
   onRemoveLocation?: (id: string) => boolean
   onAddMovement: (movement: Omit<StockMovement, 'id' | 'createdAt'>) => void
   onDeleteMovement: (id: string) => boolean
-  onPostDocument: (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => PostDocumentResult
+  onPostDocument: (
+    doc: Omit<WarehouseDocument, 'id' | 'createdAt'>,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onPostTransfer?: (
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string

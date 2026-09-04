@@ -653,6 +653,8 @@ export function useAppStore() {
     addStockMovement: warehouse.addStockMovement,
     deleteStockMovement: warehouse.deleteStockMovement,
     postWarehouseDoc: warehouse.postWarehouseDoc,
+    postWarehouseDocAuthoritative: warehouse.postWarehouseDocAuthoritative,
+    applyAuthoritativeWarehouseOverlay: warehouse.applyAuthoritativeWarehouseOverlay,
     saveWarehouseDocDraft: warehouse.saveWarehouseDocDraft,
     postExistingWarehouseDoc: warehouse.postExistingWarehouseDoc,
     unpostWarehouseDoc: warehouse.unpostWarehouseDoc,

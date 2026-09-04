@@ -382,7 +382,8 @@ describe('admin connector isolation', () => {
 })
 
 describe('source scan guard', () => {
-  it('keeps admin sdk and server env names out of src', async () => {
+  // Full src/ walk is I/O-heavy; 5s default is too tight on Windows CI/dev disks.
+  it('keeps admin sdk and server env names out of src', { timeout: 30_000 }, async () => {
     const root = path.resolve(process.cwd(), 'src')
     const stack = [root]
     const hits: string[] = []

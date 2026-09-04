@@ -56,6 +56,11 @@ import { hasPendingOutboxWork } from '@/lib/cloud/externalEffects/outbox'
 import { resolveRoleTaskAccessLevel } from '@/lib/tasks/access'
 import type { AppStore } from '@/lib/types'
 import type { FstCloudSyncProps } from './fstCloudTypes'
+import {
+  G1_CRITICAL_SOURCE,
+  g1GetAuthoritativeWarehouse,
+  resolveAuthoritativeWarehouseOverlay,
+} from '@/lib/warehouse/g1ServerClient'
 
 const SAVE_DEBOUNCE_MS = 2500
 const LOAD_TIMEOUT_MS = 45_000
@@ -312,6 +317,28 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         const parsed = parsePayloadJson(row.payloadJson)
         if (!parsed) throw new Error('invalid_payload')
         applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
+        // PHASE G1 — overlay authoritative warehouse when critical store revision > 0.
+        // Forged FstStore.warehouse from UpdateFstStore is not treated as stock truth.
+        try {
+          const g1 = await g1GetAuthoritativeWarehouse(storeId)
+          if (g1.ok && g1.data.revision > 0 && g1.data.warehouse) {
+            const local = storeRef.current
+            const overlay = resolveAuthoritativeWarehouseOverlay({
+              legacyWarehouse: local.warehouse,
+              criticalWarehouse: g1.data.warehouse,
+              criticalRevision: g1.data.revision,
+            })
+            if (overlay.source === G1_CRITICAL_SOURCE) {
+              const next = { ...local, warehouse: overlay.warehouse }
+              applyCloud(next)
+              if (!cloudDirtyTracker.hasPendingUserOperations()) {
+                commitSyncedBaseline(next, row.revision)
+              }
+            }
+          }
+        } catch (g1Err) {
+          console.warn('FST G1 warehouse overlay skipped', g1Err)
+        }
         if (force) setError(null)
       } catch (err) {
         console.warn('FST SQL pull failed', err)
@@ -323,7 +350,7 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         if (force && !cloudDirtyTracker.hasPendingUserOperations()) setStatus('idle')
       }
     },
-    [applyRemoteStore, flashStatus, storeId],
+    [applyCloud, applyRemoteStore, commitSyncedBaseline, flashStatus, storeId],
   )
 
   const schedulePullRemote = useCallback(

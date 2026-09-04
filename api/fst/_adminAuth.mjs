@@ -40,7 +40,7 @@ export async function verifySysAdminRequest(req) {
   }
 
   try {
-    const decoded = await getAuth().verifyIdToken(token)
+    const decoded = await getAuth().verifyIdToken(token, true)
     const email = decoded.email?.trim().toLowerCase() || ''
     const bootstrapAdmin = email && FST_ADMIN_EMAILS.has(email)
     const claimAdmin = decoded.fstSysadmin === true
@@ -58,7 +58,8 @@ export function getAdminAuth() {
   return getAuth()
 }
 
+/** Verifies Firebase ID token and rejects revoked/disabled sessions (checkRevoked=true). */
 export async function verifyIdToken(token) {
   initFirebaseAdmin()
-  return getAuth().verifyIdToken(token)
+  return getAuth().verifyIdToken(token, true)
 }

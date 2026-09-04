@@ -22,6 +22,21 @@ export interface CreateFstStoreVariables {
   updatedByUid: string;
 }
 
+export interface FstCommandReceipt_Key {
+  id: string;
+  __typename?: 'FstCommandReceipt_Key';
+}
+
+export interface FstCriticalStore_Key {
+  id: string;
+  __typename?: 'FstCriticalStore_Key';
+}
+
+export interface FstPrincipalAccess_Key {
+  id: string;
+  __typename?: 'FstPrincipalAccess_Key';
+}
+
 export interface FstStore_Key {
   id: string;
   __typename?: 'FstStore_Key';

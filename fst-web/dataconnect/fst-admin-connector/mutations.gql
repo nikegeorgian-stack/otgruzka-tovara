@@ -179,3 +179,93 @@ mutation InsertQcLotDecision(
     idempotencyKey: $idempotencyKey
   })
 }
+
+# ---------------------------------------------------------------------------
+# PHASE G1 — critical store + principal access (NO_ACCESS)
+# ---------------------------------------------------------------------------
+
+mutation UpsertFstPrincipalAccess(
+  $id: String!
+  $firebaseUid: String!
+  $storeId: String!
+  $roleId: String!
+  $capabilitiesJson: String!
+  $active: Boolean!
+  $revision: Int!
+  $createdByUid: String!
+  $updatedByUid: String!
+  $revokedAt: Timestamp
+  $revokedByUid: String
+  $revokeReason: String
+) @auth(level: NO_ACCESS) @transaction {
+  fstPrincipalAccess_upsert(data: {
+    id: $id
+    firebaseUid: $firebaseUid
+    storeId: $storeId
+    roleId: $roleId
+    capabilitiesJson: $capabilitiesJson
+    active: $active
+    revision: $revision
+    createdByUid: $createdByUid
+    updatedByUid: $updatedByUid
+    revokedAt: $revokedAt
+    revokedByUid: $revokedByUid
+    revokeReason: $revokeReason
+  })
+}
+
+mutation UpsertFstCriticalStore(
+  $id: String!
+  $revision: Int!
+  $payloadJson: String!
+  $fingerprint: String
+  $updatedByUid: String!
+) @auth(level: NO_ACCESS) @transaction {
+  fstCriticalStore_upsert(data: {
+    id: $id
+    revision: $revision
+    payloadJson: $payloadJson
+    fingerprint: $fingerprint
+    updatedByUid: $updatedByUid
+  })
+}
+
+mutation UpdateFstCriticalStoreCas(
+  $id: String!
+  $expectedRevision: Int!
+  $revision: Int!
+  $payloadJson: String!
+  $fingerprint: String
+  $updatedByUid: String!
+) @auth(level: NO_ACCESS) @transaction {
+  fstCriticalStore_updateMany(
+    where: {
+      id: { eq: $id }
+      revision: { eq: $expectedRevision }
+    }
+    data: {
+      revision: $revision
+      payloadJson: $payloadJson
+      fingerprint: $fingerprint
+      updatedByUid: $updatedByUid
+    }
+  ) @check(expr: "this == 1", message: "revision_conflict")
+}
+
+mutation InsertFstCommandReceipt(
+  $id: String!
+  $storeId: String!
+  $commandType: String!
+  $actorUid: String!
+  $resultJson: String!
+  $criticalRevisionAfter: Int!
+) @auth(level: NO_ACCESS) @transaction {
+  fstCommandReceipt_insert(data: {
+    id: $id
+    storeId: $storeId
+    commandType: $commandType
+    actorUid: $actorUid
+    resultJson: $resultJson
+    criticalRevisionAfter: $criticalRevisionAfter
+  })
+}

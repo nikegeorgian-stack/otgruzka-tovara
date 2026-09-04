@@ -49,6 +49,34 @@ function insertQcLotDecision(dcOrVarsOrOptions, varsOrOptions, options) {
 }
 exports.insertQcLotDecision = insertQcLotDecision;
 
+function upsertFstPrincipalAccess(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('UpsertFstPrincipalAccess', inputVars, inputOpts);
+}
+exports.upsertFstPrincipalAccess = upsertFstPrincipalAccess;
+
+function upsertFstCriticalStore(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('UpsertFstCriticalStore', inputVars, inputOpts);
+}
+exports.upsertFstCriticalStore = upsertFstCriticalStore;
+
+function updateFstCriticalStoreCas(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('UpdateFstCriticalStoreCas', inputVars, inputOpts);
+}
+exports.updateFstCriticalStoreCas = updateFstCriticalStoreCas;
+
+function insertFstCommandReceipt(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('InsertFstCommandReceipt', inputVars, inputOpts);
+}
+exports.insertFstCommandReceipt = insertFstCommandReceipt;
+
 function getQcPermissionByUidStore(dcOrVarsOrOptions, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
   dcInstance.useGen(true);
@@ -118,4 +146,32 @@ function getQcLotDecisionByIdempotency(dcOrVarsOrOptions, varsOrOptions, options
   return dcInstance.executeQuery('GetQcLotDecisionByIdempotency', inputVars, inputOpts);
 }
 exports.getQcLotDecisionByIdempotency = getQcLotDecisionByIdempotency;
+
+function getFstPrincipalAccessByUidStore(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('GetFstPrincipalAccessByUidStore', inputVars, inputOpts);
+}
+exports.getFstPrincipalAccessByUidStore = getFstPrincipalAccessByUidStore;
+
+function getFstPrincipalAccessById(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('GetFstPrincipalAccessById', inputVars, inputOpts);
+}
+exports.getFstPrincipalAccessById = getFstPrincipalAccessById;
+
+function getFstCriticalStore(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('GetFstCriticalStore', inputVars, inputOpts);
+}
+exports.getFstCriticalStore = getFstCriticalStore;
+
+function getFstCommandReceipt(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('GetFstCommandReceipt', inputVars, inputOpts);
+}
+exports.getFstCommandReceipt = getFstCommandReceipt;
 

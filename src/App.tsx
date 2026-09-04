@@ -28,9 +28,11 @@ import { useAppStore } from '@/hooks/useAppStore'
 import { restoreDailyBackup } from '@/lib/backup'
 import { BULK_BLOCKED_MESSAGE } from '@/lib/cloud/bulkStoreOverwrite'
 import { buildProcurementPageProps } from '@/lib/app/procurementProps'
+import { isG1WebAuthoritativePath } from '@/lib/warehouse/g1ServerClient'
 import { buildWarehousePageProps } from '@/lib/app/warehouseProps'
 import { isSqlConnectPersistence } from '@/lib/sqlconnect/config'
 import type { SaveDraftInput } from '@/lib/warehouse/documents'
+import type { WarehouseDocument } from '@/lib/warehouse/types'
 import { runExport } from '@/lib/export'
 import {
   employeeIdForRow,
@@ -303,7 +305,16 @@ export default function App() {
     onRemoveLocation: app.removeWarehouseLocation,
     onAddMovement: app.addStockMovement,
     onDeleteMovement: app.deleteStockMovement,
-    onPostDocument: app.postWarehouseDoc,
+    onPostDocument: async (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => {
+      if (isG1WebAuthoritativePath() && (doc.type === 'receipt' || doc.type === 'issue')) {
+        const idempotencyKey =
+          typeof doc.idempotencyKey === 'string' && doc.idempotencyKey.trim()
+            ? doc.idempotencyKey.trim()
+            : `g1-ui-${crypto.randomUUID()}`
+        return app.postWarehouseDocAuthoritative({ ...doc, type: doc.type, idempotencyKey })
+      }
+      return app.postWarehouseDoc(doc)
+    },
     onPostTransfer: app.postWarehouseTransfer,
     onCancelDocument: (documentId: string, args?: { reason?: string }) =>
       app.cancelWarehouseDocument(documentId, {

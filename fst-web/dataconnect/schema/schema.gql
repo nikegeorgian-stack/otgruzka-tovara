@@ -113,3 +113,54 @@ type QcFinishedGoodsLot @table(key: ["id"]) {
   updatedAt: Timestamp! @default(expr: "request.time")
   updatedByUid: String
 }
+
+# ---------------------------------------------------------------------------
+# PHASE G1 — server-authoritative operational data (outside FstStore.payloadJson)
+# Client UpdateFstStore cannot forge these. Written only via Admin SDK / api/fst.
+# ---------------------------------------------------------------------------
+
+"""Trusted principal capabilities (Firebase UID + store). Role in FstStore.payloadJson is NOT proof."""
+type FstPrincipalAccess @table(key: ["id"]) {
+  id: String!
+  firebaseUid: String!
+  storeId: String!
+  roleId: String!
+  """JSON: capability flags (canPostWarehouseDocument, canViewWarehouse, …)"""
+  capabilitiesJson: String!
+  active: Boolean! @default(value: true)
+  revision: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdByUid: String!
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+  revokedAt: Timestamp
+  revokedByUid: String
+  revokeReason: String
+}
+
+"""
+Server-only critical operational snapshot (hybrid transition model).
+Allowed domains only: warehouse (+ future production roots via typed commands).
+Own revision; client connector has NO access.
+"""
+type FstCriticalStore @table(key: ["id"]) {
+  id: String!
+  revision: Int! @default(value: 1)
+  """JSON: { schemaVersion, domains: { warehouse: WarehouseStore }, … }"""
+  payloadJson: String!
+  fingerprint: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+}
+
+"""Idempotent command receipt for server gateway (all-or-nothing apply)."""
+type FstCommandReceipt @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  commandType: String!
+  actorUid: String!
+  """JSON result payload returned to client"""
+  resultJson: String!
+  criticalRevisionAfter: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+}

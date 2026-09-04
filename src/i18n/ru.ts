@@ -5694,6 +5694,11 @@ export const ru: Dict = {
   'warehouse.doc.errUnpostForbidden': 'Отменить проведение может только системный администратор.',
   'warehouse.doc.errUnpostRemoved':
     'Снятие проведения удалено. Используйте сторно (отмену) проведённого документа.',
+  'warehouse.g1.errUseAuthoritativePost':
+    'На веб-версии проведение документа идёт через серверный G1 gateway. Обновите страницу или повторите действие.',
+  'warehouse.g1.errUnsupportedType':
+    'Серверное проведение G1 пока поддерживает только приход и расход.',
+  'warehouse.g1.errServer': 'Серверное проведение склада недоступно. Повторите позже.',
   'warehouse.doc.errPostedImmutable':
     'Проведённый или отменённый документ нельзя редактировать. Исправьте через сторно или корректирующий документ.',
   'warehouse.doc.errBareMovementBlocked':

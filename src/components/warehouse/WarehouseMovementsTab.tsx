@@ -646,8 +646,8 @@ export function WarehouseMovementsTab({
                 setDocType(null)
                 setDocDirty(false)
               }}
-              onPost={(doc) => {
-                const result = onPostDocument(doc)
+              onPost={async (doc) => {
+                const result = await Promise.resolve(onPostDocument(doc))
                 if (result.ok) {
                   setDocType(null)
                   setDocDirty(false)
