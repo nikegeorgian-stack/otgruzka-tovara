@@ -1,8 +1,10 @@
 import { verifyBearerToken } from './_qcAuth.mjs'
-import { jsonError, jsonOk, readJsonBody } from './_qcHttp.mjs'
+import { jsonError, jsonOk, readJsonBody, rejectCrossOriginBrowser } from './_qcHttp.mjs'
 import { releaseLot } from './_qcService.mjs'
 
 export default async function handler(req, res) {
+  if (rejectCrossOriginBrowser(req, res)) return
+
   if (req.method !== 'POST') {
     jsonError(res, 405, 'method_not_allowed')
     return

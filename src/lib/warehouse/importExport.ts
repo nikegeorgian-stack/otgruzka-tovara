@@ -1,5 +1,10 @@
-import type { WorkSheet } from 'xlsx'
-import { loadXlsx } from '@/lib/lazy/xlsx'
+import {
+  downloadXlsxBuffer,
+  isExcelAdapterError,
+  loadWorkbookFromFile,
+  writeAoAWorkbook,
+  type SheetView,
+} from '@/lib/excel/workbookAdapter'
 import { saveWarehouseDocumentDraft } from './documents'
 import { nextDocumentNumber } from './docNumbering'
 import { warehouseIdempotencyKey } from './stockSafety'
@@ -18,7 +23,13 @@ export type ImportResult = {
   draftDocumentIds?: string[]
 }
 
-export type WarehouseImportErrorCode = 'emptyWorkbook' | 'noData' | 'readFailed'
+export type WarehouseImportErrorCode =
+  | 'emptyWorkbook'
+  | 'noData'
+  | 'readFailed'
+  | 'unsupportedFile'
+  | 'fileTooLarge'
+  | 'limitsExceeded'
 
 export function warehouseImportError(code: WarehouseImportErrorCode): Error {
   const err = new Error(code)
@@ -28,6 +39,24 @@ export function warehouseImportError(code: WarehouseImportErrorCode): Error {
 
 export function isWarehouseImportError(err: unknown): err is Error & { code: WarehouseImportErrorCode } {
   return err instanceof Error && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+}
+
+function mapAdapterError(err: unknown): Error {
+  if (!isExcelAdapterError(err)) {
+    return warehouseImportError('readFailed')
+  }
+  switch (err.code) {
+    case 'unsupported_extension':
+      return warehouseImportError('unsupportedFile')
+    case 'file_too_large':
+      return warehouseImportError('fileTooLarge')
+    case 'empty_workbook':
+      return warehouseImportError('emptyWorkbook')
+    case 'limits_exceeded':
+      return warehouseImportError('limitsExceeded')
+    default:
+      return warehouseImportError('readFailed')
+  }
 }
 
 function normName(s: string): string {
@@ -53,17 +82,13 @@ function isCategoryHeader(name: string, row: unknown[]): boolean {
 }
 
 function parseSheetMovements(
-  xlsx: Awaited<ReturnType<typeof loadXlsx>>,
-  ws: WorkSheet,
+  sheet: SheetView,
   sheetName: string,
   items: WarehouseItem[],
   warehouseId: string,
   warnings: string[],
 ): Omit<StockMovement, 'id' | 'createdAt'>[] {
-  const data = xlsx.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    defval: null,
-  })
+  const data = sheet.toAoA()
   if (data.length < 5) return []
 
   const headerRow = data[1] ?? data[2]
@@ -71,10 +96,10 @@ function parseSheetMovements(
   if (headerRow) {
     for (let c = 3; c < headerRow.length; c++) {
       const v = headerRow[c]
-      if (v != null && typeof v === 'object' && (v as unknown) instanceof Date) {
+      if (v != null && v instanceof Date) {
         dateCols.push({
           col: c,
-          date: (v as Date).toISOString().slice(0, 10),
+          date: v.toISOString().slice(0, 10),
         })
       }
     }
@@ -140,15 +165,13 @@ export async function importWarehouseFromExcel(
   store: WarehouseStore,
   warehouseId?: string,
 ): Promise<{ store: WarehouseStore; result: ImportResult }> {
-  const XLSX = await loadXlsx()
-  let wb: import('xlsx').WorkBook
+  let wb
   try {
-    const buf = await file.arrayBuffer()
-    wb = XLSX.read(buf, { type: 'array', cellDates: true })
-  } catch {
-    throw warehouseImportError('readFailed')
+    wb = await loadWorkbookFromFile(file)
+  } catch (err) {
+    throw mapAdapterError(err)
   }
-  if (!wb.SheetNames.length) {
+  if (!wb.sheetNames.length) {
     throw warehouseImportError('emptyWorkbook')
   }
   const whId = warehouseId ?? store.locations[0]?.id ?? ''
@@ -156,11 +179,11 @@ export async function importWarehouseFromExcel(
   const pending: Omit<StockMovement, 'id' | 'createdAt'>[] = []
   let sheetsProcessed = 0
 
-  for (const name of wb.SheetNames) {
+  for (const name of wb.sheetNames) {
     if (/лист5|расход/i.test(name) && !/приход/i.test(name)) continue
-    const ws = wb.Sheets[name]
-    if (!ws) continue
-    const chunk = parseSheetMovements(XLSX, ws, name, store.items, whId, warnings)
+    const sheet = wb.sheet(name)
+    if (!sheet) continue
+    const chunk = parseSheetMovements(sheet, name, store.items, whId, warnings)
     if (chunk.length) {
       pending.push(...chunk)
       sheetsProcessed++
@@ -283,12 +306,19 @@ export function applyImportPendingAsDraftReceipts(
   }
 }
 
+async function downloadAoA(
+  sheets: { name: string; rows: (string | number | boolean | null | undefined | Date)[][] }[],
+  filename: string,
+): Promise<void> {
+  const buffer = await writeAoAWorkbook(sheets)
+  downloadXlsxBuffer(buffer, filename)
+}
+
 export async function exportWarehouseBalancesExcel(
   store: WarehouseStore,
   balances: Map<string, import('./types').ItemBalance>,
   warehouseId?: string,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const loc = warehouseId
     ? store.locations.find((l) => l.id === warehouseId)?.name
     : 'Все склады'
@@ -315,10 +345,10 @@ export async function exportWarehouseBalancesExcel(
     ])
   }
 
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, (loc ?? 'Остатки').slice(0, 31))
-  XLSX.writeFile(wb, `fibercell-sklad-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  await downloadAoA(
+    [{ name: (loc ?? 'Остатки').slice(0, 31), rows }],
+    `fibercell-sklad-${new Date().toISOString().slice(0, 10)}.xlsx`,
+  )
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -327,7 +357,6 @@ export async function exportWarehouseReorderExcel(
   store: WarehouseStore,
   rows: { item: WarehouseItem; available: number; minStock: number; suggested: number }[],
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
   const locMap = new Map(store.locations.map((l) => [l.id, l.name]))
   const aoa: (string | number)[][] = [
@@ -344,9 +373,7 @@ export async function exportWarehouseReorderExcel(
       r.suggested,
     ])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'К пополнению')
-  XLSX.writeFile(wb, `fibercell-popolnenie-${today()}.xlsx`)
+  await downloadAoA([{ name: 'К пополнению', rows: aoa }], `fibercell-popolnenie-${today()}.xlsx`)
 }
 
 export async function exportWarehouseTurnoverExcel(
@@ -354,7 +381,6 @@ export async function exportWarehouseTurnoverExcel(
   rows: { itemId: string; receipt: number; issue: number; net: number }[],
   period: { from: string; to: string },
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const itemMap = new Map(store.items.map((i) => [i.id, i]))
   const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
   const aoa: (string | number)[][] = [
@@ -372,21 +398,16 @@ export async function exportWarehouseTurnoverExcel(
       r.net,
     ])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Обороты')
-  XLSX.writeFile(wb, `fibercell-oboroty-${today()}.xlsx`)
+  await downloadAoA([{ name: 'Обороты', rows: aoa }], `fibercell-oboroty-${today()}.xlsx`)
 }
 
 export async function exportWarehouseAuditExcel(
   entries: { at: string; action: string; detail: string }[],
   labelFor: (action: string) => string,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const aoa: (string | number)[][] = [['Когда', 'Действие', 'Детали']]
   for (const e of entries) {
     aoa.push([e.at.slice(0, 16).replace('T', ' '), labelFor(e.action), e.detail])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Журнал')
-  XLSX.writeFile(wb, `fibercell-audit-${today()}.xlsx`)
+  await downloadAoA([{ name: 'Журнал', rows: aoa }], `fibercell-audit-${today()}.xlsx`)
 }

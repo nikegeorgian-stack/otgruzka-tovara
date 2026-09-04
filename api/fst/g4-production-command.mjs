@@ -4,11 +4,13 @@
  * Rejects arbitrary payloadJson / warehousePatch / fullStore.
  */
 import { verifyBearerToken } from './_qcAuth.mjs'
-import { jsonError, jsonOk, readJsonBody } from './_qcHttp.mjs'
+import { jsonError, jsonOk, readJsonBody, rejectCrossOriginBrowser } from './_qcHttp.mjs'
 import { executeG4Command } from './_g4PackagingService.mjs'
 import { G2_MAX_BODY_BYTES } from './_g1CriticalHelpers.mjs'
 
 export default async function handler(req, res) {
+  if (rejectCrossOriginBrowser(req, res)) return
+
   if (req.method !== 'POST') {
     jsonError(res, 405, 'method_not_allowed')
     return

@@ -1,11 +1,11 @@
 /**
- * PHASE G2 — unified typed warehouse command gateway.
- * Body: { storeId, idempotencyKey, commandType, command }
- * Rejects arbitrary payloadJson / warehousePatch / fullStore.
+ * PHASE R1 — freeze/resume command gateway for critical domains.
+ * Body: { storeId, idempotencyKey, commandType, command: { reason } }
+ * Path: /api/fst/g1-domain-freeze
  */
 import { verifyBearerToken } from './_qcAuth.mjs'
 import { jsonError, jsonOk, readJsonBody, rejectCrossOriginBrowser } from './_qcHttp.mjs'
-import { executeG2Command } from './_g2WarehouseService.mjs'
+import { executeDomainFreezeCommand } from './_g1DomainFreeze.mjs'
 import { G2_MAX_BODY_BYTES } from './_g1CriticalHelpers.mjs'
 
 export default async function handler(req, res) {
@@ -36,16 +36,16 @@ export default async function handler(req, res) {
     return
   }
 
-  const result = await executeG2Command({
+  const result = await executeDomainFreezeCommand({
     actor: { uid: auth.uid, email: auth.email, claims: auth.claims },
     storeId: body.storeId,
     idempotencyKey: body.idempotencyKey,
     commandType: body.commandType,
     command: body.command,
-    // Explicitly pass-through forged fields so service can reject them:
     payloadJson: body.payloadJson,
     warehousePatch: body.warehousePatch,
     fullStore: body.fullStore,
+    roleId: body.roleId,
   })
 
   if (!result.ok) {

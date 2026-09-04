@@ -1,7 +1,8 @@
 /**
- * PHASE G1/G2/G3.1/G4/G5 — shared critical-store helpers (server .mjs + tests).
+ * PHASE G1/G2/G3.1/G4/G5/G6/R1 — shared critical-store helpers (server .mjs + tests).
  * Allowed domains only; unknown envelope/domain fields are preserved.
  * Domain activation is per-domain / feature, not bare revision.
+ * R1: operatingMode active|frozen on activated domains (freeze/resume).
  */
 
 export const G1_CRITICAL_SCHEMA_VERSION = 5
@@ -564,6 +565,201 @@ export function isProcurementDomainActive(payload) {
 
 export function markProcurementDomainActive(payload, actorUid, now = new Date().toISOString()) {
   return markNamedDomainActive(payload, 'procurement', actorUid, now)
+}
+
+/**
+ * PHASE R1 — freeze/resume keys for critical domains / features.
+ * Nested features live under domainMeta.production.features.
+ */
+export const DOMAIN_FREEZE_KEYS = Object.freeze([
+  'warehouse',
+  'production',
+  'packagingQc',
+  'masterData',
+  'salesPlanning',
+  'procurement',
+  'capacityPlanning',
+])
+
+const DOMAIN_FREEZE_FEATURE_KEYS = new Set(['packagingQc', 'capacityPlanning'])
+
+/** Shared principal capability for emergency freeze/resume (sysadmin always allowed with reason). */
+export const CRITICAL_DOMAIN_FREEZE_CAP = 'critical.domain.freeze'
+
+export function isDomainFreezeFeatureKey(key) {
+  return DOMAIN_FREEZE_FEATURE_KEYS.has(key)
+}
+
+/** Whether the domain/feature is activated (freeze only allowed when already active). */
+export function isDomainActiveForKey(payload, key, revision = 0) {
+  switch (key) {
+    case 'warehouse':
+      return isWarehouseDomainActive(payload, revision)
+    case 'production':
+      return isProductionDomainActive(payload, revision)
+    case 'packagingQc':
+      return isPackagingQcFeatureActive(payload)
+    case 'masterData':
+      return isMasterDataDomainActive(payload)
+    case 'salesPlanning':
+      return isSalesPlanningActive(payload)
+    case 'procurement':
+      return isProcurementDomainActive(payload)
+    case 'capacityPlanning':
+      return isCapacityPlanningFeatureActive(payload)
+    default:
+      return false
+  }
+}
+
+/** Read domainMeta slice for a DOMAIN_FREEZE_KEYS entry (top-level or feature). */
+export function getDomainMetaSlice(payload, key) {
+  const meta = payload?.domainMeta
+  if (!meta || typeof meta !== 'object') return null
+  if (DOMAIN_FREEZE_FEATURE_KEYS.has(key)) {
+    const feat = meta.production?.features?.[key]
+    return feat && typeof feat === 'object' ? feat : null
+  }
+  const slot = meta[key]
+  return slot && typeof slot === 'object' ? slot : null
+}
+
+/**
+ * Replace one domain/feature meta slice; sibling domains/features unchanged.
+ */
+export function setDomainOperatingMode(payload, key, nextSlice) {
+  if (!DOMAIN_FREEZE_KEYS.includes(key)) {
+    return payload
+  }
+  const baseMeta =
+    payload?.domainMeta && typeof payload.domainMeta === 'object'
+      ? { ...payload.domainMeta }
+      : emptyDomainMeta()
+
+  if (DOMAIN_FREEZE_FEATURE_KEYS.has(key)) {
+    const prevProd =
+      baseMeta.production && typeof baseMeta.production === 'object'
+        ? { ...baseMeta.production }
+        : { active: false, version: 0 }
+    const prevFeatures =
+      prevProd.features && typeof prevProd.features === 'object' ? { ...prevProd.features } : {}
+    prevFeatures[key] = { ...(nextSlice && typeof nextSlice === 'object' ? nextSlice : {}) }
+    baseMeta.production = { ...prevProd, features: prevFeatures }
+  } else {
+    baseMeta[key] = { ...(nextSlice && typeof nextSlice === 'object' ? nextSlice : {}) }
+  }
+
+  return { ...payload, domainMeta: baseMeta }
+}
+
+/**
+ * @returns {'inactive'|'active'|'frozen'}
+ * active:true + missing operatingMode → 'active'; not active → 'inactive' (not frozen).
+ */
+export function getDomainOperatingMode(payload, key, revision = 0) {
+  if (!DOMAIN_FREEZE_KEYS.includes(key)) return 'inactive'
+  if (!isDomainActiveForKey(payload, key, revision)) return 'inactive'
+  const slice = getDomainMetaSlice(payload, key)
+  if (slice?.operatingMode === 'frozen') return 'frozen'
+  return 'active'
+}
+
+export function isDomainFrozen(payload, key, revision = 0) {
+  return getDomainOperatingMode(payload, key, revision) === 'frozen'
+}
+
+/**
+ * Write gate: frozen → domain_frozen; inactive → domain_inactive; else ok.
+ */
+export function assertDomainWritable(payload, key, revision = 0) {
+  const mode = getDomainOperatingMode(payload, key, revision)
+  if (mode === 'frozen') return { ok: false, error: 'domain_frozen', status: 409 }
+  if (mode === 'inactive') return { ok: false, error: 'domain_inactive', status: 409 }
+  return { ok: true }
+}
+
+/**
+ * Freeze an active domain. Idempotent if already frozen. Rejects inactive.
+ * Preserves activatedAt/activatedBy; sets frozenAt/frozenBy/freezeReason.
+ */
+export function applyDomainFreeze(payload, key, { actorUid, reason, now } = {}) {
+  if (!DOMAIN_FREEZE_KEYS.includes(key)) {
+    return { ok: false, error: 'unknown_domain', status: 400 }
+  }
+  const mode = getDomainOperatingMode(payload, key)
+  if (mode === 'inactive') {
+    return { ok: false, error: 'domain_inactive', status: 409 }
+  }
+  const slice = getDomainMetaSlice(payload, key) ?? { active: true, version: 1 }
+  if (mode === 'frozen') {
+    return {
+      ok: true,
+      payload,
+      domainKey: key,
+      operatingMode: 'frozen',
+      frozen: false,
+      idempotent: true,
+    }
+  }
+  const ts = now ?? new Date().toISOString()
+  const nextSlice = {
+    ...slice,
+    active: true,
+    operatingMode: 'frozen',
+    frozenAt: ts,
+    frozenBy: actorUid,
+    freezeReason: String(reason ?? '').trim() || undefined,
+  }
+  return {
+    ok: true,
+    payload: setDomainOperatingMode(payload, key, nextSlice),
+    domainKey: key,
+    operatingMode: 'frozen',
+    frozen: true,
+    idempotent: false,
+  }
+}
+
+/**
+ * Resume a frozen domain to active. Idempotent if already active (not frozen).
+ * Preserves activatedAt/activatedBy; sets resumedAt/resumedBy; clears freeze mode.
+ */
+export function applyDomainResume(payload, key, { actorUid, reason, now } = {}) {
+  if (!DOMAIN_FREEZE_KEYS.includes(key)) {
+    return { ok: false, error: 'unknown_domain', status: 400 }
+  }
+  const mode = getDomainOperatingMode(payload, key)
+  if (mode === 'inactive') {
+    return { ok: false, error: 'domain_inactive', status: 409 }
+  }
+  const slice = getDomainMetaSlice(payload, key) ?? { active: true, version: 1 }
+  if (mode === 'active') {
+    return {
+      ok: true,
+      payload,
+      domainKey: key,
+      operatingMode: 'active',
+      resumed: false,
+      idempotent: true,
+    }
+  }
+  const ts = now ?? new Date().toISOString()
+  const nextSlice = {
+    ...slice,
+    active: true,
+    operatingMode: 'active',
+    resumedAt: ts,
+    resumedBy: actorUid,
+    resumeReason: String(reason ?? '').trim() || undefined,
+  }
+  return {
+    ok: true,
+    payload: setDomainOperatingMode(payload, key, nextSlice),
+    domainKey: key,
+    operatingMode: 'active',
+    resumed: true,
+    idempotent: false,
+  }
 }
 
 export function parseCriticalPayload(payloadJson, { revision = 0 } = {}) {

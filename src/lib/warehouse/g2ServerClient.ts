@@ -3,6 +3,7 @@
  */
 import { getFirebaseAuth, isFirebaseConfigured } from '@/lib/cloud/firebase'
 import { fstApiUrl } from '@/lib/cloud/fstApiOrigin'
+import { fstCommandErrorMessage } from '@/lib/cloud/fstCommandErrors'
 import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import {
@@ -62,10 +63,14 @@ async function g2Fetch<T>(body: Record<string, unknown>): Promise<G2ServerResult
     if (res.ok && payload && payload.error === undefined) {
       return { ok: true, data: payload as T }
     }
+    const err = payload?.error || String(res.status)
     return {
       ok: false,
-      error: payload?.error || String(res.status),
-      message: payload?.message || payload?.error || 'G2 server error',
+      error: err,
+      message: fstCommandErrorMessage(
+        err,
+        payload?.message || payload?.error || 'G2 server error',
+      ),
     }
   } catch {
     return { ok: false, error: 'network', message: 'G2 server unavailable' }

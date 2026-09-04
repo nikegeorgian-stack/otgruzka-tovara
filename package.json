@@ -90,8 +90,7 @@
     "jspdf": "^4.2.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -113,5 +112,15 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
+  },
+  "overrides": {
+    "brace-expansion@1": "1.1.18",
+    "brace-expansion@2": "2.1.4",
+    "fast-xml-parser": "5.11.1",
+    "websocket-driver": "0.7.5",
+    "dompurify": "3.4.14",
+    "protobufjs": "7.6.6",
+    "qs": "6.16.0",
+    "body-parser": "2.3.0"
   }
 }

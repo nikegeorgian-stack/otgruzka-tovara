@@ -1,3 +1,8 @@
+/**
+ * DEPRECATED: unused clone of src/lib/hr/registryImport.ts.
+ * Do not import/require the `xlsx` package here — SheetJS was removed from runtime.
+ * Prefer `@/lib/hr/registryImport` + `@/lib/excel/workbookAdapter` (.xlsx only).
+ */
 import crypto from 'node:crypto'
 
 // --- banks.ts (minimal) ---

@@ -1,5 +1,5 @@
+import { downloadXlsxBuffer, writeAoAWorkbook } from '@/lib/excel/workbookAdapter'
 import { exportLabels } from '@/lib/export/labels'
-import { loadXlsx } from '@/lib/lazy/xlsx'
 import { dayDateKey, daysInMonth, formatMonthTitle, parseMonthKey } from './dates'
 import { resolvePayrollAccrualRules } from './finance/payrollAccrualRules'
 import { calculateRowPay, isPayableInMonth } from './payroll'
@@ -64,21 +64,31 @@ function buildTimesheetSheet(
   return rows
 }
 
+async function downloadSheets(
+  sheets: { name: string; rows: (string | number)[][] }[],
+  filename: string,
+): Promise<void> {
+  const buffer = await writeAoAWorkbook(sheets)
+  downloadXlsxBuffer(buffer, filename)
+}
+
 export async function exportTimesheetExcel(
   store: AppStore,
   month: string,
   locale: Locale,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const labels = exportLabels(locale)
   const planRows = buildTimesheetSheet(store, month, 'plan', locale)
   const factRows = buildTimesheetSheet(store, month, 'fact', locale)
   if (!planRows.length) return
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(planRows), labels.sheetPlan)
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(factRows), labels.sheetFact)
-  XLSX.writeFile(wb, `fibercell-tabel-${month}.xlsx`)
+  await downloadSheets(
+    [
+      { name: labels.sheetPlan, rows: planRows },
+      { name: labels.sheetFact, rows: factRows },
+    ],
+    `fibercell-tabel-${month}.xlsx`,
+  )
 }
 
 export async function exportPayrollExcel(
@@ -86,7 +96,6 @@ export async function exportPayrollExcel(
   month: string,
   locale: Locale,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const sheet = store.months[month]
   if (!sheet) return
   const [y, m] = month.split('-').map(Number)
@@ -120,10 +129,10 @@ export async function exportPayrollExcel(
     ])
   }
 
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, formatMonthTitle(month, locale).slice(0, 31))
-  XLSX.writeFile(wb, `fibercell-pay-${month}.xlsx`)
+  await downloadSheets(
+    [{ name: formatMonthTitle(month, locale).slice(0, 31), rows }],
+    `fibercell-pay-${month}.xlsx`,
+  )
 }
 
 const STATEMENT_HEADERS: Record<Locale, string[]> = {
@@ -207,7 +216,6 @@ export async function exportPayrollStatementExcel(
   month: string,
   locale: Locale,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const stmt = monthStatement(store, month)
   if (!stmt.length) return
   const totals = statementTotals(stmt)
@@ -265,11 +273,10 @@ export async function exportPayrollStatementExcel(
     totals.remaining,
   ])
 
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  ws['!cols'] = STATEMENT_HEADERS[locale].map((h, i) => ({ wch: i < 2 ? 22 : Math.max(8, h.length + 1) }))
-  XLSX.utils.book_append_sheet(wb, ws, formatMonthTitle(month, locale).slice(0, 31))
-  XLSX.writeFile(wb, `fibercell-statement-${month}.xlsx`)
+  await downloadSheets(
+    [{ name: formatMonthTitle(month, locale).slice(0, 31), rows }],
+    `fibercell-statement-${month}.xlsx`,
+  )
 }
 
 export async function exportBrigadeReportExcel(
@@ -277,7 +284,6 @@ export async function exportBrigadeReportExcel(
   month: string,
   locale: Locale = store.settings.locale,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const labels = exportLabels(locale)
   const sheet = store.months[month]
   if (!sheet) return
@@ -307,7 +313,5 @@ export async function exportBrigadeReportExcel(
     rows.push([b, v.hours, Math.round(v.amount * 100) / 100])
   }
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'brigades')
-  XLSX.writeFile(wb, `fibercell-brigades-${month}.xlsx`)
+  await downloadSheets([{ name: 'brigades', rows }], `fibercell-brigades-${month}.xlsx`)
 }

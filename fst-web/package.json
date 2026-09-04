@@ -46,8 +46,7 @@
     "jspdf": "^4.2.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.2",

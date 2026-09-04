@@ -273,7 +273,8 @@ describe('meals access', () => {
   const access = createDefaultAccessStore()
 
   it('gives meals to employees and not to the timeclock kiosk', () => {
-    expect(viewsForUser(access, user('employee'))).toEqual(['tasks', 'my', 'meals'])
+    // Baseline ACL: employee personal cabinet includes protocols (see roles.ts / permissions.ts).
+    expect(viewsForUser(access, user('employee'))).toEqual(['tasks', 'my', 'meals', 'protocols'])
     expect(viewsForUser(access, user('timeclock'))).toEqual(['timeclock'])
     expect(viewsForUser(access, user('cook'))).toEqual(['tasks', 'meals', 'my'])
     expect(viewsForUser(access, user('hr'))).toContain('meals')

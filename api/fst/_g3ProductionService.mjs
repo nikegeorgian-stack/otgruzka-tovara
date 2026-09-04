@@ -20,6 +20,7 @@ import {
   isMasterDataDomainActive,
   isPeriodClosed,
   isProductionDomainActive,
+  isDomainFrozen,
   markPackagingQcFeatureActive,
   markProductionDomainActive,
   markWarehouseDomainActive,
@@ -2332,6 +2333,15 @@ export async function executeG3Command(input) {
     !productionActive
   ) {
     return fail('production_domain_inactive', 409)
+  }
+
+  // PHASE R1 — frozen production blocks writes; read/preview still allowed
+  if (
+    commandType !== 'production.read' &&
+    commandType !== 'production.order.packagingBomSnapshot.preview' &&
+    isDomainFrozen(critical.payload, 'production', critical.revision)
+  ) {
+    return fail('domain_frozen', 409)
   }
 
   if (commandType === 'production.domain.activate') {

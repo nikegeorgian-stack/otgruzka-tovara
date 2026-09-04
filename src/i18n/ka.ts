@@ -4186,10 +4186,11 @@ export const ka: Dict = {
   'hr.settings.defaultDept': 'ზოგადი',
   'hr.registryImport.title': 'თანამშრომელთა რეესტრის იმპორტი',
   'hr.registryImport.hint':
-    'ატვირთეთ Excel «РЕЕСТР СОТРУДНИКОВ». ბარათებში ჩაიწერება: სახელი, ტაბელი, პოზიცია, ტელ., email, IBAN, ხელფასი, ხელშეკრულების თარიღები და ნომრები, ID/ხელშ. ბმულები. გათავისუფლებულები — სტატუსი «გათავისუფლებული».',
-  'hr.registryImport.chooseFile': 'Excel/ODS ფაილის არჩევა',
+    'ატვირთეთ Excel (.xlsx) «РЕЕСТР СОТРУДНИКОВ». ბარათებში ჩაიწერება: სახელი, ტაბელი, პოზიცია, ტელ., email, IBAN, ხელფასი, ხელშეკრულების თარიღები და ნომრები, ID/ხელშ. ბმულები. გათავისუფლებულები — სტატუსი «გათავისუფლებული».',
+  'hr.registryImport.chooseFile': 'Excel (.xlsx) ფაილის არჩევა',
   'hr.registryImport.busy': 'ფაილის წაკითხვა…',
-  'hr.registryImport.error': 'ფაილის წაკითხვა ვერ მოხერხდა. შეამოწმეთ რეესტრის ფორმატი.',
+  'hr.registryImport.error':
+    'ფაილის წაკითხვა ვერ მოხერხდა. მხოლოდ .xlsx. თუ გაქვთ .xls ან .ods — გახსენით Excel-ში და შეინახეთ როგორც «Excel Workbook (.xlsx)».',
   'hr.registryImport.confirm':
     'რეესტრში {count} ადამიანი, ბაზაში {existing}. განახლდეს ბარათები რეესტრის მიხედვით?',
   'hr.registryImport.confirmByName':
@@ -6294,7 +6295,8 @@ export const ka: Dict = {
   'warehouse.import.items': 'поз.',
   'warehouse.import.sheets': 'лист.',
   'warehouse.import.confirm': 'Импортировать операции из Excel? Данные добавятся к текущему журналу.',
-  'warehouse.import.invalidFile': 'Выберите файл Excel (.xlsx или .xls).',
+  'warehouse.import.invalidFile':
+    'საჭიროა მხოლოდ .xlsx. .xls და .ods არ არის მხარდაჭერილი — გახსენით Excel-ში და შეინახეთ როგორც «Excel Workbook (.xlsx)».',
   'warehouse.import.parseError': 'Не удалось прочитать файл. Проверьте формат «Приходы + Списание».',
   'warehouse.import.emptyWorkbook': 'Файл пуст или не содержит листов.',
   'warehouse.import.noData': 'В файле не найдено операций для импорта.',
@@ -6510,6 +6512,17 @@ export const ka: Dict = {
 
   'maintenance.announce5min': 'განახლება 5 წუთში',
   'maintenance.bannerTitle': 'დაგეგმილი განახლება — პროგრამაში ნუ იმუშავებთ',
+  'criticalDomain.frozen.banner': 'კონტური დროებით მხოლოდ კითხვის რეჟიმშია',
+  'criticalDomain.frozen.hint': 'ჩაწერა შეჩერებულია, სანამ ადმინისტრატორი დომენს არ აღადგენს.',
+  'criticalDomain.frozen.domains': 'გაყინულია',
+  'criticalDomain.frozen.warehouse': 'საწყობი',
+  'criticalDomain.frozen.production': 'წარმოება',
+  'criticalDomain.frozen.packagingQc': 'შეფუთვა / ხარისხი',
+  'criticalDomain.frozen.masterData': 'საცნობარო',
+  'criticalDomain.frozen.salesPlanning': 'გაყიდვები / დაგეგმვა',
+  'criticalDomain.frozen.procurement': 'შესყიდვები',
+  'criticalDomain.frozen.capacityPlanning': 'სიმძლავრეები',
+
   'maintenance.bannerCountdown': 'განახლებამდე: {m}:{s}',
   'maintenance.by': 'გამოაცხადა',
   'maintenance.clear': 'განცხადების მოხსნა',

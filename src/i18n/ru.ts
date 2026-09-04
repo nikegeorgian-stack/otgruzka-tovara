@@ -4217,10 +4217,11 @@ export const ru: Dict = {
   'hr.settings.defaultDept': 'Общий',
   'hr.registryImport.title': 'Импорт реестра сотрудников',
   'hr.registryImport.hint':
-    'Загрузите Excel или ODS «РЕЕСТР СОТРУДНИКОВ». В карточки попадут: ФИО, табель, должность, телефон, email, IBAN (счёт), ЗП, даты договора, № договора и реестра труда, ссылки на ID и договоры (Google Drive). Уволенные — статус «Уволен» с датой.',
-  'hr.registryImport.chooseFile': 'Выбрать файл реестра',
+    'Загрузите Excel (.xlsx) «РЕЕСТР СОТРУДНИКОВ». В карточки попадут: ФИО, табель, должность, телефон, email, IBAN (счёт), ЗП, даты договора, № договора и реестра труда, ссылки на ID и договоры (Google Drive). Уволенные — статус «Уволен» с датой.',
+  'hr.registryImport.chooseFile': 'Выбрать файл реестра (.xlsx)',
   'hr.registryImport.busy': 'Чтение файла…',
-  'hr.registryImport.error': 'Не удалось прочитать файл. Проверьте формат реестра.',
+  'hr.registryImport.error':
+    'Не удалось прочитать файл. Поддерживается только .xlsx. Если у вас .xls или .ods — откройте в Excel и сохраните как «Книга Excel (.xlsx)».',
   'hr.registryImport.confirm':
     'В реестре {count} человек, в базе {existing}. Обновить карточки по реестру?',
   'hr.registryImport.confirmByName':
@@ -6373,7 +6374,8 @@ export const ru: Dict = {
   'warehouse.import.sheets': 'листов',
   'warehouse.import.confirm':
     'Импорт создаст черновики прихода (остатки не изменятся). Продолжить?',
-  'warehouse.import.invalidFile': 'Выберите файл Excel (.xlsx или .xls).',
+  'warehouse.import.invalidFile':
+    'Нужен файл .xlsx. Форматы .xls и .ods не поддерживаются — откройте файл в Excel и сохраните как «Книга Excel (.xlsx)».',
   'warehouse.import.parseError': 'Не удалось прочитать файл. Проверьте формат «Приходы + Списание».',
   'warehouse.import.emptyWorkbook': 'Файл пуст или не содержит листов.',
   'warehouse.import.noData': 'В файле не найдено операций для импорта.',
@@ -6595,6 +6597,17 @@ export const ru: Dict = {
 
   'maintenance.announce5min': 'Обновление через 5 мин',
   'maintenance.bannerTitle': 'Запланированное обновление — не работайте в программе',
+  'criticalDomain.frozen.banner': 'Контур временно доступен только для чтения',
+  'criticalDomain.frozen.hint': 'Запись приостановлена, пока администратор не возобновит домен.',
+  'criticalDomain.frozen.domains': 'Заморожено',
+  'criticalDomain.frozen.warehouse': 'Склад',
+  'criticalDomain.frozen.production': 'Производство',
+  'criticalDomain.frozen.packagingQc': 'Фасовка / ОТК',
+  'criticalDomain.frozen.masterData': 'НСИ',
+  'criticalDomain.frozen.salesPlanning': 'Продажи / планирование',
+  'criticalDomain.frozen.procurement': 'Закупки',
+  'criticalDomain.frozen.capacityPlanning': 'Мощности',
+
   'maintenance.bannerCountdown': 'До обновления: {m}:{s}',
   'maintenance.by': 'Объявил',
   'maintenance.clear': 'Снять объявление',

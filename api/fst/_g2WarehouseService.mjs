@@ -27,6 +27,7 @@ import {
   isMasterDataDomainActive,
   isSalesPlanningActive,
   isProcurementDomainActive,
+  isDomainFrozen,
   markWarehouseDomainActive,
   monthKeyFromDate,
   nextReversalNumber,
@@ -679,6 +680,11 @@ export async function executeG2Command(input) {
       embedded.criticalRevision ?? critical.revision,
     )
     return ok({ ...embedded.result, idempotent: true, recoveredFromEmbeddedReceipt: true })
+  }
+
+  // PHASE R1 — frozen warehouse: overlay still readable via get; all writes denied
+  if (isDomainFrozen(critical.payload, 'warehouse', critical.revision)) {
+    return fail('domain_frozen', 409)
   }
 
   let warehouse = structuredClone(critical.payload.domains.warehouse)

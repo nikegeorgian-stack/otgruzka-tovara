@@ -30,6 +30,7 @@ import {
   isProductionDomainActive,
   isMasterDataDomainActive,
   isSalesPlanningActive,
+  isDomainFrozen,
   markPackagingQcFeatureActive,
   nextReversalNumber,
   nextServerDocumentNumber,
@@ -2549,6 +2550,11 @@ export async function executeG4Command(input) {
       domainMeta: critical.payload.domainMeta,
       source: packagingActive ? 'fst_critical_store' : 'legacy_or_inactive',
     })
+  }
+
+  // PHASE R1 — frozen packagingQc blocks writes; read still allowed above
+  if (isDomainFrozen(critical.payload, 'packagingQc', critical.revision)) {
+    return fail('domain_frozen', 409)
   }
 
   // Packaging/QC/shipment truth is only authoritative once the feature was explicitly

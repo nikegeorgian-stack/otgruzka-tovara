@@ -47,6 +47,12 @@ body {
   background: var(--color-paper);
 }
 
+/* PHASE R1 — opt-in write controls when any critical domain is frozen */
+body[data-fst-critical-frozen='1'] [data-fst-critical-write] {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

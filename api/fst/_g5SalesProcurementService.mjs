@@ -48,6 +48,7 @@ import {
   isProductionDomainActive,
   isSalesPlanningActive,
   isWarehouseDomainActive,
+  isDomainFrozen,
   markMasterDataDomainActive,
   markProcurementDomainActive,
   markSalesPlanningActive,
@@ -3233,6 +3234,20 @@ export async function executeG5Command(input) {
   const procActive = isProcurementDomainActive(critical.payload)
   const whActive = isWarehouseDomainActive(critical.payload, critical.revision)
 
+  // PHASE R1 — frozen domains reject writes (activate included; already-active+frozen)
+  if (commandType.startsWith('masterdata.') && isDomainFrozen(critical.payload, 'masterData')) {
+    return fail('domain_frozen', 409)
+  }
+  if (
+    (commandType.startsWith('sales.') || commandType.startsWith('planning.')) &&
+    isDomainFrozen(critical.payload, 'salesPlanning')
+  ) {
+    return fail('domain_frozen', 409)
+  }
+  if (commandType.startsWith('procurement.') && isDomainFrozen(critical.payload, 'procurement')) {
+    return fail('domain_frozen', 409)
+  }
+
   if (perm.emergency) {
     // Audit emergency use on the primary domain being mutated
     const note = `emergency:${perm.emergencyReason}`
@@ -3367,6 +3382,14 @@ export async function executeG5Command(input) {
     !whActive
   ) {
     return fail('warehouse_domain_inactive', 409)
+  }
+  if (
+    (commandType === 'procurement.receipt.post' ||
+      commandType === 'sales.shipment.post' ||
+      commandType === 'sales.shipment.cancel') &&
+    isDomainFrozen(critical.payload, 'warehouse', critical.revision)
+  ) {
+    return fail('domain_frozen', 409)
   }
 
   let applied

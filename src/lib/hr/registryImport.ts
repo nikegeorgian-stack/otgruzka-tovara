@@ -1,4 +1,4 @@
-import type { WorkSheet } from 'xlsx'
+import type { SheetView, WorkbookView } from '@/lib/excel/workbookAdapter'
 import { detectBankFromIban, normalizeIban } from './banks'
 import { createNewEmployee } from './newEmployee'
 import { applyHrStatus } from './sync'
@@ -106,6 +106,10 @@ function normalizeName(name: string): string {
 
 function excelDate(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return undefined
+    return v.toISOString().slice(0, 10)
+  }
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10)
   if (typeof v !== 'number') return undefined
   const epoch = Math.round((v - 25569) * 86400 * 1000)
@@ -296,13 +300,12 @@ function isTraineeContract(c: RegistryContract): boolean {
 }
 
 function parseContinuationContract(
-  ws: WorkSheet,
+  ws: SheetView,
   r: number,
-  XLSX: typeof import('xlsx'),
   positionKa: string,
   positionRu: string,
 ): RegistryContract {
-  const contractCell = cellVal(ws, r, 5, XLSX)
+  const contractCell = cellVal(ws, r, 5)
   return {
     idNumber: '',
     address: '',
@@ -310,14 +313,14 @@ function parseContinuationContract(
     position: positionRu.replace(/\n/g, ' ').trim(),
     bankAccount: '',
     phone: '',
-    salary: parseSalary(cellVal(ws, r, 4, XLSX).v),
+    salary: parseSalary(cellVal(ws, r, 4).v),
     contractNumber: String(contractCell.v || '').trim(),
     contractLink: contractCell.link,
-    hireDate: excelDate(cellVal(ws, r, 6, XLSX).v),
-    term: String(cellVal(ws, r, 7, XLSX).v || '').trim(),
-    endDate: excelDate(cellVal(ws, r, 8, XLSX).v),
-    bonusThirteenth: String(cellVal(ws, r, 9, XLSX).v || '').trim(),
-    laborRegistry: String(cellVal(ws, r, 10, XLSX).v || '').trim(),
+    hireDate: excelDate(cellVal(ws, r, 6).v),
+    term: String(cellVal(ws, r, 7).v || '').trim(),
+    endDate: excelDate(cellVal(ws, r, 8).v),
+    bonusThirteenth: String(cellVal(ws, r, 9).v || '').trim(),
+    laborRegistry: String(cellVal(ws, r, 10).v || '').trim(),
   }
 }
 
@@ -335,48 +338,40 @@ function contractHasPayload(contract: RegistryContract): boolean {
   )
 }
 
-/** Лист с реестром: «Лист1» или самый большой по строкам. */
-export function pickRegistryWorksheet(
-  wb: { SheetNames: string[]; Sheets: Record<string, WorkSheet | undefined> },
-  XLSX: typeof import('xlsx'),
-): WorkSheet | null {
-  const preferred = wb.SheetNames.find((n) => /^лист1$/i.test(n) || /^sheet1$/i.test(n))
-  if (preferred && wb.Sheets[preferred]) return wb.Sheets[preferred]!
+/** Лист с реестром: «Лист1» / Sheet1 или самый большой по строкам. */
+export function pickRegistryWorksheet(wb: WorkbookView): SheetView | null {
+  const preferred = wb.sheetNames.find((n) => /^лист1$/i.test(n) || /^sheet1$/i.test(n))
+  if (preferred) {
+    const sheet = wb.sheet(preferred)
+    if (sheet) return sheet
+  }
 
-  let bestName: string | null = null
+  let best: SheetView | null = null
   let bestRows = 0
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name]
-    const ref = ws?.['!ref']
-    if (!ref) continue
-    const rows = XLSX.utils.decode_range(ref).e.r
-    if (rows > bestRows) {
-      bestRows = rows
-      bestName = name
+  for (const sheet of wb.sheets()) {
+    if (sheet.rowCount > bestRows) {
+      bestRows = sheet.rowCount
+      best = sheet
     }
   }
-  return bestName ? (wb.Sheets[bestName] ?? null) : null
+  return best
 }
 
-function cellVal(ws: WorkSheet, r: number, c: number, XLSX: typeof import('xlsx')) {
-  const cell = ws[XLSX.utils.encode_cell({ r, c })]
-  if (!cell) return { v: '', link: undefined as string | undefined }
-  const link = (cell as { l?: { Target?: string } }).l?.Target
-  return { v: cell.v, link }
+function cellVal(ws: SheetView, r: number, c: number) {
+  const cell = ws.cell(r, c)
+  return { v: cell.v ?? '', link: cell.link }
 }
 
 /** Разбор листа реестра (строка 0 — заголовки). */
-export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): RegistryPerson[] {
-  const ref = ws['!ref']
-  if (!ref) return []
-  const range = XLSX.utils.decode_range(ref)
+export function parseRegistrySheet(ws: SheetView): RegistryPerson[] {
+  if (ws.rowCount <= 1) return []
   const people: RegistryPerson[] = []
   let current: RegistryPerson | null = null
 
-  for (let r = 1; r <= range.e.r; r++) {
-    const tab = cellVal(ws, r, 0, XLSX).v
-    const rawName = String(cellVal(ws, r, 1, XLSX).v || '').trim()
-    const nameKa = String(cellVal(ws, r, 2, XLSX).v || '').trim()
+  for (let r = 1; r < ws.rowCount; r++) {
+    const tab = cellVal(ws, r, 0).v
+    const rawName = String(cellVal(ws, r, 1).v || '').trim()
+    const nameKa = String(cellVal(ws, r, 2).v || '').trim()
     const hasTab = hasTabNumber(tab)
 
     if (hasTab && rawName) {
@@ -386,9 +381,9 @@ export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): 
         tabNumber: String(tab).trim(),
         fullName: parsedName.fullName,
         nameKa,
-        gender: String(cellVal(ws, r, 3, XLSX).v || '').trim(),
-        citizenship: String(cellVal(ws, r, 4, XLSX).v || '').trim(),
-        birthDate: excelDate(cellVal(ws, r, 5, XLSX).v),
+        gender: String(cellVal(ws, r, 3).v || '').trim(),
+        citizenship: String(cellVal(ws, r, 4).v || '').trim(),
+        birthDate: excelDate(cellVal(ws, r, 5).v),
         terminated: parsedName.terminated,
         terminationDate: parsedName.terminationDate,
         ibans: [],
@@ -397,35 +392,35 @@ export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): 
     }
     if (!current) continue
 
-    const bankRaw = String(cellVal(ws, r, 10, XLSX).v || '')
+    const bankRaw = String(cellVal(ws, r, 10).v || '')
     for (const iban of extractIbans(bankRaw)) {
       if (!current.ibans.includes(iban)) current.ibans.push(iban)
     }
 
-    const idCell = cellVal(ws, r, 6, XLSX)
-    const contractCell = cellVal(ws, r, 13, XLSX)
-    const phoneRaw = String(cellVal(ws, r, 11, XLSX).v || '').trim()
+    const idCell = cellVal(ws, r, 6)
+    const contractCell = cellVal(ws, r, 13)
+    const phoneRaw = String(cellVal(ws, r, 11).v || '').trim()
 
     let contract: RegistryContract
     if (!hasTab && rawName) {
-      contract = parseContinuationContract(ws, r, XLSX, rawName, nameKa)
+      contract = parseContinuationContract(ws, r, rawName, nameKa)
     } else {
       contract = {
         idNumber: String(idCell.v || '').trim(),
         idLink: idCell.link,
-        address: String(cellVal(ws, r, 7, XLSX).v || '').trim(),
-        positionKa: String(cellVal(ws, r, 8, XLSX).v || '').trim(),
-        position: String(cellVal(ws, r, 9, XLSX).v || '').replace(/\n/g, ' ').trim(),
-        bankAccount: String(cellVal(ws, r, 10, XLSX).v || '').trim(),
+        address: String(cellVal(ws, r, 7).v || '').trim(),
+        positionKa: String(cellVal(ws, r, 8).v || '').trim(),
+        position: String(cellVal(ws, r, 9).v || '').replace(/\n/g, ' ').trim(),
+        bankAccount: String(cellVal(ws, r, 10).v || '').trim(),
         phone: phoneRaw,
-        salary: parseSalary(cellVal(ws, r, 12, XLSX).v),
+        salary: parseSalary(cellVal(ws, r, 12).v),
         contractNumber: String(contractCell.v || '').trim(),
         contractLink: contractCell.link,
-        hireDate: excelDate(cellVal(ws, r, 14, XLSX).v),
-        term: String(cellVal(ws, r, 15, XLSX).v || '').trim(),
-        endDate: excelDate(cellVal(ws, r, 16, XLSX).v),
-        bonusThirteenth: String(cellVal(ws, r, 17, XLSX).v || '').trim(),
-        laborRegistry: String(cellVal(ws, r, 18, XLSX).v || '').trim(),
+        hireDate: excelDate(cellVal(ws, r, 14).v),
+        term: String(cellVal(ws, r, 15).v || '').trim(),
+        endDate: excelDate(cellVal(ws, r, 16).v),
+        bonusThirteenth: String(cellVal(ws, r, 17).v || '').trim(),
+        laborRegistry: String(cellVal(ws, r, 18).v || '').trim(),
       }
     }
 

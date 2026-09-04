@@ -29,6 +29,7 @@ import {
   isProcurementDomainActive,
   isSalesPlanningActive,
   isWarehouseDomainActive,
+  isDomainFrozen,
   markCapacityPlanningFeatureActive,
   markMasterDataDomainActive,
   markProcurementDomainActive,
@@ -2458,6 +2459,14 @@ export async function executeG6Command(input) {
   if (commandType !== 'capacity.domain.activate' && commandType !== 'capacity.legacy.scan') {
     const inactive = requireActive(critical0.payload)
     if (inactive) return inactive
+  }
+
+  // PHASE R1 — frozen capacityPlanning blocks writes; legacy.scan remains readable
+  if (
+    commandType !== 'capacity.legacy.scan' &&
+    isDomainFrozen(critical0.payload, 'capacityPlanning')
+  ) {
+    return fail('domain_frozen', 409)
   }
 
   const now = new Date().toISOString()

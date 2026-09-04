@@ -23,6 +23,7 @@ import {
   MaintenanceBanner,
   buildFiveMinuteMaintenance,
 } from '@/components/layout/MaintenanceBanner'
+import { CriticalDomainFrozenBanner } from '@/components/cloud/CriticalDomainFrozenBanner'
 import type { ViewId } from '@/lib/types'
 import { useAppStore } from '@/hooks/useAppStore'
 import { restoreDailyBackup } from '@/lib/backup'
@@ -1777,6 +1778,7 @@ export default function App() {
               : undefined
           }
         />
+        <CriticalDomainFrozenBanner store={app.store} />
           </SupportChromeProvider>
           </CoachProvider>
           </EmployeeEditorProvider>

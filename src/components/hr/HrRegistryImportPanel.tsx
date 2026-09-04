@@ -4,7 +4,7 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { HrRegistryMissingPicker } from '@/components/hr/HrRegistryMissingPicker'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
-import { loadXlsx } from '@/lib/lazy/xlsx'
+import { loadWorkbookFromFile } from '@/lib/excel/workbookAdapter'
 import {
   analyzeRegistryImport,
   mergeEmployeesFromRegistry,
@@ -66,12 +66,10 @@ export function HrRegistryImportPanel({
     setBusy(true)
     setNotice(null)
     try {
-      const XLSX = await loadXlsx()
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array', cellDates: false })
-      const sheet = pickRegistryWorksheet(wb, XLSX)
+      const wb = await loadWorkbookFromFile(file)
+      const sheet = pickRegistryWorksheet(wb)
       if (!sheet) throw new Error('empty_sheet')
-      const registry = parseRegistrySheet(sheet, XLSX)
+      const registry = parseRegistrySheet(sheet)
       if (!registry.length) throw new Error('no_rows')
 
       const analysis = analyzeRegistryImport(employees, registry)
@@ -99,7 +97,8 @@ export function HrRegistryImportPanel({
       }
 
       finishImport(registry, new Set())
-    } catch {
+    } catch (err) {
+      void err
       setNotice({ type: 'error', message: t('hr.registryImport.error') })
     } finally {
       setBusy(false)
@@ -151,7 +150,7 @@ export function HrRegistryImportPanel({
         <input
           ref={fileRef}
           type="file"
-          accept=".xlsx,.xls,.ods,application/vnd.oasis.opendocument.spreadsheet"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0]

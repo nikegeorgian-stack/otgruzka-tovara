@@ -93,6 +93,10 @@ export function defaultWarehouseCapabilities(partial = {}) {
       out[key] = true
     }
   }
+  // PHASE R1 — shared critical domain freeze/resume
+  if (partial['critical.domain.freeze'] === true) {
+    out['critical.domain.freeze'] = true
+  }
   if (Array.isArray(partial.productionLineIds)) {
     out.productionLineIds = partial.productionLineIds.map(String)
   }
@@ -101,3 +105,6 @@ export function defaultWarehouseCapabilities(partial = {}) {
   }
   return out
 }
+
+/** PHASE R1 — emergency freeze/resume capability (sysadmin always OK with reason). */
+export const CRITICAL_DOMAIN_FREEZE_CAP = 'critical.domain.freeze'

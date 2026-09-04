@@ -22,6 +22,7 @@ import {
 } from './_g1DataConnect.mjs'
 import {
   isPackagingQcFeatureActive,
+  isDomainFrozen,
   parseCapabilities,
   parseCriticalPayload,
   principalAccessId,
@@ -268,6 +269,37 @@ export async function rejectIfPackagingQcAuthoritative(storeId) {
   return ok()
 }
 
+/**
+ * PHASE R1 — when packagingQc is frozen, legacy QC writes return domain_frozen.
+ * Fail-soft false (allow) when critical unavailable.
+ */
+export async function rejectIfPackagingQcFrozen(storeId) {
+  const id = String(storeId ?? '').trim()
+  if (!id) return ok()
+  try {
+    const g1 = getG1DataConnect()
+    const { data } = await getFstCriticalStore(g1, { id })
+    const row = data?.fstCriticalStore
+    if (!row) return ok()
+    const revision = Number(row.revision) || 0
+    const parsed = parseCriticalPayload(row.payloadJson, { revision })
+    if (!parsed.ok) return ok()
+    if (isDomainFrozen(parsed.payload, 'packagingQc', revision)) {
+      return fail('domain_frozen', 409)
+    }
+  } catch {
+    return ok()
+  }
+  return ok()
+}
+
+/** Freeze first (domain_frozen), then G4 redirect when packagingQc active. */
+async function rejectIfPackagingQcWriteBlocked(storeId) {
+  const frozen = await rejectIfPackagingQcFrozen(storeId)
+  if (!frozen.ok) return frozen
+  return rejectIfPackagingQcAuthoritative(storeId)
+}
+
 function flagsToG4Caps(flags) {
   const caps = {}
   const safe = asSafeFlags(flags)
@@ -438,6 +470,8 @@ export async function revokePermission(input) {
 export async function initiateAttachment(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
+  const frozen = await rejectIfPackagingQcFrozen(input.storeId)
+  if (!frozen.ok) return frozen
   const permission = await requireActivePermission(actor.uid, input.storeId, 'canUpload')
   if (!permission.ok) return permission
 
@@ -514,6 +548,8 @@ export async function initiateAttachment(input) {
 export async function finalizeAttachment(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
+  const frozen = await rejectIfPackagingQcFrozen(input.storeId)
+  if (!frozen.ok) return frozen
   const permission = await requireActivePermission(actor.uid, input.storeId, 'canUpload')
   if (!permission.ok) return permission
 
@@ -572,7 +608,7 @@ async function updateAttachmentRecord(dc, record, objectGeneration, nextRevision
 export async function upsertLotProjection(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const dc = getQcDataConnect()
   const current = await loadLot(dc, input.id)
@@ -583,7 +619,7 @@ export async function upsertLotProjection(input) {
 }
 
 export async function releaseLot(input) {
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canRelease')
   if (!permission.ok) return permission
@@ -652,7 +688,7 @@ export async function releaseLot(input) {
 }
 
 export async function regradeLot(input) {
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canRegrade')
   if (!permission.ok) return permission
@@ -682,7 +718,7 @@ export async function regradeLot(input) {
 }
 
 export async function rejectLot(input) {
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canReject')
   if (!permission.ok) return permission
@@ -726,7 +762,7 @@ async function loadLatestDecision(dc, storeId, lotId) {
 }
 
 export async function authorizeShipment(input) {
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canPostShipment')
   if (!permission.ok) return permission
@@ -792,7 +828,7 @@ export async function applyShipment(input) {
 }
 
 export async function cancelShipment(input) {
-  const gate = await rejectIfPackagingQcAuthoritative(input.storeId)
+  const gate = await rejectIfPackagingQcWriteBlocked(input.storeId)
   if (!gate.ok) return gate
   const permission = await requireActivePermission(input.actor.uid, input.storeId, 'canPostShipment')
   if (!permission.ok) return permission
