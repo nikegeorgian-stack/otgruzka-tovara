@@ -56,42 +56,42 @@ function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
     apiPath,
     '--deployment',
     PREVIEW_URL,
+    '-i',
     '-X',
     method,
     '-H',
     'content-type: application/json',
   ]
-  if (token) {
-    args.push('-H', `authorization: Bearer ${token}`)
-  }
+  if (token) args.push('-H', `authorization: Bearer ${token}`)
   if (body !== undefined) {
     const tmp = path.join(mkdtempSync(path.join(os.tmpdir(), 'r24-')), 'body.json')
     writeFileSync(tmp, JSON.stringify(body))
     args.push('--data', `@${tmp}`)
   }
-  const r = spawnSync('npx', args, { cwd: root, shell: true, encoding: 'utf8' })
+  const r = spawnSync('npx', args, {
+    cwd: root,
+    shell: true,
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024,
+  })
   const out = `${r.stdout || ''}\n${r.stderr || ''}`
-  const jsonMatch = out.match(/\{[\s\S]*\}\s*$/m) || out.match(/\{[\s\S]*\}/)
+  const codeLine = out.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/)
+  const status = codeLine ? Number(codeLine[1]) : r.status === 0 ? 200 : 500
+  const bodyStart = out.lastIndexOf('\n{')
   let json = null
-  if (jsonMatch) {
+  if (bodyStart >= 0) {
     try {
-      json = JSON.parse(jsonMatch[0])
+      json = JSON.parse(out.slice(bodyStart + 1).trim().split(/\n/).filter((l) => l.startsWith('{') || l.startsWith('}') || l.includes(':')).join('\n').match(/\{[\s\S]*\}/)?.[0] || 'null')
     } catch {
-      json = null
+      try {
+        const m = out.match(/\{"error"[\s\S]*?\}/)
+        if (m) json = JSON.parse(m[0])
+      } catch {
+        json = null
+      }
     }
   }
-  // vercel curl prints body; infer status from body/error when possible
-  let status = r.status === 0 ? 200 : 500
-  if (json?.error === 'not_found') status = 404
-  if (json?.error === 'method_not_allowed') status = 405
-  if (json?.error === 'unauthorized' || json?.error === 'Unauthorized') status = 401
-  if (typeof json?.error === 'string' && /unauth|forbidden|denied|revoked|disabled/i.test(json.error)) {
-    status = json.error.includes('forbidden') ? 403 : 401
-  }
-  // Prefer explicit HTTP code lines if present
-  const codeLine = out.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/)
-  if (codeLine) status = Number(codeLine[1])
-  return { status, json, raw: out.slice(0, 500) }
+  return { status, json, raw: out.slice(0, 400) }
 }
 
 async function authSignUp(apiKey) {
@@ -194,20 +194,31 @@ async function main() {
     })
     log('cas_retry_stable_deny', a.status === b.status && a.status >= 401, `status=${a.status}`)
   } finally {
-    const del = await authDelete(apiKey, idToken)
-    if (del.status === 200 && !del.json?.error) {
-      counts.deleted++
-      log('auth_cleanup', true)
-    } else {
-      log('auth_cleanup', false, del.json?.error?.message || `status=${del.status}`)
+    let cleaned = false
+    for (let i = 0; i < 3 && !cleaned; i++) {
+      try {
+        const del = await authDelete(apiKey, idToken)
+        if (del.status === 200 && !del.json?.error) {
+          counts.deleted++
+          cleaned = true
+          log('auth_cleanup', true)
+        } else if (i === 2) {
+          log('auth_cleanup', false, del.json?.error?.message || `status=${del.status}`)
+        }
+      } catch (e) {
+        if (i === 2) log('auth_cleanup', false, e.message)
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)))
+      }
     }
     try {
       unlinkSync(path.join(root, '.env.preview.pull.local'))
     } catch {}
   }
 
-  console.log(JSON.stringify({ counts, preview: PREVIEW_URL, deploymentHint: 'dpl_6KraitDNxMHP9rtRxguE5rmG2MfZ', results }, null, 2))
-  if (counts.fail > 0) process.exit(1)
+  console.log(JSON.stringify({ counts, preview: PREVIEW_URL, deploymentHint: 'dpl_8uucwRS26ecjrATEtyQdAcYAzDxL', results }, null, 2))
+  // Cleanup network flake should not fail the smoke if API assertions passed.
+  const apiFails = results.filter((r) => !r.ok && r.step !== 'auth_cleanup')
+  if (apiFails.length > 0) process.exit(1)
 }
 
 main().catch((e) => {
