@@ -1,5 +1,6 @@
 import { getDataConnect } from 'firebase-admin/data-connect'
 import { initFirebaseAdmin } from './_adminAuth.mjs'
+import { resolveAdminDataConnectConfig } from './_dataConnectRuntime.mjs'
 import {
   connectorConfig,
   getFstCommandReceipt,
@@ -23,7 +24,7 @@ function syncDataConnectEmulatorEnv() {
 export function getG1DataConnect() {
   initFirebaseAdmin()
   syncDataConnectEmulatorEnv()
-  return getDataConnect(connectorConfig)
+  return getDataConnect(resolveAdminDataConnectConfig(connectorConfig))
 }
 
 export {

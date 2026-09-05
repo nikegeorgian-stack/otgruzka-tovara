@@ -1,5 +1,6 @@
 import { getDataConnect } from 'firebase-admin/data-connect'
 import { initFirebaseAdmin } from './_adminAuth.mjs'
+import { resolveAdminDataConnectConfig } from './_dataConnectRuntime.mjs'
 import {
   connectorConfig,
   getLatestQcLotDecision,
@@ -31,7 +32,7 @@ function syncDataConnectEmulatorEnv() {
 export function getQcDataConnect() {
   initFirebaseAdmin()
   syncDataConnectEmulatorEnv()
-  return getDataConnect(connectorConfig)
+  return getDataConnect(resolveAdminDataConnectConfig(connectorConfig))
 }
 
 export {

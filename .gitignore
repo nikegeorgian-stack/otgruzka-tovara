@@ -75,4 +75,10 @@ fst-web/android/local.properties
 
 .vercel
 .env*.local
+
+# R2.4 local staging SQL helpers (never commit)
+cloud-sql-proxy.exe
+tmp-stg-*.txt
+tmp-stg-*.sql
+tmp-access-token.txt
 .env*

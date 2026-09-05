@@ -1,5 +1,9 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
+import {
+  FST_STAGING_PROJECT_ID,
+  isStagingIsolatedRuntime,
+} from './_dataConnectRuntime.mjs'
 
 export const FST_ADMIN_EMAILS = new Set([
   'admin@fibercell.net',
@@ -8,10 +12,35 @@ export const FST_ADMIN_EMAILS = new Set([
   'levan-admin@fibercell.net',
 ])
 
+function parseServiceAccountProjectId(raw) {
+  try {
+    const parsed = JSON.parse(raw)
+    return String(parsed?.project_id ?? '').trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Preview/staging: refuse any service account that is not otgruzka-tovara-stg.
+ * Does not log or return the JSON contents.
+ */
+export function assertStagingServiceAccountIsolation(rawJson) {
+  if (!isStagingIsolatedRuntime()) return
+  const projectId = parseServiceAccountProjectId(rawJson)
+  if (!projectId) {
+    throw new Error('staging_service_account_project_missing')
+  }
+  if (projectId !== FST_STAGING_PROJECT_ID) {
+    throw new Error('staging_service_account_project_mismatch')
+  }
+}
+
 export function initFirebaseAdmin() {
   if (getApps().length > 0) return
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
   if (raw?.trim()) {
+    assertStagingServiceAccountIsolation(raw)
     initializeApp({ credential: cert(JSON.parse(raw)) })
     return
   }
@@ -20,6 +49,9 @@ export function initFirebaseAdmin() {
     process.env.DATA_CONNECT_EMULATOR_HOST ?? process.env.FIREBASE_DATA_CONNECT_EMULATOR_HOST ?? '',
   ).trim()
   if (emulatorHost || process.env.QC_LOCAL_EMULATOR === '1') {
+    if (isStagingIsolatedRuntime()) {
+      throw new Error('staging_service_account_required')
+    }
     initializeApp({
       projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'otgruzka-tovara',
     })
