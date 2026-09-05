@@ -24,9 +24,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PREVIEW_URL =
   process.env.R26_PREVIEW_URL ||
   process.env.R25_PREVIEW_URL ||
-  'https://otgruzka-tovara-dpqlrhdmw-nikegeorgian-8562s-projects.vercel.app'
-const PREVIEW_DEPLOYMENT = process.env.R26_PREVIEW_DEPLOYMENT || process.env.R25_PREVIEW_DEPLOYMENT || 'dpl_8uucwRS26ecjrATEtyQdAcYAzDxL'
-const EXPECTED_COMMIT_PREFIX = process.env.R26_EXPECTED_COMMIT || process.env.R25_EXPECTED_COMMIT || '3e5c478'
+  'https://otgruzka-tovara-4cfg1029z-nikegeorgian-8562s-projects.vercel.app'
+const PREVIEW_DEPLOYMENT = process.env.R26_PREVIEW_DEPLOYMENT || process.env.R25_PREVIEW_DEPLOYMENT || 'dpl_Ao5NYW7kYY2tydSHcMEcNybfmg6q'
+const EXPECTED_COMMIT_PREFIX = process.env.R26_EXPECTED_COMMIT || process.env.R25_EXPECTED_COMMIT || '7966c3a'
 const STG_PROJECT = 'otgruzka-tovara-stg'
 const STG_SERVICE = 'otgruzka-tovara-stg-service'
 const STG_LOCATION = 'europe-west3'
@@ -174,16 +174,34 @@ function loadPreviewEnv() {
 let cachedPreviewEnv = null
 
 /**
- * Call Preview API via `vercel curl` (injects protection bypass).
- * Never use `-v`; never log tokens/bypass/URLs with secrets.
- * Body is written to a temp file to avoid Windows CLI body drops.
+ * Call Preview API via `vercel curl` (injects protection bypass; no `-v`).
+ * Authorization header and JSON body go through temp files so Windows shells
+ * cannot mangle JWTs / POST bodies. Never log tokens or bypass secrets.
  */
 async function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'r26-api-'))
   const outFile = path.join(tmpDir, 'out.json')
   const bodyFile = path.join(tmpDir, 'body.json')
-  const errFile = path.join(tmpDir, 'err.txt')
+  const cfgFile = path.join(tmpDir, 'curl.cfg')
   try {
+    const cfgLines = [
+      `request = "${method}"`,
+      `output = "${outFile.replace(/\\/g, '/')}"`,
+      'silent',
+      'show-error',
+      'write-out = "HTTP_CODE=%{http_code}"',
+      'header = "content-type: application/json"',
+    ]
+    if (token) {
+      // Keep JWT out of argv; curl config header form is safer on Windows.
+      cfgLines.push(`header = "authorization: Bearer ${token}"`)
+    }
+    if (body !== undefined) {
+      writeFileSync(bodyFile, JSON.stringify(body), 'utf8')
+      cfgLines.push(`data-binary = "@${bodyFile.replace(/\\/g, '/')}"`)
+    }
+    writeFileSync(cfgFile, cfgLines.join('\n') + '\n', 'utf8')
+
     const curlArgs = [
       'vercel',
       'curl',
@@ -192,23 +210,9 @@ async function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
       PREVIEW_URL,
       '--yes',
       '--',
-      '-sS',
-      '-w',
-      'HTTP_CODE=%{http_code}',
-      '-o',
-      outFile,
-      '-X',
-      method,
-      '-H',
-      'content-type: application/json',
+      '-K',
+      cfgFile,
     ]
-    if (token) {
-      curlArgs.push('-H', `authorization: Bearer ${token}`)
-    }
-    if (body !== undefined) {
-      writeFileSync(bodyFile, JSON.stringify(body), 'utf8')
-      curlArgs.push('--data-binary', `@${bodyFile}`)
-    }
     const r = spawnSync('npx', curlArgs, {
       cwd: root,
       shell: true,
@@ -216,7 +220,6 @@ async function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
       maxBuffer: 2 * 1024 * 1024,
     })
     const meta = `${r.stdout || ''}\n${r.stderr || ''}`
-    writeFileSync(errFile, meta, 'utf8')
     const codeMatch = meta.match(/HTTP_CODE=(\d{3})/)
     const status = codeMatch ? Number(codeMatch[1]) : 0
     let text = ''
@@ -233,21 +236,6 @@ async function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
     }
     return { status, json, rawHead: text.slice(0, 240) }
   } finally {
-    try {
-      unlinkSync(outFile)
-    } catch {
-      /* ignore */
-    }
-    try {
-      unlinkSync(bodyFile)
-    } catch {
-      /* ignore */
-    }
-    try {
-      unlinkSync(errFile)
-    } catch {
-      /* ignore */
-    }
     try {
       rmSync(tmpDir, { recursive: true, force: true })
     } catch {

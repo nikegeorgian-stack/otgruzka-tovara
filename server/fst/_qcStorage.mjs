@@ -123,6 +123,8 @@ export async function createSignedUploadSession({
       expiresAt: new Date(expires).toISOString(),
       headers: {
         'Content-Type': mime,
+        // Must match extensionHeaders used when signing the URL.
+        'x-goog-if-generation-match': '0',
       },
     }
   } catch {
