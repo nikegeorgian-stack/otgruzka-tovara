@@ -6,11 +6,13 @@ import { describe, expect, it } from 'vitest'
 import {
   FST_ROUTE_HANDLERS,
   resolveFstRoutePath,
+  resolveFstRouteFromRequest,
   default as fstRouter,
 } from '../api/fst/[...path].mjs'
 import {
   RS_ROUTE_HANDLERS,
   resolveRsRoutePath,
+  resolveRsRouteFromRequest,
   default as rsRouter,
 } from '../api/rs/[...path].mjs'
 
@@ -87,6 +89,20 @@ describe('r23 api route consolidation', () => {
     expect(resolveFstRoutePath('')).toBeNull()
     expect(resolveRsRoutePath('verify')).toBe('verify')
     expect(resolveRsRoutePath(['credentials', 'x'])).toBeNull()
+  })
+
+  it('resolves route from request URL when query.path is missing (Vercel catch-all)', () => {
+    expect(
+      resolveFstRouteFromRequest({ url: '/api/fst/list-users', query: {} }),
+    ).toBe('list-users')
+    expect(resolveFstRouteFromRequest({ url: '/api/fst/missing', query: {} })).toBe('missing')
+    expect(resolveRsRouteFromRequest({ url: '/api/rs/verify', query: {} })).toBe('verify')
+    expect(
+      resolveFstRouteFromRequest({
+        url: '/api/fst/g2-warehouse-command',
+        query: { path: 'g2-warehouse-command' },
+      }),
+    ).toBe('g2-warehouse-command')
   })
 
   it('returns 404 for unknown FST and RS routes without invoking handlers', async () => {

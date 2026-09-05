@@ -64,15 +64,32 @@ export const FST_ROUTE_HANDLERS = {
 export function resolveFstRoutePath(queryPath) {
   if (Array.isArray(queryPath)) {
     if (queryPath.length !== 1) return null
-    return String(queryPath[0] ?? '').trim()
+    return String(queryPath[0] ?? '').trim() || null
   }
-  const raw = String(queryPath ?? '').trim()
+  if (queryPath == null) return null
+  const raw = String(queryPath).trim()
   if (!raw || raw.includes('/')) return null
   return raw
 }
 
+/** Resolve single-segment FST route from Vercel query and/or request URL. */
+export function resolveFstRouteFromRequest(req) {
+  const fromQuery = resolveFstRoutePath(req?.query?.path)
+  if (fromQuery) return fromQuery
+  try {
+    const pathname = new URL(String(req?.url || ''), 'http://localhost').pathname
+    const parts = pathname.split('/').filter(Boolean)
+    if (parts[0] === 'api' && parts[1] === 'fst' && parts.length === 3) return parts[2]
+    // Some runtimes mount the catch-all so url is only the remainder.
+    if (parts.length === 1) return parts[0]
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 export default async function handler(req, res) {
-  const route = resolveFstRoutePath(req.query?.path)
+  const route = resolveFstRouteFromRequest(req)
   if (!route) {
     res.status(404).json({ error: 'not_found' })
     return
