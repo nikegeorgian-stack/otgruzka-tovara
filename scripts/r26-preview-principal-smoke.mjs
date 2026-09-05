@@ -24,9 +24,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PREVIEW_URL =
   process.env.R26_PREVIEW_URL ||
   process.env.R25_PREVIEW_URL ||
-  'https://otgruzka-tovara-4cfg1029z-nikegeorgian-8562s-projects.vercel.app'
-const PREVIEW_DEPLOYMENT = process.env.R26_PREVIEW_DEPLOYMENT || process.env.R25_PREVIEW_DEPLOYMENT || 'dpl_Ao5NYW7kYY2tydSHcMEcNybfmg6q'
-const EXPECTED_COMMIT_PREFIX = process.env.R26_EXPECTED_COMMIT || process.env.R25_EXPECTED_COMMIT || '7966c3a'
+  'https://otgruzka-tovara-fgdnwvb1s-nikegeorgian-8562s-projects.vercel.app'
+const PREVIEW_DEPLOYMENT = process.env.R26_PREVIEW_DEPLOYMENT || process.env.R25_PREVIEW_DEPLOYMENT || 'dpl_6uiiDX5dKLm3BijCc2cPXJsiQ1Nk'
+const EXPECTED_COMMIT_PREFIX = process.env.R26_EXPECTED_COMMIT || process.env.R25_EXPECTED_COMMIT || '835c0f6'
 const STG_PROJECT = 'otgruzka-tovara-stg'
 const STG_SERVICE = 'otgruzka-tovara-stg-service'
 const STG_LOCATION = 'europe-west3'
@@ -215,9 +215,10 @@ async function vercelApi(apiPath, { method = 'GET', token, body } = {}) {
     ]
     const r = spawnSync('npx', curlArgs, {
       cwd: root,
-      shell: true,
+      shell: false,
       encoding: 'utf8',
       maxBuffer: 2 * 1024 * 1024,
+      env: process.env,
     })
     const meta = `${r.stdout || ''}\n${r.stderr || ''}`
     const codeMatch = meta.match(/HTTP_CODE=(\d{3})/)
@@ -1215,8 +1216,13 @@ async function main() {
     ok('idempotency_no_duplicate') &&
     ok('real_token_accepted') &&
     ok('disabled_user_denied')
-  flags.PREVIEW_ENVIRONMENT_VERIFIED = flags.R26_FULL_SUITE_GREEN
-  flags.PRODUCTION_DEPLOY_READY = false
+  flags.PREVIEW_ENVIRONMENT_VERIFIED = flags.R26_FULL_SUITE_GREEN && flags.R26_PREVIEW_READY
+  // Readiness signal only — this phase still STOP before merge/Production deploy.
+  flags.PRODUCTION_DEPLOY_READY =
+    flags.R26_FULL_SUITE_GREEN &&
+    flags.R26_STORAGE_REGION_EUROPE_WEST3 &&
+    flags.R26_STORAGE_RULES_FAIL_CLOSED &&
+    flags.PREVIEW_ENVIRONMENT_VERIFIED
 
   console.log('\n=== R26 SUMMARY (no secrets) ===')
   console.log(

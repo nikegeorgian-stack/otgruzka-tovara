@@ -1,6 +1,6 @@
 # Otgruzka — текущее состояние (обновлять после значимых сессий)
 
-**Обновлено:** 2026-09-02<br>
+**Обновлено:** 2026-09-05<br>
 **Канон URL:** https://otgruzka-tovara.vercel.app
 
 ## Git checkpoints (не live HEAD)
@@ -11,14 +11,14 @@
 |------------|------|--------|
 | **Product baseline** | `61681f9` | Последняя подтверждённая база прикладного продукта до agent-system commit |
 | **Agent-system baseline** | `90cc6f0` | Локальный проверенный commit agent-system (consolidate skills + memory) |
+| **R2.6 staging smoke** | `835c0f6` | Storage signed-upload + revoked-token Preview green (ветка safety/…) |
 
 ### Remote status (на момент последней проверки)
 
 | | |
 |--|--|
-| Локальная ветка | `master`, commit `90cc6f0` **не отправлен** |
-| `nika/main` | `61681f9` |
-| Push | Ждёт осознанного product deployment **или** отдельной настройки подавления Vercel Git deployment |
+| Safety branch | `safety/cloud-data-integrity-20260902` → `nika` (Preview only) |
+| Production | **не трогать** — STOP before merge/Production deploy |
 
 ## Confirmed facts
 
@@ -26,52 +26,33 @@
 |------|----------|------------------|
 | Данные прод | SQL Connect `otgruzka-tovara-service` | `OTGRUZKA.md` |
 | UI канон | Vercel `otgruzka-tovara` | `AGENTS.md` / `OTGRUZKA.md` |
+| Staging Firebase | `otgruzka-tovara-stg` · Storage `EUROPE-WEST3` deny-all | R2.6 |
 | Канон скилов | `.cursor/skills/` only | agent-system refactor 2026-09-02 |
-
-## Last-known (не перепроверялось в этой сессии)
-
-| Поле | Значение | Статус |
-|------|----------|--------|
-| UI bundle | `index-C1fKaFGo.js` | last-known из прошлой сессии (technologist slice 1); **не** re-verified сейчас |
 
 ## Текущая задача
 
-Доводка agent-system: baseline-память без drift live HEAD, sessionStart с live Git, локальная уборка мусора.<br>
-Продуктовый срез **канбан технолога / состав ГП** — не начат.
+R2.6 закрыт на Preview: Storage QC signed-upload + revoked-token poll зелёные; cleanup Auth/Storage/synth = 0.<br>
+**STOP** — без merge и без Production deploy.
 
 ## Выполнено недавно
 
-- Agent-system commit `90cc6f0` локально: skills, archive, guardian, hooks, validate tooling
-- Technologist slice 1: `technicalName`, склад для технолога, журналы (код + деплой в прошлой сессии)
+- R2.6: `resolveFirebaseStorageBucket`, `checkRevoked=true`, signed-upload `x-goog-if-generation-match`, smoke `scripts/r26-preview-principal-smoke.mjs`
+- Preview Ready: `dpl_6uiiDX5dKLm3BijCc2cPXJsiQ1Nk` (commit `835c0f6`)
 
 ## Открытые проблемы
 
-- Push `90cc6f0` → возможен Vercel production deploy без отдельной настройки
+- Merge / Production deploy — не начаты (осознанный STOP)
 - Полный UI-аудит по разделам — не завершён
-- Kanban технолога / состав ГП — только в плане
-
-## Принятые решения
-
-- SQL Connect = данные; Vercel = UI truth
-- Always-on: `fst-core-policy`, `fst-data-integrity`, `fst-session-memory`, `fst-skill-router`
-- Spec Kit только для крупных фич → обязательно `converge`
-- CURRENT_STATE хранит **именованные baseline**, не live HEAD
 
 ## Следующий безопасный шаг
 
-1. Staging/commit доводки памяти + sessionStart (без push)
-2. При необходимости push — сначала Vercel git deploy policy, затем `nika/main`
-3. `project-guardian` + chain brief «технолог канбан ГП» перед продуктовым срезом
-
-## Затронутые модули (ожидаемые на следующем срезе)
-
-`TechnologistPage`, `src/lib/technologist/`, `src/components/kanban/`, coach, i18n RU/KA
+1. Review + merge decision (отдельная просьба)
+2. Production UI deploy — только по слову «деплой»
 
 ## Документы для синхронизации
 
 - Этот файл после значимой сессии (baseline/checkpoint, не live HEAD)
 - `docs/DEPLOY.md` — только после реального деплоя с проверкой бандла
-- `docs/OTGRUZKA-SKILLS-GUIDE.md` — при смене agent workflow
 
 ---
 
