@@ -1,0 +1,16 @@
+# Staging overlay only — deploy with scripts/dataconnect-deploy-staging.mjs
+# Do NOT use as default firebase dataconnect source for production.
+specVersion: "v1"
+serviceId: otgruzka-tovara-stg-service
+location: europe-west3
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: otgruzka-tovara-stg-database
+      cloudSql:
+        instanceId: otgruzka-tovara-stg-instance
+        schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./fst-connector
+  - ./fst-admin-connector

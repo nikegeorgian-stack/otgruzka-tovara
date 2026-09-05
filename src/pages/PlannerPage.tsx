@@ -1,25 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { PlannerMaterialsPanel } from '@/components/planner/PlannerMaterialsPanel'
+import { PlannerOrderForm } from '@/components/planner/PlannerOrderForm'
+import { PlannerOrdersKanban } from '@/components/planner/PlannerOrdersKanban'
+import { G5ActivationWizard } from '@/components/planner/G5ActivationWizard'
+import { G5MrpHorizonBanner } from '@/components/planner/G5MrpHorizonBanner'
+import { G5MrpWorkspace } from '@/components/planner/G5MrpWorkspace'
 import { MaterialStockHint } from '@/components/planner/MaterialStockHint'
-import { RawMaterialPlanField } from '@/components/planner/RawMaterialPlanField'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { TabBar } from '@/components/ui/TabBar'
-import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { ProductColorBadge } from '@/components/ui/ProductColorBadge'
-import { ProductColorPicker } from '@/components/ui/ProductColorPicker'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
+import { KanbanViewToggle, type KanbanViewMode } from '@/components/kanban'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
 import { emptyProductionOrder } from '@/lib/planner/init'
-import { formatStackDescription } from '@/lib/packaging/calc'
 import {
   extractSolidsPct,
   recipeDryBatchKg,
@@ -28,7 +31,9 @@ import {
 } from '@/lib/formulations/calc'
 import type { FormulationRecipe } from '@/lib/formulations/types'
 import { formulationCategoryLabel } from '@/lib/formulations/types'
-import type { PackagingRecipe } from '@/lib/packaging/types'
+import { inheritPackagingFromProduct } from '@/lib/packaging/inherit'
+import { shortContentHash } from '@/lib/planner/g5PackagingBom'
+import type { BoxRecipe, PackagingRecipe } from '@/lib/packaging/types'
 import {
   lineAllocationForDate,
   type GeneratePlannerRequestsResult,
@@ -39,6 +44,7 @@ import {
 import { PLANNER_MATERIAL_STATUSES, orderNeedsMaterialPlanning } from '@/lib/planner/materialNeeds'
 import type { MaterialReserveResult } from '@/lib/planner/materialReserve'
 import { attachPackagingPlanToOrder } from '@/lib/planner/packagingOrder'
+import { estimatedOrderedRolls } from '@/lib/planner/rolls'
 import {
   buildDayPlanRows,
   generateEvenDayPlans,
@@ -50,13 +56,10 @@ import {
   buildMonthReport,
   summarizeOrder,
 } from '@/lib/planner/stats'
-import type {
-  PlannerOrderCategory,
-  PlannerPlanMode,
-  PlannerRecalcMode,
-  ProductionOrder,
-} from '@/lib/planner/types'
-import { plannerCategoryLabel, PLANNER_ORDER_CATEGORIES } from '@/lib/planner/types'
+import type { AppUser, AccessStore } from '@/lib/access/types'
+import type { WorkTaskDraft } from '@/lib/tasks/types'
+import type { ProductionOrder, PlannerOrderStatus } from '@/lib/planner/types'
+import type { AppStore } from '@/lib/types'
 import { formatNum, weekdayLabel } from '@/lib/production/stats'
 import { PRODUCTION_LINES } from '@/lib/production/types'
 import type { ProductionRequest } from '@/lib/production/types'
@@ -66,6 +69,7 @@ import { useDirectoryBranch } from '@/hooks/useDirectoryBranch'
 import type { WorkspaceBranchFrom, WorkspaceBranchTarget } from '@/lib/workspace/types'
 import { resolveOrderProductColor } from '@/lib/finishedProducts/colors'
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import { productTypeToRawKind } from '@/lib/finishedProducts/types'
 import type { WarehouseCategory, WarehouseItem, StockMovement } from '@/lib/warehouse/types'
 import type { SalesOrder } from '@/lib/sales/types'
 import {
@@ -74,7 +78,7 @@ import {
   type ProductionSalesLink,
 } from '@/lib/sales/plannerLink'
 
-type Tab = 'orders' | 'calendar' | 'reports' | 'materials'
+type Tab = 'orders' | 'calendar' | 'reports' | 'materials' | 'mrp'
 
 type Props = {
   orders: ProductionOrder[]
@@ -82,15 +86,22 @@ type Props = {
   counterparties: Counterparty[]
   finishedProducts: FinishedProduct[]
   packagingRecipes: PackagingRecipe[]
+  boxRecipes: BoxRecipe[]
   formulationRecipes: FormulationRecipe[]
   warehouseItems: WarehouseItem[]
   warehouseCategories: WarehouseCategory[]
   warehouseMovements: StockMovement[]
+  warehouseDocuments?: import('@/lib/warehouse/types').WarehouseDocument[]
+  warehouseLocations?: import('@/lib/warehouse/types').WarehouseLocation[]
+  productionLineBindings?: import('@/lib/warehouse/types').ProductionLineLocationBinding[]
+  warehouseAccounting?: import('@/lib/warehouse/types').WarehouseAccountingState[]
   activeMonth: string
   onMonthChange: (m: string) => void
   onSaveOrder: (o: ProductionOrder) => void
   onRemoveOrder: (id: string) => void
-  onActivateOrder: (id: string) => { ok: boolean; messageKey?: string }
+  onActivateOrder: (id: string) =>
+    | { ok: boolean; messageKey?: string; error?: string }
+    | Promise<{ ok: boolean; messageKey?: string; error?: string }>
   onRecalculateOrder: (id: string) => void
   onNavigateToDirectory: (section: DirectorySection) => void
   branchWorkspace: (target: WorkspaceBranchTarget, from?: WorkspaceBranchFrom) => void
@@ -106,6 +117,18 @@ type Props = {
   onOpenSalesOrder?: () => void
   focusOrderId?: string | null
   onFocusOrderConsumed?: () => void
+  access?: AccessStore
+  currentUser?: AppUser | null
+  onCreateWorkTask?: (draft: WorkTaskDraft) => string
+  /** Full AppStore for G5 activation scan (optional). */
+  store?: AppStore | null
+  /**
+   * Admin-only G5 activation wizard controls.
+   * Default false — parent must pass true for sysadmin/admin.
+   */
+  canActivateG5?: boolean
+  /** PHASE G6 — capacity domain activate from MRP Capacity tab. */
+  canActivateG6?: boolean
 }
 
 type PlannerWorkspaceDraft = {
@@ -128,10 +151,15 @@ export function PlannerPage({
   counterparties,
   finishedProducts,
   packagingRecipes,
+  boxRecipes,
   formulationRecipes,
   warehouseItems,
   warehouseCategories,
   warehouseMovements,
+  warehouseDocuments = [],
+  warehouseLocations = [],
+  productionLineBindings = [],
+  warehouseAccounting,
   activeMonth,
   onMonthChange,
   onSaveOrder,
@@ -150,6 +178,12 @@ export function PlannerPage({
   onOpenSalesOrder,
   focusOrderId,
   onFocusOrderConsumed,
+  access,
+  currentUser,
+  onCreateWorkTask,
+  store = null,
+  canActivateG5 = false,
+  canActivateG6 = false,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
@@ -168,6 +202,7 @@ export function PlannerPage({
   const [notice, setNotice] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [ordersView, setOrdersView] = useState<KanbanViewMode>('list')
 
   const today = new Date().toISOString().slice(0, 10)
   const monthEnd = activeMonth + '-31'
@@ -191,6 +226,7 @@ export function PlannerPage({
     if (!focusOrderId) return
     const o = orders.find((x) => x.id === focusOrderId)
     if (o) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot focus load
       setSelectedId(o.id)
       setForm(o)
       setEditing(false)
@@ -263,8 +299,12 @@ export function PlannerPage({
   }, [form, packagingRecipes, locale])
 
   const warehouseCtx = useMemo(
-    () => ({ items: warehouseItems, movements: warehouseMovements }),
-    [warehouseItems, warehouseMovements],
+    () => ({
+      items: warehouseItems,
+      movements: warehouseMovements,
+      accountingByWarehouse: warehouseAccounting,
+    }),
+    [warehouseItems, warehouseMovements, warehouseAccounting],
   )
 
   const materialShortageCount = useMemo(
@@ -330,6 +370,19 @@ export function PlannerPage({
     setForm(o)
   }
 
+  function moveOrderStatus(orderId: string, status: PlannerOrderStatus) {
+    const order = orders.find((o) => o.id === orderId)
+    if (!order || order.status === status) return
+    if (status === 'active') {
+      void activateOrder(orderId)
+      return
+    }
+    onSaveOrder({ ...order, status })
+    if (selectedId === orderId) {
+      setForm((f) => (f.id === orderId ? { ...f, status } : f))
+    }
+  }
+
   function startEdit() {
     if (!selected) return
     setForm(selected)
@@ -355,26 +408,41 @@ export function PlannerPage({
           formulationRecipes,
         )
       : undefined
-    setForm((f) => ({
-      ...f,
-      finishedProductId: id || undefined,
-      productName: fp?.name ?? '',
-      category: fp?.category ?? f.category,
-      colorLogo: fp?.colorLogo ?? f.colorLogo,
-      productColor: fp?.productColor ?? f.productColor,
-      formulationRecipeId:
-        fp?.defaultFormulationRecipeId ?? suggested?.id ?? f.formulationRecipeId,
-      rawMaterialKind:
-        fp?.productType ?? fp?.rawMaterialKind ?? f.rawMaterialKind,
-      counterpartyId: f.counterpartyId || fp?.defaultCounterpartyId,
-      customer:
-        f.customer ||
-        counterparties.find((c) => c.id === fp?.defaultCounterpartyId)?.name ||
-        '',
-      rawMaterialItemId: fp?.defaultRawMaterialItemId ?? f.rawMaterialItemId,
-      packagingRecipeId: fp?.defaultPackagingRecipeId ?? f.packagingRecipeId,
-      metersPerRoll: fp?.metersPerRoll ?? f.metersPerRoll,
-    }))
+    const inherited = inheritPackagingFromProduct(fp, {
+      items: packagingRecipes,
+      nextCode: 1,
+      boxes: boxRecipes,
+    })
+    setForm((f) => {
+      const metersPerRoll = fp?.metersPerRoll ?? f.metersPerRoll
+      const totalQtyMp = f.totalQtyMp
+      return {
+        ...f,
+        finishedProductId: id || undefined,
+        productName: fp?.name ?? '',
+        category: fp?.category ?? f.category,
+        colorLogo: fp?.colorLogo ?? f.colorLogo,
+        productColor: fp?.productColor ?? f.productColor,
+        formulationRecipeId:
+          fp?.defaultFormulationRecipeId ?? suggested?.id ?? f.formulationRecipeId,
+        rawMaterialKind:
+          productTypeToRawKind(fp?.productType) ?? fp?.rawMaterialKind ?? f.rawMaterialKind,
+        counterpartyId: f.counterpartyId || fp?.defaultCounterpartyId,
+        customer:
+          f.customer ||
+          counterparties.find((c) => c.id === fp?.defaultCounterpartyId)?.name ||
+          '',
+        rawMaterialItemId: fp?.defaultRawMaterialItemId ?? f.rawMaterialItemId,
+        packagingRecipeId: inherited.packagingRecipeId ?? f.packagingRecipeId,
+        boxRecipeId: inherited.boxRecipeId,
+        boxItemId: inherited.boxItemId ?? f.boxItemId,
+        metersPerRoll,
+        targetGsm: fp?.grammageGsm ?? f.targetGsm,
+        meshCellSize: inherited.meshCellSize ?? f.meshCellSize,
+        orderedRolls: estimatedOrderedRolls(totalQtyMp, metersPerRoll) ?? f.orderedRolls,
+        rollsPerBox: inherited.rollsPerBox ?? f.rollsPerBox,
+      }
+    })
   }
 
   function saveOrder() {
@@ -419,9 +487,9 @@ export function PlannerPage({
     ) {
       return
     }
-    const res = onActivateOrder(id)
+    const res = await onActivateOrder(id)
     if (!res.ok) {
-      setNotice(t(res.messageKey ?? 'planner.activate.recipePending'))
+      setNotice(t(res.messageKey ?? res.error ?? 'planner.activate.recipePending'))
       return
     }
     setNotice(t('planner.activated'))
@@ -464,11 +532,12 @@ export function PlannerPage({
   return (
     <PageLayout>
       <PageHeader
+        density="compact"
         badge={t('planner.badge')}
         title={t('planner.title')}
         subtitle={t('planner.subtitle')}
         actions={
-          <Button variant="success" onClick={startNew}>
+          <Button variant="success" onClick={startNew} data-coach="planner:newOrder">
             {t('planner.newOrder')}
           </Button>
         }
@@ -482,6 +551,7 @@ export function PlannerPage({
           <MonthNavigator month={activeMonth} onChange={onMonthChange} variant="input" />
         </label>
         <TabBar
+          coachPrefix="planner"
           tabs={(
             [
               ['orders', 'planner.tab.orders'],
@@ -493,6 +563,7 @@ export function PlannerPage({
                   ? `${t('planner.tab.materials')} (${materialShortageCount})`
                   : 'planner.tab.materials',
               ],
+              ['mrp', 'planner.tab.mrp'],
             ] as const
           ).map(([id, key]) => ({
             id,
@@ -503,420 +574,220 @@ export function PlannerPage({
         />
       </div>
 
-      {tab === 'orders' && (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-          <div className="space-y-2">
-            <h3 className="text-sm font-bold text-ink">{t('planner.orderList')}</h3>
+      {tab === 'orders' && editing && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 shadow-sm">
+            <button
+              type="button"
+              className="rounded-md border border-stone-200 px-2.5 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+              onClick={() => {
+                setEditing(false)
+                clearWorkspaceDraft(PLANNER_DRAFT_KEY)
+                if (selected) setForm(selected)
+              }}
+            >
+              ← {t('planner.form.backToList')}
+            </button>
+            <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-stone-500 sm:max-w-md">
+              <span className="shrink-0 font-medium">{t('planner.orderList')}</span>
+              <select
+                className="min-w-0 flex-1 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-sm text-ink"
+                value={selectedId ?? ''}
+                onChange={(e) => {
+                  const id = e.target.value
+                  if (!id) {
+                    startNew()
+                    return
+                  }
+                  const o = orders.find((x) => x.id === id)
+                  if (o) {
+                    setSelectedId(o.id)
+                    setForm(o)
+                    setEditing(true)
+                  }
+                }}
+              >
+                <option value="">{t('planner.newOrder')}</option>
+                {orders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {(o.orderNumber || t('planner.draft')) +
+                      ' · ' +
+                      o.productName +
+                      (o.customer ? ` · ${o.customer}` : '')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button size="sm" variant="success" onClick={startNew}>
+              {t('planner.newOrder')}
+            </Button>
+          </div>
+
+          <PlannerOrderForm
+            form={form}
+            setForm={setForm}
+            isEdit={!!selectedId}
+            counterparties={counterparties}
+            finishedProducts={finishedProducts}
+            formulationRecipes={formulationRecipes}
+            packagingRecipes={packagingRecipes}
+            boxRecipes={boxRecipes}
+            warehouseItems={warehouseItems}
+            warehouseMovements={warehouseMovements}
+            warehouseAccounting={warehouseAccounting}
+            categoryNames={categoryNames}
+            formPackagingPreview={formPackagingPreview}
+            formForStock={formForStock}
+            salesBanner={
+              form.salesOrderId
+                ? (() => {
+                    const salesLink = resolveProductionOrderSalesLink(form, salesOrders)
+                    if (!salesLink) return null
+                    return <SalesOrderLinkBanner link={salesLink} onOpen={onOpenSalesOrder} />
+                  })()
+                : undefined
+            }
+            onSelectCounterparty={selectCounterparty}
+            onSelectFinishedProduct={selectFinishedProduct}
+            onOpenDirectory={branchDirectory}
+            onSave={saveOrder}
+            onCancel={() => {
+              setEditing(false)
+              clearWorkspaceDraft(PLANNER_DRAFT_KEY)
+              if (selected) setForm(selected)
+            }}
+          />
+        </div>
+      )}
+
+      {tab === 'orders' && !editing && ordersView === 'kanban' && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <KanbanViewToggle
+              mode={ordersView}
+              onChange={setOrdersView}
+              dataCoachKanban="planner:ordersViewKanban"
+            />
+            <Button size="sm" variant="success" onClick={startNew} data-coach="planner:newOrder">
+              {t('planner.newOrder')}
+            </Button>
+          </div>
+          <PlannerOrdersKanban
+            orders={orders}
+            requests={requests}
+            finishedProducts={finishedProducts}
+            onOpen={openOrder}
+            onMoveStatus={moveOrderStatus}
+          />
+        </div>
+      )}
+
+      {tab === 'orders' && !editing && ordersView === 'list' && (
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
+          <div className="space-y-1">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold text-ink">{t('planner.orderList')}</h3>
+                <KanbanViewToggle
+                  mode={ordersView}
+                  onChange={setOrdersView}
+                  dataCoachKanban="planner:ordersViewKanban"
+                />
+              </div>
+              <Button size="sm" variant="success" onClick={startNew} data-coach="planner:newOrder">
+                {t('planner.newOrder')}
+              </Button>
+            </div>
             {orders.length === 0 && (
               <p className="rounded-sm border border-dashed border-grid bg-white p-6 text-center text-sm text-stone-500">
                 {t('planner.empty')}
               </p>
             )}
-            {orders.map((o) => {
-              const sum = summarizeOrder(o, requests)
-              const orderColor = resolveOrderProductColor(o, finishedProducts)
-              const salesLink = resolveProductionOrderSalesLink(o, salesOrders)
-              const hasMaterialShort =
-                PLANNER_MATERIAL_STATUSES.includes(o.status) &&
-                orderHasMaterialShortage(o, warehouseCtx, warehouseItems)
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => openOrder(o)}
-                  className={`relative w-full overflow-hidden rounded-sm border p-3 text-left transition-colors ${
-                    selectedId === o.id
-                      ? 'border-accent bg-orange-50/60'
-                      : 'border-grid bg-white hover:border-accent/40'
-                  }`}
-                >
-                  {orderColor && (
-                    <span
-                      className="absolute inset-y-0 left-0 w-1"
-                      style={{ backgroundColor: orderColor }}
-                      aria-hidden
-                    />
-                  )}
-                  <div className="flex items-start justify-between gap-2 pl-1">
-                    <div>
-                      <p className="font-semibold text-ink">{o.orderNumber || t('planner.draft')}</p>
-                      <p className="flex items-center gap-1.5 text-sm text-stone-600">
-                        {orderColor && (
-                          <ProductColorBadge productColor={orderColor} showLabel={false} />
-                        )}
-                        {o.productName}
-                      </p>
-                      <p className="text-xs text-stone-400">{o.customer}</p>
-                      {salesLink && (
-                        <p className="mt-0.5 text-xs font-medium text-sky-800">
-                          {t('planner.fromSalesOrder')}:{' '}
-                          {formatSalesOrderLinkLabel(salesLink, { includeLine: true })}
-                        </p>
-                      )}
-                      {o.lineAssignmentPending && (
-                        <p className="text-xs text-amber-700">{t('planner.lineMasterPending')}</p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
+            <div className="max-h-[min(70vh,40rem)] space-y-1 overflow-y-auto pr-0.5">
+              {orders.map((o) => {
+                const sum = summarizeOrder(o, requests)
+                const orderColor = resolveOrderProductColor(o, finishedProducts)
+                const salesLink = resolveProductionOrderSalesLink(o, salesOrders)
+                const hasMaterialShort =
+                  PLANNER_MATERIAL_STATUSES.includes(o.status) &&
+                  orderHasMaterialShortage(o, warehouseCtx, warehouseItems)
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => openOrder(o)}
+                    className={`relative w-full overflow-hidden rounded-md border px-2 py-1.5 text-left transition-colors ${
+                      selectedId === o.id
+                        ? 'border-teal-600 bg-teal-50/70'
+                        : 'border-grid bg-white hover:border-teal-400/50'
+                    }`}
+                  >
+                    {orderColor && (
                       <span
-                        className={`rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[o.status]}`}
-                      >
-                        {t(`planner.status.${o.status}`)}
-                      </span>
-                      {hasMaterialShort && (
-                        <span className="rounded-sm bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800">
-                          {t('planner.material.short')}
-                        </span>
-                      )}
+                        className="absolute inset-y-0 left-0 w-1"
+                        style={{ backgroundColor: orderColor }}
+                        aria-hidden
+                      />
+                    )}
+                    <div className="flex items-center justify-between gap-2 pl-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate text-xs font-bold text-ink">
+                            {o.orderNumber || t('planner.draft')}
+                          </p>
+                          <span
+                            className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold ${STATUS_COLORS[o.status]}`}
+                          >
+                            {t(`planner.status.${o.status}`)}
+                          </span>
+                        </div>
+                        <p className="truncate text-[11px] text-stone-600">
+                          {o.productName}
+                          {o.customer ? ` · ${o.customer}` : ''}
+                        </p>
+                        <p className="truncate text-[10px] text-stone-400">
+                          {[
+                            o.customer || null,
+                            o.meshCellSize ? o.meshCellSize.replace('x', '×') : null,
+                            o.targetGsm ? `${o.targetGsm} г/м²` : null,
+                            o.orderedRolls
+                              ? `${o.orderedRolls} ${t('planner.rollsUnit')}`
+                              : null,
+                            salesLink
+                              ? formatSalesOrderLinkLabel(salesLink, { includeLine: false })
+                              : null,
+                            o.lineAssignmentPending ? t('planner.lineMasterPending') : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-[10px] tabular-nums text-stone-500">
+                        <div>{sum.completionPct}%</div>
+                        <div>
+                          {formatNum(sum.factMp)}/{formatNum(o.totalQtyMp)}
+                        </div>
+                        {hasMaterialShort && (
+                          <span className="mt-0.5 inline-block rounded bg-red-100 px-1 font-semibold text-red-800">
+                            {t('planner.material.short')}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-2 flex gap-3 text-xs text-stone-500">
-                    <span>{sum.completionPct}%</span>
-                    <span>
-                      {formatNum(sum.factMp)} / {formatNum(o.totalQtyMp)} {t('planner.unitMp')}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-stone-100">
-                    <div
-                      className="h-full rounded-sm bg-accent transition-all"
-                      style={{ width: `${Math.min(100, sum.completionPct)}%` }}
-                    />
-                  </div>
-                </button>
-              )
-            })}
+                    <div className="mt-1 ml-1.5 h-0.5 overflow-hidden rounded-full bg-stone-100">
+                      <div
+                        className="h-full rounded-full bg-teal-600"
+                        style={{ width: `${Math.min(100, sum.completionPct)}%` }}
+                      />
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
-          <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">
-            {editing ? (
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold uppercase tracking-wide text-ink">
-                  {selectedId ? t('planner.editOrder') : t('planner.newOrder')}
-                </h3>
-                {form.salesOrderId && (() => {
-                  const salesLink = resolveProductionOrderSalesLink(form, salesOrders)
-                  if (!salesLink) return null
-                  return (
-                    <SalesOrderLinkBanner
-                      link={salesLink}
-                      onOpen={onOpenSalesOrder}
-                    />
-                  )
-                })()}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <DirectoryFieldPicker
-                    label={t('planner.customer')}
-                    hint={t('planner.customerHint')}
-                    value={form.counterpartyId ?? ''}
-                    placeholder={t('planner.pickCounterparty')}
-                    options={counterparties
-                      .filter((c) => c.active)
-                      .map((c) => ({
-                        value: c.id,
-                        label: `${c.code} · ${c.name}`,
-                      }))}
-                    onChange={selectCounterparty}
-                    onAdd={() => branchDirectory('counterparties')}
-                  />
-                  <DirectoryFieldPicker
-                    label={t('planner.product')}
-                    hint={t('planner.productHint')}
-                    value={form.finishedProductId ?? ''}
-                    placeholder={t('planner.pickProduct')}
-                    options={finishedProducts
-                      .filter((p) => p.active)
-                      .map((p) => ({
-                        value: p.id,
-                        label: `${p.code} · ${p.name}`,
-                      }))}
-                    onChange={selectFinishedProduct}
-                    onAdd={() => branchDirectory('finishedProducts')}
-                  />
-                  <div className="sm:col-span-2">
-                    <ProductColorPicker
-                      productColor={form.productColor}
-                      colorLogo={form.colorLogo}
-                      onColorChange={(productColor) =>
-                        setForm((f) => ({ ...f, productColor }))
-                      }
-                      onLogoChange={(colorLogo) => setForm((f) => ({ ...f, colorLogo }))}
-                    />
-                  </div>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.category')}
-                    <select
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.category}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          category: e.target.value as PlannerOrderCategory,
-                        }))
-                      }
-                    >
-                      {PLANNER_ORDER_CATEGORIES.map((c) => (
-                        <option key={c.key} value={c.key}>
-                          {plannerCategoryLabel(c.key, locale)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.totalQty')}
-                    <input
-                      type="number"
-                      min={0}
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.totalQtyMp || ''}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          totalQtyMp: Number(e.target.value) || 0,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.startDate')}
-                    <input
-                      type="date"
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.startDate}
-                      onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-                    />
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.endDate')}
-                    <input
-                      type="date"
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.endDate}
-                      onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-                    />
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.line')}
-                    <select
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.lineId}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          lineId: e.target.value as ProductionOrder['lineId'],
-                        }))
-                      }
-                    >
-                      {PRODUCTION_LINES.filter((l) => l.id !== 'pack').map((l) => (
-                        <option key={l.id} value={l.id}>
-                          {locale === 'ka' ? l.labelKa : l.labelRu}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.priority')}
-                    <select
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.priority}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          priority: e.target.value as ProductionOrder['priority'],
-                        }))
-                      }
-                    >
-                      <option value="normal">{t('planner.priorityNormal')}</option>
-                      <option value="urgent">{t('planner.priorityUrgent')}</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.planMode')}
-                    <select
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.planMode}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          planMode: e.target.value as PlannerPlanMode,
-                        }))
-                      }
-                    >
-                      <option value="even">{t('planner.planModeEven')}</option>
-                      <option value="manual">{t('planner.planModeManual')}</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-medium text-stone-500">
-                    {t('planner.recalcMode')}
-                    <select
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      value={form.recalcMode}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          recalcMode: e.target.value as PlannerRecalcMode,
-                        }))
-                      }
-                    >
-                      <option value="auto">{t('planner.recalcAuto')}</option>
-                      <option value="manual">{t('planner.recalcManual')}</option>
-                    </select>
-                  </label>
-                  <RawMaterialPlanField
-                    kind={form.rawMaterialKind}
-                    itemId={form.rawMaterialItemId}
-                    metersPerRoll={form.metersPerRoll}
-                    warehouseItems={warehouseItems}
-                    categoryNames={categoryNames}
-                    onKindChange={(rawMaterialKind) =>
-                      setForm((f) => ({ ...f, rawMaterialKind }))
-                    }
-                    onItemChange={(rawMaterialItemId) =>
-                      setForm((f) => ({ ...f, rawMaterialItemId }))
-                    }
-                    onMetersPerRollChange={(metersPerRoll) =>
-                      setForm((f) => ({ ...f, metersPerRoll }))
-                    }
-                    onOpenNomenclature={() => branchDirectory('nomenclature')}
-                  />
-
-                  <div className="sm:col-span-2 rounded-sm border border-violet-200/80 bg-violet-50/30 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-violet-900">
-                      {t('planner.formulationBlock')}
-                    </p>
-                    <DirectoryFieldPicker
-                      label={t('planner.formulationRecipe')}
-                      value={form.formulationRecipeId ?? ''}
-                      placeholder={t('planner.formulationRecipePick')}
-                      options={formulationRecipes
-                        .filter((r) => r.active)
-                        .map((r) => ({
-                          value: r.id,
-                          label: `${r.code} · ${r.variantCode ?? r.name.slice(0, 40)}`,
-                        }))}
-                      onChange={(id) =>
-                        setForm((f) => ({
-                          ...f,
-                          formulationRecipeId: id || undefined,
-                        }))
-                      }
-                      onAdd={() => branchDirectory('formulations')}
-                    />
-                    {form.formulationRecipeId && (() => {
-                      const fr = formulationRecipes.find(
-                        (r) => r.id === form.formulationRecipeId,
-                      )
-                      if (!fr) return null
-                      return (
-                        <p className="mt-2 text-xs text-stone-600">
-                          {formulationCategoryLabel(fr.category, locale)} ·{' '}
-                          {recipeDryBatchKg(fr)} {t('formulation.kgDry')} ·{' '}
-                          {recipeTotalCost(fr).toFixed(2)} {fr.currency}
-                          {extractSolidsPct(fr.note)
-                            ? ` · ${t('formulation.col.solids')} ${extractSolidsPct(fr.note)}`
-                            : ''}
-                        </p>
-                      )
-                    })()}
-                  </div>
-
-                  <div className="sm:col-span-2 rounded-sm border border-amber-200/80 bg-amber-50/30 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
-                      {t('planner.packBlock')}
-                    </p>
-                    <DirectoryFieldPicker
-                      label={t('planner.packRecipe')}
-                      value={form.packagingRecipeId ?? ''}
-                      placeholder={t('planner.packRecipePick')}
-                      options={packagingRecipes
-                        .filter((r) => r.active)
-                        .map((r) => ({
-                          value: r.id,
-                          label: `${r.code} · ${r.name}`,
-                        }))}
-                      onChange={(id) =>
-                        setForm((f) => ({
-                          ...f,
-                          packagingRecipeId: id || undefined,
-                        }))
-                      }
-                      onAdd={() => branchDirectory('packagingRecipes')}
-                    />
-                    {form.packagingRecipeId && (() => {
-                      const recipe = packagingRecipes.find(
-                        (r) => r.id === form.packagingRecipeId,
-                      )
-                      return recipe ? (
-                        <p className="mt-2 text-xs text-stone-600">
-                          {formatStackDescription(recipe, locale)}
-                        </p>
-                      ) : null
-                    })()}
-                    {formPackagingPreview && (
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                        <div className="rounded-sm border border-grid bg-white px-2 py-1.5">
-                          <span className="text-stone-500">{t('planner.packRolls')}</span>
-                          <p className="font-semibold">{formPackagingPreview.rawRollsEstimated}</p>
-                        </div>
-                        <div className="rounded-sm border border-grid bg-white px-2 py-1.5">
-                          <span className="text-stone-500">{t('planner.packPallets')}</span>
-                          <p className="font-semibold">{formPackagingPreview.palletsNeeded}</p>
-                        </div>
-                        <div className="rounded-sm border border-grid bg-white px-2 py-1.5">
-                          <span className="text-stone-500">{t('planner.packBoxes')}</span>
-                          <p className="font-semibold">{formPackagingPreview.boxesNeeded}</p>
-                        </div>
-                        <div className="rounded-sm border border-grid bg-white px-2 py-1.5">
-                          <span className="text-stone-500">{t('planner.packPerPallet')}</span>
-                          <p className="font-semibold">{formPackagingPreview.rollsPerPallet}</p>
-                        </div>
-                      </div>
-                    )}
-                    <div className="mt-4 border-t border-amber-200/60 pt-3">
-                      <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
-                        {t('planner.material.blockTitle')}
-                      </p>
-                      <div className="mt-2">
-                        <MaterialStockHint
-                          order={formForStock}
-                          warehouseItems={warehouseItems}
-                          warehouseMovements={warehouseMovements}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <label className="text-xs font-medium text-stone-500 sm:col-span-2">
-                    {t('planner.note')}
-                    <textarea
-                      className="mt-1 w-full rounded-sm border border-grid px-3 py-2 text-sm"
-                      rows={2}
-                      value={form.note ?? ''}
-                      onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-                    />
-                  </label>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-sm bg-accent px-4 py-2 text-sm font-semibold text-white"
-                    onClick={saveOrder}
-                  >
-                    {t('planner.save')}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-sm border border-grid px-4 py-2 text-sm"
-                    onClick={() => {
-                      setEditing(false)
-                      clearWorkspaceDraft(PLANNER_DRAFT_KEY)
-                      if (selected) setForm(selected)
-                    }}
-                  >
-                    {t('planner.cancel')}
-                  </button>
-                </div>
-              </div>
-            ) : selected && selectedSummary ? (
+          <div className="rounded-lg border border-grid bg-white p-3 shadow-sm lg:sticky lg:top-2 lg:self-start">
+            {selected && selectedSummary ? (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
@@ -930,7 +801,18 @@ export function PlannerPage({
                       {selected.productName}
                     </p>
                     <p className="text-xs text-stone-400">
-                      {selected.customer} · {plannerCategoryLabel(selected.category, locale)}
+                      {[
+                        selected.customer,
+                        selected.meshCellSize
+                          ? selected.meshCellSize.replace('x', '×')
+                          : null,
+                        selected.targetGsm ? `${selected.targetGsm} г/м²` : null,
+                        selected.orderedRolls
+                          ? `${selected.orderedRolls} ${t('planner.rollsUnit')}`
+                          : `${formatNum(selected.totalQtyMp)} ${t('planner.unitMp')}`,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </p>
                   </div>
                   <span
@@ -1015,6 +897,34 @@ export function PlannerPage({
                         )}
                       </div>
                     )}
+                    {selected.packagingBomSnapshot && (
+                      <div className="rounded-sm border border-sky-200 bg-sky-50/50 px-3 py-2 text-sm sm:col-span-2">
+                        <p className="text-xs font-bold uppercase text-sky-900">
+                          {t('g5.production.bom.title')}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-600">{t('g5.production.bom.readOnly')}</p>
+                        <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-3">
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.version')}</dt>
+                            <dd className="font-mono">{selected.packagingBomSnapshot.version}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.hash')}</dt>
+                            <dd className="font-mono" title={selected.packagingBomSnapshot.contentHash}>
+                              {shortContentHash(selected.packagingBomSnapshot.contentHash)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-stone-500">{t('g5.production.bom.snapshotDate')}</dt>
+                            <dd className="font-mono">
+                              {selected.packagingBomSnapshot.asOfDate ??
+                                selected.packagingBomSnapshot.snapshotAt?.slice(0, 10) ??
+                                '—'}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1023,6 +933,7 @@ export function PlannerPage({
                     order={selected}
                     warehouseItems={warehouseItems}
                     warehouseMovements={warehouseMovements}
+                    warehouseAccounting={warehouseAccounting}
                   />
                 )}
 
@@ -1052,9 +963,15 @@ export function PlannerPage({
                       {tf('planner.todayPlan', {
                         mp: formatNum(selectedTodayPlan.planMp),
                         line:
-                          PRODUCTION_LINES.find(
-                            (l) => l.id === (selectedTodayPlan.dayPlan.lineId ?? selected.lineId),
-                          )?.[locale === 'ka' ? 'labelKa' : 'labelRu'] ?? selected.lineId,
+                          labelRuKa(
+                            locale,
+                            PRODUCTION_LINES.find(
+                              (l) => l.id === (selectedTodayPlan.dayPlan.lineId ?? selected.lineId),
+                            )?.labelRu,
+                            PRODUCTION_LINES.find(
+                              (l) => l.id === (selectedTodayPlan.dayPlan.lineId ?? selected.lineId),
+                            )?.labelKa,
+                          ) ?? selected.lineId,
                       })}
                     </p>
                     <p className="mt-1 text-xs text-emerald-800">
@@ -1089,7 +1006,7 @@ export function PlannerPage({
                             className="rounded-sm border border-emerald-200 bg-emerald-50/50 px-3 py-2 text-xs"
                           >
                             <span className="font-semibold">
-                              {locale === 'ka' ? line.labelKa : line.labelRu}
+                              {labelRuKa(locale, line.labelRu, line.labelKa)}
                             </span>
                             <span className="ml-2">{formatNum(row.totalMp)} {t('planner.unitMp')}</span>
                             {hasReq && (
@@ -1422,10 +1339,16 @@ export function PlannerPage({
       )}
 
       {tab === 'materials' && (
+        <>
+        <G5MrpHorizonBanner store={store} />
         <PlannerMaterialsPanel
           orders={orders}
           warehouseItems={warehouseItems}
           warehouseMovements={warehouseMovements}
+          warehouseDocuments={warehouseDocuments}
+          warehouseLocations={warehouseLocations}
+          productionLineBindings={productionLineBindings}
+          warehouseAccounting={warehouseAccounting}
           onReserveOrder={onReserveMaterials}
           onUnreserveOrder={onUnreserveMaterials}
           onSelectOrder={(id) => {
@@ -1434,7 +1357,43 @@ export function PlannerPage({
             else setSelectedId(id)
             setTab('orders')
           }}
+          access={access}
+          currentUser={currentUser}
+          onCreateWorkTask={onCreateWorkTask}
         />
+        </>
+      )}
+
+      {tab === 'mrp' && (
+        <div className="space-y-4">
+          <G5ActivationWizard
+            store={store}
+            access={access}
+            currentUser={currentUser}
+            canActivateG5={canActivateG5}
+          />
+          <G5MrpWorkspace
+            asOfDate={activeMonth.length === 7 ? `${activeMonth}-01` : activeMonth}
+            salesOrders={salesOrders}
+            warehouseItems={warehouseItems}
+            finishedProducts={finishedProducts}
+            counterparties={counterparties}
+            store={store}
+            onOpenSalesOrder={() => onOpenSalesOrder?.()}
+            onOpenProductionOrder={(id) => {
+              const order = orders.find((o) => o.id === id)
+              if (order) {
+                openOrder(order)
+                setTab('orders')
+              }
+            }}
+            onNavigateToDirectory={onNavigateToDirectory}
+            access={access}
+            currentUser={currentUser}
+            onCreateWorkTask={onCreateWorkTask}
+            canActivateG6={canActivateG6 || canActivateG5}
+          />
+        </div>
       )}
 
       {tab === 'reports' && (

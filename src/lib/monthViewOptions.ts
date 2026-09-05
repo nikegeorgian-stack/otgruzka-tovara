@@ -1,6 +1,11 @@
-import type { Employee, HrStructuralUnit } from './types'
+import { brigadeLabel } from './brigadeText'
+import { collatorLocale } from '@/i18n/localeFormat'
+import type { Employee, HrStructuralUnit, Locale } from './types'
 
 export type MonthGroupMode = 'brigade' | 'unit'
+
+/** Пустая строка = все разделы (фильтр списка бригад). */
+export const BRIGADE_UNIT_FILTER_ALL = ''
 
 export type MonthTableDisplay = {
   showTab: boolean
@@ -15,14 +20,30 @@ export type MonthViewDisplay = MonthTableDisplay & {
   showFact: boolean
 }
 
+/** Минимальный вид таблицы: №, ФИО, дни. Мета-колонки — только по явному включению. */
 export const DEFAULT_MONTH_VIEW_DISPLAY: MonthViewDisplay = {
   showPlan: true,
   showFact: true,
-  showTab: true,
-  showPosition: true,
-  showUnit: true,
-  showSchedule: true,
-  showTotals: true,
+  showTab: false,
+  showPosition: false,
+  showUnit: false,
+  showSchedule: false,
+  showTotals: false,
+}
+
+/** Собрать вид: сохранённые флаги плана/факта/итогов; мета-колонки всегда выкл. */
+export function resolveMonthViewDisplay(
+  saved?: Partial<MonthViewDisplay> | null,
+  _opts?: { workshopMasterMode?: boolean },
+): MonthViewDisplay {
+  return {
+    ...DEFAULT_MONTH_VIEW_DISPLAY,
+    ...saved,
+    showTab: false,
+    showPosition: false,
+    showUnit: false,
+    showSchedule: false,
+  }
 }
 
 /** Сотрудники без structuralUnitId в фильтре табеля. */
@@ -92,6 +113,55 @@ export function brigadeMatchesSearch(
   const q = query.trim().toLowerCase()
   if (!q) return true
   return brigadeSearchText(nameRu, namesKa).includes(q)
+}
+
+/** Ключ раздела бригады в фильтре списка (`brigadeUnits` или «без раздела»). */
+export function brigadeAssignedUnitKey(
+  brigadeUnits: Record<string, string> | undefined,
+  brigade: string,
+): string {
+  const id = brigadeUnits?.[brigade]?.trim()
+  return id || NO_STRUCTURAL_UNIT_ID
+}
+
+export function brigadeMatchesUnitFilter(
+  brigade: string,
+  brigadeUnits: Record<string, string> | undefined,
+  unitFilter: string,
+): boolean {
+  if (!unitFilter || unitFilter === BRIGADE_UNIT_FILTER_ALL) return true
+  return brigadeAssignedUnitKey(brigadeUnits, brigade) === unitFilter
+}
+
+/** Список бригад: фильтр по поиску + разделу, сортировка А→Я по подписи. */
+export function filterAndSortBrigadeList(opts: {
+  brigades: string[]
+  namesKa: Record<string, string>
+  locale: Locale
+  search?: string
+  brigadeUnits?: Record<string, string>
+  unitFilter?: string
+}): string[] {
+  const {
+    brigades,
+    namesKa,
+    locale,
+    search = '',
+    brigadeUnits,
+    unitFilter = BRIGADE_UNIT_FILTER_ALL,
+  } = opts
+  const filtered = brigades.filter(
+    (b) =>
+      brigadeMatchesSearch(b, namesKa, search) &&
+      brigadeMatchesUnitFilter(b, brigadeUnits, unitFilter),
+  )
+  return [...filtered].sort((a, b) =>
+    brigadeLabel(a, namesKa, locale).localeCompare(
+      brigadeLabel(b, namesKa, locale),
+      collatorLocale(locale),
+      { sensitivity: 'base', numeric: true },
+    ),
+  )
 }
 
 export function isBrigadeVisible(

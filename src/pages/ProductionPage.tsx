@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { useWorkspaceDraftRestore } from '@/hooks/useWorkspaceDraftRestore'
 import { Button } from '@/components/ui/Button'
 import { MonthNavigator } from '@/components/ui/MonthNavigator'
@@ -26,10 +27,17 @@ import {
   emptyProductionRequest,
 } from '@/lib/production/init'
 import { ProductionPrintPreview } from '@/components/production/ProductionPrintPreview'
+import { PackagingReportPrintPreview } from '@/components/production/PackagingReportPrintPreview'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
+import { ProductionDayOutputReport } from '@/components/production/ProductionDayOutputReport'
 import { ProductionBrigadeRoster } from '@/components/production/ProductionBrigadeRoster'
+import { ProductionShiftReportPanel } from '@/components/production/ProductionShiftReportPanel'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
+import { listAvailableWipAtPackaging } from '@/lib/production/packagingReports'
+import type { ProductionPackagingReport } from '@/lib/production/packagingReports'
+import { buildPackagingReportPrintModel } from '@/lib/production/packagingReportPrint'
+import { shortContentHash } from '@/lib/planner/g5PackagingBom'
 import {
   formatNum,
   summarizeProductionMonth,
@@ -60,13 +68,22 @@ import {
 import { useDirectoryBranch } from '@/hooks/useDirectoryBranch'
 import type { WorkspaceBranchFrom, WorkspaceBranchTarget } from '@/lib/workspace/types'
 import type { ProductionOrder } from '@/lib/planner/types'
+import type { FormulationStore } from '@/lib/formulations/types'
+import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { Employee, MonthSheet } from '@/lib/types'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import type { ProductionStore } from '@/lib/production/types'
+import type { ConfirmShiftReportResult } from '@/lib/production/shiftReports'
+import type { ConfirmPackagingReportResult } from '@/lib/production/packagingReports'
+import type { PackagingReportPrintModel } from '@/lib/production/packagingReportPrint'
 
-type Tab = 'request' | 'journal' | 'summary'
+type Tab = 'request' | 'journal' | 'summary' | 'shift'
 
 type Props = {
   requests: ProductionRequest[]
   orders: ProductionOrder[]
+  formulations: FormulationStore
+  warehouse: WarehouseStore
   employees: Employee[]
   brigades: string[]
   brigadeNamesKa: Record<string, string>
@@ -84,6 +101,38 @@ type Props = {
   workspaceDrafts: Record<string, unknown>
   focusRequestId?: string | null
   onJournalFocusConsumed?: () => void
+  productionStore: ProductionStore
+  access: AccessStore
+  currentUser: AppUser | null
+  appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
+  onConfirmShiftReport: (input: {
+    report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+    productionOrderId: string
+    idempotencyKey: string
+  }) => ConfirmShiftReportResult | Promise<ConfirmShiftReportResult>
+  onConfirmPackagingReport?: (input: {
+    report: import('@/lib/production/packagingReports').ConfirmPackagingReportInput['report']
+    idempotencyKey: string
+    actor: { id?: string; name?: string; roleId?: import('@/lib/access/types').AccessRoleId }
+    appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
+    access?: import('@/lib/access/types').AccessStore | null
+    emergencyReason?: string
+  }) => ConfirmPackagingReportResult | Promise<ConfirmPackagingReportResult>
+  onConfirmPackagingReportCorrection?: (input: {
+    report: import('@/lib/production/packagingReports').ConfirmPackagingReportInput['report']
+    idempotencyKey: string
+    actor: { id?: string; name?: string; roleId?: import('@/lib/access/types').AccessRoleId }
+    appScope: Pick<import('@/lib/types').AppStore, 'brigades' | 'brigadiers' | 'employees'>
+    access?: import('@/lib/access/types').AccessStore | null
+    emergencyReason?: string
+  }) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
+  onCorrectShiftReport: (input: {
+    originalReportId: string
+    correctionReason: string
+    report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
+    productionOrderId: string
+    idempotencyKey: string
+  }) => ConfirmShiftReportResult | Promise<ConfirmShiftReportResult>
 }
 
 type ProductionWorkspaceDraft = {
@@ -95,6 +144,8 @@ type ProductionWorkspaceDraft = {
 export function ProductionPage({
   requests,
   orders,
+  formulations,
+  warehouse,
   employees,
   brigades,
   brigadeNamesKa,
@@ -110,7 +161,16 @@ export function ProductionPage({
   workspaceDrafts,
   focusRequestId,
   onJournalFocusConsumed,
+  productionStore,
+  access,
+  currentUser,
+  appScope,
+  onConfirmShiftReport,
+  onConfirmPackagingReport,
+  onConfirmPackagingReportCorrection: _onConfirmPackagingReportCorrection,
+  onCorrectShiftReport,
 }: Props) {
+  void _onConfirmPackagingReportCorrection
   const { t, tf, locale, employeeName } = useI18n()
   const { confirm } = useConfirm()
   const PROD_DRAFT_KEY = 'production-request'
@@ -118,6 +178,7 @@ export function ProductionPage({
   const [notice, setNotice] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [printOpen, setPrintOpen] = useState(false)
+  const [packagingPrintModel, setPackagingPrintModel] = useState<PackagingReportPrintModel | null>(null)
 
   const today = new Date().toISOString().slice(0, 10)
   const daySnapshot = useAsOfSnapshot()
@@ -217,6 +278,148 @@ export function ProductionPage({
     () => orders.filter((o) => o.status === 'active' || o.status === 'draft'),
     [orders],
   )
+  const packagingWip = useMemo(
+    () => listAvailableWipAtPackaging(productionStore, warehouse, 'pack'),
+    [productionStore, warehouse],
+  )
+  const activePackagingOrder = useMemo(
+    () => activeOrders.find((o) => o.lineId === 'pack') ?? activeOrders[0] ?? null,
+    [activeOrders],
+  )
+  const latestPackagingReport = useMemo(() => {
+    if (!activePackagingOrder) return null
+    const report = [...(productionStore.packagingReports ?? [])]
+      .filter(
+        (row) =>
+          row.status === 'confirmed' &&
+          row.productionOrderId === activePackagingOrder.id &&
+          row.shiftDate === form.date &&
+          row.shift === form.shift &&
+          row.lineId === 'pack',
+      )
+      .sort(
+        (a, b) =>
+          (b.confirmedAt ?? b.updatedAt).localeCompare(a.confirmedAt ?? a.updatedAt) ||
+          b.createdAt.localeCompare(a.createdAt),
+      )[0]
+    if (!report) return null
+    const lot =
+      productionStore.finishedGoodsLots?.find(
+        (row) => row.id === report.finishedGoodsLotId || row.packagingReportId === report.id,
+      ) ?? null
+    return buildPackagingReportPrintModel(report, {
+      order: activePackagingOrder,
+      warehouse,
+      lot,
+      attachments: productionStore.qcAttachments,
+    })
+  }, [activePackagingOrder, form.date, form.shift, productionStore.finishedGoodsLots, productionStore.packagingReports, productionStore.qcAttachments, warehouse])
+
+  const latestConfirmedPackagingReport = useMemo((): ProductionPackagingReport | null => {
+    if (!activePackagingOrder) return null
+    return (
+      [...(productionStore.packagingReports ?? [])]
+        .filter(
+          (row) =>
+            row.status === 'confirmed' &&
+            row.productionOrderId === activePackagingOrder.id &&
+            row.shiftDate === form.date &&
+            row.shift === form.shift &&
+            row.lineId === 'pack',
+        )
+        .sort(
+          (a, b) =>
+            (b.confirmedAt ?? b.updatedAt).localeCompare(a.confirmedAt ?? a.updatedAt) ||
+            b.createdAt.localeCompare(a.createdAt),
+        )[0] ?? null
+    )
+  }, [activePackagingOrder, form.date, form.shift, productionStore.packagingReports])
+
+  function openPackagingPrintPreview(result: ConfirmPackagingReportResult) {
+    if (!result.ok || !result.report) return
+    const confirmedReport = result.report
+    const order =
+      orders.find((o) => o.id === confirmedReport.productionOrderId) ?? activePackagingOrder ?? null
+    const lot =
+      result.lot ??
+      productionStore.finishedGoodsLots?.find(
+        (row) =>
+          row.id === confirmedReport.finishedGoodsLotId ||
+          row.packagingReportId === confirmedReport.id,
+      ) ??
+      null
+    setPackagingPrintModel(
+      buildPackagingReportPrintModel(confirmedReport, {
+        order,
+        warehouse,
+        lot,
+        attachments: productionStore.qcAttachments,
+      }),
+    )
+  }
+
+  async function confirmPackagingReport() {
+    if (!onConfirmPackagingReport || !activePackagingOrder) return
+    const report = {
+      productionOrderId: activePackagingOrder.id,
+      lineId: 'pack' as const,
+      shiftDate: form.date,
+      shift: form.shift,
+      packagingLocationId: warehouse.locations.find((loc) => loc.id === 'pack')?.id ?? 'pack',
+      finishedProductId:
+        activePackagingOrder.finishedProductId ||
+        activePackagingOrder.warehouseItemId ||
+        activePackagingOrder.semiFinishedItemId ||
+        '',
+      warehouseItemId:
+        activePackagingOrder.warehouseItemId ||
+        activePackagingOrder.finishedProductId ||
+        activePackagingOrder.semiFinishedItemId ||
+        '',
+      semiFinishedItemId: activePackagingOrder.semiFinishedItemId || '',
+      materialLines: [],
+      wipLines: packagingWip.map((line) => ({
+        lineId: line.lineId,
+        shiftReportId: line.shiftReportId,
+        productionOrderId: line.productionOrderId,
+        semiFinishedItemId: line.semiFinishedItemId,
+        itemId: line.itemId,
+        receiptDocumentId: line.receiptDocumentId,
+        quantity: line.remainingQty ?? line.quantity,
+        remainingQty: line.remainingQty,
+        unitSnapshot: line.unitSnapshot,
+        batchNo: line.batchNo,
+        expiryDate: line.expiryDate,
+      })),
+      outputM2: packagingWip.reduce((sum, line) => sum + (line.remainingQty ?? line.quantity), 0),
+      rollCount: form.packaging?.rolls.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0,
+      palletCount: form.packaging?.pallets.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0,
+      batchNo: activePackagingOrder.orderNumber,
+      m2PerRollSnapshot: undefined,
+      rollsPerPalletSnapshot: undefined,
+      conversionTolerancePct: 5,
+      conversionDeviationReason: undefined,
+      idempotencyKey: `pack::${activePackagingOrder.id}::${form.date}`,
+      id: undefined,
+      number: undefined,
+    }
+    const result = await onConfirmPackagingReport({
+      report,
+      idempotencyKey: `pack::${activePackagingOrder.id}::${form.date}`,
+      actor: {
+        id: currentUser?.id,
+        name: currentUser?.displayName,
+        roleId: currentUser?.roleId,
+      },
+      appScope,
+      access,
+    })
+    if (!result.ok) {
+      setNotice(result.error ? t(result.error) : 'Error')
+      return
+    }
+    openPackagingPrintPreview(result)
+  }
 
   const plannerPreview = useMemo(
     () => lineAllocationForDate(orders, form.date),
@@ -323,6 +526,8 @@ export function ProductionPage({
   useEffect(() => {
     if (!focusRequestId) return
     const req = requests.find((r) => r.id === focusRequestId)
+    // Pre-existing journal focus restore pattern (not introduced by P1B).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot focus load
     if (req) loadRequest(req)
     onJournalFocusConsumed?.()
   }, [focusRequestId])
@@ -526,7 +731,7 @@ export function ProductionPage({
 
   const lineTitle = (id: ProductionLineId) => {
     const line = PRODUCTION_LINES.find((l) => l.id === id)!
-    return locale === 'ka' ? line.labelKa : line.labelRu
+    return labelRuKa(locale, line.labelRu, line.labelKa)
   }
 
   const planStatus =
@@ -557,9 +762,11 @@ export function ProductionPage({
           <MonthNavigator month={activeMonth} onChange={onMonthChange} variant="input" />
         </label>
         <TabBar
+          coachPrefix="production"
           tabs={(
             [
               ['request', 'production.tab.request'],
+              ['shift', 'production.tab.shift'],
               ['journal', 'production.tab.journal'],
               ['summary', 'production.tab.summary'],
             ] as const
@@ -696,7 +903,7 @@ export function ProductionPage({
                 >
                   {PRODUCTION_LINES.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {locale === 'ka' ? l.labelKa : l.labelRu}
+                      {labelRuKa(locale, l.labelRu, l.labelKa)}
                     </option>
                   ))}
                 </select>
@@ -1366,6 +1573,165 @@ export function ProductionPage({
           </section>
           )}
 
+          {form.lineId === 'pack' && activePackagingOrder && (
+            <section className="rounded-sm border border-grid bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-ink">
+                    {t('production.pack.title')}
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    {activePackagingOrder.orderNumber} · {activePackagingOrder.productName}
+                  </p>
+                </div>
+                {onConfirmPackagingReport && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" size="sm" onClick={() => latestPackagingReport && setPackagingPrintModel(latestPackagingReport)} disabled={!latestPackagingReport}>
+                      {t('print.preview')}
+                    </Button>
+                    <Button type="button" size="sm" onClick={confirmPackagingReport}>
+                      {t('production.pack.confirm')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-sm border border-grid bg-stone-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    {t('production.pack.wip')}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {packagingWip.length > 0 ? (
+                      packagingWip.map((line) => (
+                        <li key={line.lineId} className="flex items-center justify-between gap-2">
+                          <span className="truncate">
+                            {line.batchNo ?? line.lineId} · {line.itemId}
+                          </span>
+                          <span className="text-stone-500">
+                            {formatNum(line.remainingQty ?? line.quantity)} {line.unitSnapshot}
+                          </span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-stone-500">{t('production.pack.noWip')}</li>
+                    )}
+                  </ul>
+                </div>
+                <div className="rounded-sm border border-grid bg-stone-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    {t('production.pack.materials')}
+                  </p>
+                  <div className="mt-2 space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span>{t('production.pack.m2')}</span>
+                      <span>{formatNum(packagingWip.reduce((sum, line) => sum + (line.remainingQty ?? line.quantity), 0))}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>{t('production.pack.rolls')}</span>
+                      <span>{formatNum(form.packaging?.rolls.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>{t('production.pack.pallets')}</span>
+                      <span>{formatNum(form.packaging?.pallets.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {activePackagingOrder.packagingBomSnapshot && !latestConfirmedPackagingReport ? (
+                <div className="mt-4 rounded-sm border border-sky-200 bg-sky-50/60 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-900">
+                    {t('g5.production.bom.title')}
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-600">{t('g5.production.bom.readOnly')}</p>
+                  <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.version')}</dt>
+                      <dd className="font-mono">{activePackagingOrder.packagingBomSnapshot.version}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.hash')}</dt>
+                      <dd
+                        className="font-mono"
+                        title={activePackagingOrder.packagingBomSnapshot.contentHash}
+                      >
+                        {shortContentHash(activePackagingOrder.packagingBomSnapshot.contentHash)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-stone-500">{t('g5.production.bom.snapshotDate')}</dt>
+                      <dd className="font-mono">
+                        {activePackagingOrder.packagingBomSnapshot.asOfDate ??
+                          activePackagingOrder.packagingBomSnapshot.snapshotAt?.slice(0, 10) ??
+                          '—'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : null}
+              {(latestConfirmedPackagingReport?.packagingBomId ||
+                (latestConfirmedPackagingReport?.packagingComponentNorms?.length ?? 0) > 0) && (
+                <div className="mt-4 overflow-auto rounded-sm border border-grid">
+                  <div className="border-b border-grid bg-stone-50 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+                      {t('g5.packaging.bom.title')}
+                    </p>
+                    <p className="mt-0.5 font-mono text-[10px] text-stone-500">
+                      {latestConfirmedPackagingReport?.packagingBomId ?? '—'} · v
+                      {latestConfirmedPackagingReport?.packagingBomVersion ?? '—'} ·{' '}
+                      {shortContentHash(latestConfirmedPackagingReport?.packagingBomContentHash)}
+                    </p>
+                    {latestConfirmedPackagingReport?.packagingExcessReason ? (
+                      <p className="mt-1 text-xs text-amber-900">
+                        {t('g5.packaging.bom.excessReason')}:{' '}
+                        {latestConfirmedPackagingReport.packagingExcessReason}
+                      </p>
+                    ) : null}
+                  </div>
+                  <table className="fc-table min-w-full text-xs">
+                    <thead>
+                      <tr className="text-left uppercase text-stone-500">
+                        <th className="px-2 py-1.5">{t('g5.packaging.bom.col.item')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.norm')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.actual')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.deviation')}</th>
+                        <th className="px-2 py-1.5 text-right">{t('g5.packaging.bom.col.tolerance')}</th>
+                        <th className="px-2 py-1.5">{t('g5.packaging.bom.col.reason')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(latestConfirmedPackagingReport?.packagingComponentNorms ?? []).map((row) => (
+                        <tr key={row.itemId} className="border-t border-grid">
+                          <td className="px-2 py-1 font-mono">{row.itemId}</td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {formatNum(row.normQty)} {row.unit}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {row.actualQty != null ? `${formatNum(row.actualQty)} ${row.unit}` : '—'}
+                          </td>
+                          <td
+                            className={`px-2 py-1 text-right font-mono ${
+                              row.overTolerance ? 'font-semibold text-amber-900' : ''
+                            }`}
+                          >
+                            {row.deviation != null ? formatNum(row.deviation) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {row.tolerance != null ? formatNum(row.tolerance) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-stone-600">
+                            {row.overTolerance
+                              ? latestConfirmedPackagingReport?.packagingExcessReason ?? '—'
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
           {form.lineId !== 'pack' && (
           <label className="block rounded-sm border border-grid bg-white p-4 shadow-sm">
             <span className="text-xs font-bold uppercase text-ink-muted">
@@ -1423,6 +1789,19 @@ export function ProductionPage({
         </div>
       )}
 
+      {tab === 'shift' && (
+        <ProductionShiftReportPanel
+          orders={orders}
+          production={productionStore}
+          warehouse={warehouse}
+          access={access}
+          currentUser={currentUser}
+          appScope={appScope}
+          onConfirm={onConfirmShiftReport}
+          onCorrect={onCorrectShiftReport}
+        />
+      )}
+
       {tab === 'journal' && (
         <>
           <AsOfSnapshotBar
@@ -1444,6 +1823,16 @@ export function ProductionPage({
               />
             </div>
           ) : null}
+          <div className="mb-4">
+            <ProductionDayOutputReport
+              date={daySnapshotDate}
+              requests={requests}
+              formulations={formulations}
+              warehouse={warehouse}
+              orders={orders}
+              asOfIso={daySnapshotAsOf ?? undefined}
+            />
+          </div>
           <div className="overflow-auto rounded-sm border border-grid bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-stone-50 text-xs uppercase text-stone-500">
@@ -1546,6 +1935,15 @@ export function ProductionPage({
             />
           ) : null}
 
+          <ProductionDayOutputReport
+            date={daySnapshotDate}
+            requests={requests}
+            formulations={formulations}
+            warehouse={warehouse}
+            orders={orders}
+            asOfIso={daySnapshotAsOf ?? undefined}
+          />
+
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">
               <p className="text-xs uppercase text-stone-500">{t('production.monthPlan')}</p>
@@ -1616,6 +2014,12 @@ export function ProductionPage({
           }
           rosterLines={rosterDisplayLines()}
           onClose={() => setPrintOpen(false)}
+        />
+      )}
+      {packagingPrintModel && (
+        <PackagingReportPrintPreview
+          model={packagingPrintModel}
+          onClose={() => setPackagingPrintModel(null)}
         />
       )}
     </PageLayout>

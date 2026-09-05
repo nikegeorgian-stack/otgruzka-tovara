@@ -2,12 +2,16 @@ import { useMemo, useState } from 'react'
 import { FormulationCubeLabelModal } from '@/components/technologist/FormulationCubeLabelModal'
 import { FormulationMixerPanel } from '@/components/technologist/FormulationMixerPanel'
 import { TechnologistRoomClimateWidget } from '@/components/technologist/TechnologistRoomClimateWidget'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { FormNotice } from '@/components/ui/FormNotice'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { useI18n } from '@/context/I18nContext'
 import type { PostBatchMixInput, PostBatchMixResult } from '@/lib/formulations/batch'
 import { formatMixDate } from '@/lib/formulations/cubeLabel'
+import type { MixTaskReserveResult } from '@/lib/formulations/mixTaskReserve'
+import { reservedQtyForMixTask } from '@/lib/formulations/mixTaskReserve'
 import type { FormulationBatchRun, FormulationStore } from '@/lib/formulations/types'
 import { formulationColorLabel } from '@/lib/formulations/types'
 import type { RoomClimateRecord, TechnologistQcStore } from '@/lib/technologist/types'
@@ -26,6 +30,8 @@ type Props = {
   webMixerMode?: boolean
   onPostBatch: (input: PostBatchMixInput) => PostBatchMixResult
   onCompleteMixTask: (taskId: string, batchRunId: string, doneByName?: string) => void
+  onReserveMixTask: (taskId: string) => MixTaskReserveResult
+  onUnreserveMixTask: (taskId: string) => boolean
   onAddRoomClimateReading: (entry: Omit<RoomClimateRecord, 'id' | 'createdAt'>) => void
   onRemoveRoomClimateReading?: (id: string) => void
 }
@@ -43,12 +49,15 @@ export function MixerPage({
   webMixerMode = false,
   onPostBatch,
   onCompleteMixTask,
+  onReserveMixTask,
+  onUnreserveMixTask,
   onAddRoomClimateReading,
   onRemoveRoomClimateReading,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [labelRun, setLabelRun] = useState<FormulationBatchRun | null>(null)
+  const [reserveNotice, setReserveNotice] = useState<string | null>(null)
 
   const recipeById = useMemo(
     () => new Map(formulations.recipes.map((r) => [r.id, r])),
@@ -82,12 +91,35 @@ export function MixerPage({
     [openTasks, selectedTaskId],
   )
 
+  const selectedHasReserve = useMemo(() => {
+    if (!selectedTask) return false
+    const itemIds = new Set(
+      warehouse.movements.filter((m) => m.mixTaskId === selectedTask.id).map((m) => m.itemId),
+    )
+    for (const itemId of itemIds) {
+      if (reservedQtyForMixTask(warehouse, selectedTask.id, itemId) > 0) return true
+    }
+    return false
+  }, [selectedTask, warehouse])
+
   function handleBatchPosted(run: FormulationBatchRun) {
     if (selectedTask) {
       onCompleteMixTask(selectedTask.id, run.id, operatorName)
       setSelectedTaskId(null)
     }
     setLabelRun(run)
+  }
+
+  function handleReserve() {
+    if (!selectedTask) return
+    const res = onReserveMixTask(selectedTask.id)
+    setReserveNotice(t(res.messageKey ?? (res.ok ? 'mixer.reserve.ok' : 'mixer.reserve.nothing')))
+  }
+
+  function handleUnreserve() {
+    if (!selectedTask) return
+    const ok = onUnreserveMixTask(selectedTask.id)
+    setReserveNotice(ok ? t('mixer.reserve.cleared') : t('mixer.reserve.nothing'))
   }
 
   const defaultWarehouseId = warehouse.locations[0]?.id
@@ -102,6 +134,11 @@ export function MixerPage({
         subtitle={t('mixer.subtitle')}
       />
 
+      {reserveNotice ? (
+        <FormNotice type="info" message={reserveNotice} onDismiss={() => setReserveNotice(null)} />
+      ) : null}
+
+      <div data-coach="mixer:inbox">
       <Card title={t('mixer.inbox.title')} description={t('mixer.inbox.hint')}>
         {openTasks.length === 0 ? (
           <p className="py-6 text-center text-sm text-stone-500">{t('mixer.inbox.empty')}</p>
@@ -143,9 +180,30 @@ export function MixerPage({
             })}
           </div>
         )}
-      </Card>
 
-      <div className="mt-4">
+        {selectedTask ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3">
+            <span className="text-xs text-stone-500">
+              {tf('mixer.activeTask', { task: selectedTask.taskNumber })}
+              {selectedHasReserve ? ` · ${t('mixer.reserve.active')}` : ''}
+            </span>
+            <Button size="sm" variant="secondary" onClick={handleReserve}>
+              {t('mixer.reserve.do')}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!selectedHasReserve}
+              onClick={handleUnreserve}
+            >
+              {t('mixer.reserve.undo')}
+            </Button>
+          </div>
+        ) : null}
+      </Card>
+      </div>
+
+      <div className="mt-4" data-coach="mixer:workPanel">
         <FormulationMixerPanel
           key={selectedTask?.id ?? 'free'}
           formulations={formulations}

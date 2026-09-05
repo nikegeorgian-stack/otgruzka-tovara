@@ -1,0 +1,166 @@
+# FST AppStore in PostgreSQL (Firebase SQL Connect)
+# Полный снимок AppStore v6 — одна строка на организацию (fibercell-main).
+# Синхронизация через revision (optimistic locking), без 3-way merge.
+
+type FstStore @table(key: ["id"]) {
+  id: String!
+  revision: Int! @default(value: 1)
+  """JSON-serialized AppStore v6 (sanitize secrets on write in client/API)."""
+  payloadJson: String!
+  fingerprint: String
+  updatedByUid: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Журнал событий — индексируется из auditLog и документов (SQL-фильтрация)."""
+type JournalEvent @table(key: ["id"]) {
+  id: String!
+  at: Timestamp!
+  category: String!
+  title: String!
+  detail: String!
+  actor: String
+  docDate: String
+  docNumber: String
+  docStatus: String
+  linkKind: String
+  linkRef: String
+  storeRevision: Int!
+}
+
+# ---------------------------------------------------------------------------
+# PHASE P1C.3 — server-trusted QC (outside FstStore.payloadJson)
+# Written only via Admin SDK / api/fst. Client UpdateFstStore cannot forge these.
+# ---------------------------------------------------------------------------
+
+"""Explicit QC capability bound to Firebase Auth UID + store scope."""
+type QcPermission @table(key: ["id"]) {
+  id: String!
+  firebaseUid: String!
+  storeId: String!
+  active: Boolean! @default(value: true)
+  canView: Boolean! @default(value: false)
+  canUpload: Boolean! @default(value: false)
+  canRelease: Boolean! @default(value: false)
+  canRegrade: Boolean! @default(value: false)
+  canReject: Boolean! @default(value: false)
+  canPostShipment: Boolean! @default(value: false)
+  revision: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdByUid: String!
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+  revokedAt: Timestamp
+  revokedByUid: String
+  revokeReason: String
+}
+
+"""Server-verified QC attachment metadata (binaries live in Firebase Storage)."""
+type QcAttachmentRecord @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  lotId: String!
+  documentKind: String!
+  storagePath: String!
+  contentType: String!
+  sizeBytes: Int!
+  checksum: String!
+  objectGeneration: String
+  """initiated | uploaded | verified | superseded"""
+  status: String! @default(value: "initiated")
+  uploadedByUid: String!
+  verifiedAt: Timestamp
+  revision: Int! @default(value: 1)
+  idempotencyKey: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Authoritative QC decision for a finished-goods lot."""
+type QcLotDecision @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  lotId: String!
+  lotRevision: Int! @default(value: 1)
+  decisionVersion: Int! @default(value: 1)
+  """pending | released | regrade_pending | rejected | scrap_pending"""
+  status: String! @default(value: "pending")
+  passportAttachmentId: String
+  protocolAttachmentId: String
+  targetFinishedProductId: String
+  reason: String
+  decidedByUid: String
+  decidedAt: Timestamp
+  revision: Int! @default(value: 1)
+  idempotencyKey: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+"""Minimal FG lot projection for QC quantity / shipment checks (not full AppStore)."""
+type QcFinishedGoodsLot @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  finishedProductId: String!
+  warehouseItemId: String!
+  batchNo: String!
+  quantityProduced: Float! @default(value: 0)
+  quantityShipped: Float! @default(value: 0)
+  packagingReportId: String!
+  """active | superseded"""
+  status: String! @default(value: "active")
+  revision: Int! @default(value: 1)
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String
+}
+
+# ---------------------------------------------------------------------------
+# PHASE G1 — server-authoritative operational data (outside FstStore.payloadJson)
+# Client UpdateFstStore cannot forge these. Written only via Admin SDK / api/fst.
+# ---------------------------------------------------------------------------
+
+"""Trusted principal capabilities (Firebase UID + store). Role in FstStore.payloadJson is NOT proof."""
+type FstPrincipalAccess @table(key: ["id"]) {
+  id: String!
+  firebaseUid: String!
+  storeId: String!
+  roleId: String!
+  """JSON: capability flags (canPostWarehouseDocument, canViewWarehouse, …)"""
+  capabilitiesJson: String!
+  active: Boolean! @default(value: true)
+  revision: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdByUid: String!
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+  revokedAt: Timestamp
+  revokedByUid: String
+  revokeReason: String
+}
+
+"""
+Server-only critical operational snapshot (hybrid transition model).
+Allowed domains only: warehouse (+ future production roots via typed commands).
+Own revision; client connector has NO access.
+"""
+type FstCriticalStore @table(key: ["id"]) {
+  id: String!
+  revision: Int! @default(value: 1)
+  """JSON: { schemaVersion, domains: { warehouse: WarehouseStore }, … }"""
+  payloadJson: String!
+  fingerprint: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+  updatedByUid: String!
+}
+
+"""Idempotent command receipt for server gateway (all-or-nothing apply)."""
+type FstCommandReceipt @table(key: ["id"]) {
+  id: String!
+  storeId: String!
+  commandType: String!
+  actorUid: String!
+  """JSON result payload returned to client"""
+  resultJson: String!
+  criticalRevisionAfter: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+}

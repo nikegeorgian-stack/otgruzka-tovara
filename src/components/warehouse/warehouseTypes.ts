@@ -6,6 +6,7 @@ import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { WorkwearStore } from '@/lib/workwear/types'
 import type { ImportResult } from '@/lib/warehouse/importExport'
 import type { PostWorkwearIssueResult } from '@/lib/workwear/issue'
+import type { FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
 import type {
   PostDocumentResult,
   CancelDocumentResult,
@@ -38,6 +39,10 @@ export type WarehousePageProps = {
   /** Облачный кабинет кладовщика — упрощённые вкладки */
   webWarehouseMode?: boolean
   webUserName?: string
+  /** Полный стор для пакетов Balance / шапок бланков */
+  exportStore?: import('@/lib/types').AppStore | null
+  /** Отметить складские документы выгруженными */
+  onMarkWarehouseDocsExported?: (documentIds: string[], actor?: { id?: string; name?: string }) => void
   printMeta?: {
     site: string
     responsible?: string
@@ -53,24 +58,30 @@ export type WarehousePageProps = {
   onRemoveLocation?: (id: string) => boolean
   onAddMovement: (movement: Omit<StockMovement, 'id' | 'createdAt'>) => void
   onDeleteMovement: (id: string) => boolean
-  onPostDocument: (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => PostDocumentResult
+  onPostDocument: (
+    doc: Omit<WarehouseDocument, 'id' | 'createdAt'>,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onPostTransfer?: (
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string
     },
-  ) => PostDocumentResult
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onCancelDocument?: (
     documentId: string,
     args?: { reason?: string },
-  ) => CancelDocumentResult
+  ) => CancelDocumentResult | Promise<CancelDocumentResult>
   /** Сохранить документ черновиком (без движений) */
-  onSaveDocumentDraft?: (doc: SaveDraftInput) => PostDocumentResult
+  onSaveDocumentDraft?: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
   /** Провести существующий черновик/документ */
-  onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  onPostExistingDocument?: (
+    documentId: string,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   /** Снять проведение (вернуть в черновик) */
   onUnpostDocument?: (documentId: string) => UnpostDocumentResult
   /** Удалить черновик документа */
-  onRemoveDocumentDraft?: (documentId: string) => UnpostDocumentResult
+  onRemoveDocumentDraft?: (
+    documentId: string,
+  ) => UnpostDocumentResult | Promise<UnpostDocumentResult>
   onMergeInvoiceRegistry: (registry: import('@/lib/warehouse/types').GeorgianInvoice[]) => void
   onRunInventory: (args: {
     itemId: string
@@ -84,13 +95,34 @@ export type WarehousePageProps = {
     date: string
     comment?: string
     lines: { itemId: string; counted: number }[]
-  }) => { applied: number; skipped: number; unchanged: number }
+  }) =>
+    | { applied: number; skipped: number; unchanged: number; error?: string }
+    | Promise<{ applied: number; skipped: number; unchanged: number; error?: string }>
   onPostOpeningBalances: (args: {
     warehouseId: string
     date: string
     comment?: string
     lines: { itemId: string; quantity: number }[]
   }) => { applied: number; skipped: number }
+  /** PHASE W0.5 — черновик начальной инвентаризации (активация учёта) */
+  onSaveOpeningInventoryDraft?: (input: {
+    id?: string
+    number: string
+    date: string
+    warehouseId: string
+    comment?: string
+    lines: { itemId: string; countedQty: number; comment?: string }[]
+  }) => PostDocumentResult | Promise<PostDocumentResult>
+  /** PHASE W0.5 — провести начальную инвентаризацию и активировать склад */
+  onPostOpeningInventory?: (input: {
+    id?: string
+    documentId?: string
+    number: string
+    date: string
+    warehouseId: string
+    comment?: string
+    lines: { itemId: string; countedQty: number; comment?: string }[]
+  }) => PostDocumentResult | Promise<PostDocumentResult>
   onAcquireDocumentLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }
@@ -120,7 +152,9 @@ export type WarehousePageProps = {
   onPostDailyIssueSession?: (
     sessionId: string,
     options?: { allowNegativeStock?: boolean },
-  ) => import('@/lib/warehouse/dailyIssue').PostDailyIssueResult
+  ) =>
+    | import('@/lib/warehouse/dailyIssue').PostDailyIssueResult
+    | Promise<import('@/lib/warehouse/dailyIssue').PostDailyIssueResult>
   onResolveWarehouseItemRequest?: (
     requestId: string,
     status: 'fulfilled' | 'rejected',
@@ -158,6 +192,7 @@ export type WarehousePageProps = {
   ) => import('@/lib/warehouse/keeperReplenishment').ReceiveReplenishmentResult
   finishedProducts?: import('@/lib/finishedProducts/types').FinishedProduct[]
   packagingRecipes?: import('@/lib/packaging/types').PackagingRecipe[]
+  finishedGoodsLots?: FinishedGoodsLot[]
   onUpsertFinishedProduct?: (fp: import('@/lib/finishedProducts/types').FinishedProduct) => void
   onUpsertLoadingShipment?: (
     input: import('@/lib/warehouse/loadingShipments').UpsertLoadingShipmentInput,
@@ -165,12 +200,16 @@ export type WarehousePageProps = {
   onPostLoadingShipment?: (
     shipmentId: string,
     args?: { keeperId?: string; keeperName?: string },
-  ) => import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+  ) =>
+    | import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+    | Promise<import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult>
   onRemoveLoadingShipment?: (shipmentId: string) => void
   salesOrders?: import('@/lib/sales/types').SalesOrder[]
   onOpenSalesOrder?: (orderId: string) => void
   /** Замесы пропиточного состава, ожидающие подтверждения кладовщиком */
   pendingBatchRuns?: FormulationBatchRun[]
+  /** Задания миксеру — для панели активных резервов сырья */
+  mixTasks?: import('@/lib/formulations/types').FormulationMixTask[]
   onConfirmFormulationBatch?: (
     runId: string,
     keeper?: { id?: string; name?: string },
@@ -205,6 +244,10 @@ export type WarehousePageProps = {
     viewId: K,
     patch: NonNullable<UserViewDefaults[K]>,
   ) => void
+  /** Создание задачи из ERP (приход / расхождение) */
+  access?: import('@/lib/access/types').AccessStore
+  currentUser?: import('@/lib/access/types').AppUser | null
+  onCreateWorkTask?: (draft: import('@/lib/tasks/types').WorkTaskDraft) => string
 }
 
 export type WarehouseTab =
@@ -224,9 +267,9 @@ export const WAREHOUSE_TABS: WarehouseTab[] = [
   'balances',
   'requests',
   'nomenclature',
-  'workwear',
-  'movements',
   'documents',
+  'movements',
+  'workwear',
   'inventory',
   'loading',
   'analytics',

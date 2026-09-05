@@ -13,10 +13,22 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
     <article className="warehouse-receipt-page print-sheet-page">
       <div className="warehouse-receipt-content print-sheet-content">
         <header className="warehouse-receipt-brand">
-          <div>
-            <div className="warehouse-receipt-brand-mark">FiberCell</div>
-            <div className="warehouse-receipt-brand-sub">{model.orgLine}</div>
+          <div className="warehouse-receipt-brand-row">
+            <img
+              src={model.brandMarkUrl}
+              alt="Fibercell"
+              className="warehouse-receipt-brand-logo"
+            />
+            <div>
+              <div className="warehouse-receipt-brand-mark">Fibercell</div>
+              <div className="warehouse-receipt-brand-sub">{model.orgLine}</div>
+            </div>
           </div>
+          {model.isStorno ? (
+            <div className="warehouse-receipt-storno-banner" aria-label="СТОРНО">
+              {model.stornoLabel ?? 'СТОРНО'}
+            </div>
+          ) : null}
         </header>
 
         <h1 className="warehouse-receipt-title">{t('warehouse.print.receiptTitle')}</h1>
@@ -47,12 +59,6 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
               <dd>{model.contractNumber}</dd>
             </div>
           ) : null}
-          {model.invoiceKey ? (
-            <div>
-              <dt>{t('warehouse.doc.invoiceKey')}</dt>
-              <dd>{model.invoiceKey}</dd>
-            </div>
-          ) : null}
           {model.keeperName ? (
             <div>
               <dt>{t('warehouse.doc.keeper')}</dt>
@@ -65,6 +71,24 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
               <dd>{model.productionRequestLabel}</dd>
             </div>
           ) : null}
+          {model.productionOrderLabel ? (
+            <div>
+              <dt>{t('warehouse.doc.productionOrder')}</dt>
+              <dd>{model.productionOrderLabel}</dd>
+            </div>
+          ) : null}
+          {model.productionLineId ? (
+            <div>
+              <dt>{t('warehouse.doc.productionLine')}</dt>
+              <dd>{model.productionLineId}</dd>
+            </div>
+          ) : null}
+          {model.basisLabel ? (
+            <div>
+              <dt>{t('warehouse.doc.basis')}</dt>
+              <dd>{model.basisLabel}</dd>
+            </div>
+          ) : null}
         </dl>
 
         <table className="warehouse-receipt-table">
@@ -75,6 +99,9 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
               <th>{t('warehouse.col.category')}</th>
               <th>{t('warehouse.col.unit')}</th>
               <th>{t('warehouse.quantity')}</th>
+              {model.lines.some((l) => l.batchNo) ? (
+                <th>{t('warehouse.batch')}</th>
+              ) : null}
               <th>{t('warehouse.price')}</th>
               <th>{t('warehouse.col.sum')}</th>
             </tr>
@@ -90,6 +117,9 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
                 <td className="c">{line.category}</td>
                 <td className="c">{line.unit}</td>
                 <td className="r num">{formatQty(line.qty)}</td>
+                {model.lines.some((l) => l.batchNo) ? (
+                  <td className="c">{line.batchNo || '—'}</td>
+                ) : null}
                 <td className="r num">{line.price ? formatReceiptMoney(line.price) : '—'}</td>
                 <td className="r num">{line.sum ? formatReceiptMoney(line.sum) : '—'}</td>
               </tr>
@@ -113,6 +143,12 @@ export function WarehouseReceiptPrintSheet({ model }: Props) {
             </div>
           </div>
         </div>
+
+        {model.handoffReason ? (
+          <p className="warehouse-receipt-note">
+            <strong>{t('warehouse.doc.handoffReason')}:</strong> {model.handoffReason}
+          </p>
+        ) : null}
 
         {model.comment ? (
           <p className="warehouse-receipt-note">

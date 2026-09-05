@@ -1,0 +1,2 @@
+# Generated briefs land here (CHAIN_BRIEF.md is gitignored).
+# Run: npm run agent:chain-brief -- "topic"

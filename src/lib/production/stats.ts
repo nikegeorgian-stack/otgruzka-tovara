@@ -253,8 +253,11 @@ export function formatNum(n: number | undefined): string {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
 }
 
-export function weekdayLabel(dateIso: string, locale: 'ru' | 'ka'): string {
+import { intlLocale } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
+export function weekdayLabel(dateIso: string, locale: Locale): string {
   const d = new Date(dateIso + 'T12:00:00')
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString(locale === 'ka' ? 'ka-GE' : 'ru-RU', { weekday: 'long' })
+  return d.toLocaleDateString(intlLocale(locale), { weekday: 'long' })
 }

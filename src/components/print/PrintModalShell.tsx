@@ -1,7 +1,9 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalScope } from '@/hooks/useModalScope'
+import { FULLSCREEN_OVER_CHROME_Z, zOverChrome } from '@/lib/ui/chromeLayout'
 import { getModalPortalRoot } from '@/lib/ui/modalScope'
+import { onCloseOverlays } from '@/lib/ui/overlayEvents'
 
 type Props = {
   open: boolean
@@ -10,8 +12,13 @@ type Props = {
   zIndex?: number
 }
 
-/** Полноэкранная оболочка для предпросмотра печати. */
-export function PrintModalShell({ open, onClose, children, zIndex: zIndexProp = 100 }: Props) {
+/** Полноэкранная оболочка для предпросмотра печати (поверх сайдбара). */
+export function PrintModalShell({
+  open,
+  onClose,
+  children,
+  zIndex: zIndexProp = FULLSCREEN_OVER_CHROME_Z,
+}: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   const { zIndex: stackZIndex } = useModalScope({
@@ -20,7 +27,7 @@ export function PrintModalShell({ open, onClose, children, zIndex: zIndexProp = 
     containerRef: panelRef,
     initialFocus: 'none',
   })
-  const zIndex = Math.max(zIndexProp, stackZIndex)
+  const zIndex = zOverChrome(Math.max(zIndexProp, stackZIndex))
 
   useEffect(() => {
     if (!open) return
@@ -30,6 +37,11 @@ export function PrintModalShell({ open, onClose, children, zIndex: zIndexProp = 
       document.body.style.overflow = prev
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    return onCloseOverlays(onClose)
+  }, [open, onClose])
 
   if (!open) return null
 

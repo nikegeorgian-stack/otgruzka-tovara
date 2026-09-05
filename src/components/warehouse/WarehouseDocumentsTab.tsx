@@ -3,10 +3,12 @@ import { AppDialog } from '@/components/ui/AppDialog'
 import { WarehouseDocumentEditor, type WarehouseDocumentEditorHandle } from '@/components/warehouse/WarehouseDocumentEditor'
 import { WarehouseInventoryRevisionModal } from '@/components/warehouse/WarehouseInventoryRevisionModal'
 import { Button } from '@/components/ui/Button'
+import { CreateLinkedTaskButton } from '@/components/tasks/CreateLinkedTaskButton'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
-import { useConfirm } from '@/context/ConfirmContext'
-import { requestModalClose } from '@/lib/ui/requestModalClose'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import { draftFromWarehouseReceipt } from '@/lib/tasks/linkRefs'
+import type { WorkTaskDraft } from '@/lib/tasks/types'
 import type { WarehousePickDetail } from '@/lib/ai/warehousePickEvent'
 import {
   buildIssuePrintModelFromDocument,
@@ -16,9 +18,22 @@ import {
 } from '@/lib/warehouse/printDocument'
 import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssuePrintPreview'
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
+import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
+import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
+import {
+  isG5WarehousePrintDoc,
+  receiptToPrintModel,
+  warehouseDocToReversalPrintModel,
+} from '@/lib/print/g5PrintFromDomain'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
-import { buildDocumentJournalRows } from '@/lib/warehouse/documentJournal'
 import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
+import {
+  buildDocumentCardMeta,
+  documentSourceKind,
+  isAutomaticDocument,
+  queryDocumentJournal,
+  type JournalSourceFilter,
+} from '@/lib/warehouse/documentJournalQuery'
 import {
   documentCanBeCancelled,
   resolveCounterpartyDisplayName,
@@ -35,7 +50,6 @@ type Props = Pick<
   | 'onCancelDocument'
   | 'onSaveDocumentDraft'
   | 'onPostExistingDocument'
-  | 'onUnpostDocument'
   | 'onRemoveDocumentDraft'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
@@ -44,13 +58,13 @@ type Props = Pick<
   | 'printMeta'
   | 'allowNegativeStock'
   | 'canCancelDocuments'
-  | 'canUnpostDocuments'
   | 'counterparties'
   | 'onUpsertCounterparty'
   | 'onOpenCounterparties'
   | 'productionRequests'
   | 'keeperId'
   | 'keeperName'
+  | 'exportStore'
 > & {
   warehouseId: string
   categoryNames: Map<string, string>
@@ -59,12 +73,24 @@ type Props = Pick<
   /** Открыть документ из общего журнала */
   pendingOpenDocumentId?: string | null
   onPendingOpenConsumed?: () => void
+  access?: AccessStore
+  currentUser?: AppUser | null
+  onCreateWorkTask?: (draft: WorkTaskDraft) => string
+  /** Commercial ACL for G5 print prices. */
+  canViewCommercial?: boolean
 }
 
 type DocModalState =
   | { mode: 'new'; aiPick?: WarehousePickDetail | null }
   | { mode: 'edit'; doc: WarehouseDocument }
   | { mode: 'view'; doc: WarehouseDocument }
+
+function srcNumber(
+  warehouse: WarehousePageProps['warehouse'],
+  id: string,
+): string {
+  return warehouse.documents.find((d) => d.id === id)?.number ?? id.slice(0, 8)
+}
 
 export function WarehouseDocumentsTab({
   warehouse,
@@ -76,7 +102,6 @@ export function WarehouseDocumentsTab({
   onCancelDocument,
   onSaveDocumentDraft,
   onPostExistingDocument,
-  onUnpostDocument,
   onRemoveDocumentDraft,
   onAcquireDocumentLock,
   onReleaseDocumentLock,
@@ -89,25 +114,54 @@ export function WarehouseDocumentsTab({
   onPendingOpenConsumed,
   allowNegativeStock = false,
   canCancelDocuments = false,
-  canUnpostDocuments = false,
   counterparties,
   onUpsertCounterparty,
   onOpenCounterparties,
   productionRequests,
   keeperId,
   keeperName,
+  access,
+  currentUser,
+  onCreateWorkTask,
+  exportStore = null,
+  canViewCommercial = false,
 }: Props) {
   const { t, tf } = useI18n()
-  const { confirmUnsaved } = useConfirm()
   const docEditorRef = useRef<WarehouseDocumentEditorHandle>(null)
   const [docModal, setDocModal] = useState<DocModalState | null>(null)
+  const [docDirty, setDocDirty] = useState(false)
   const [receiptPrintPreview, setReceiptPrintPreview] = useState<ReceiptPrintModel | null>(null)
   const [issuePrintPreview, setIssuePrintPreview] = useState<IssuePrintModel | null>(null)
+  const [g5PrintModel, setG5PrintModel] = useState<G5DocumentPrintModel | null>(null)
   const [filterType, setFilterType] = useState<'all' | 'receipt' | 'issue' | 'inventory'>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'posted' | 'cancelled'>(
     'all',
   )
   const [filterPurpose, setFilterPurpose] = useState<WarehouseDocumentPurpose | 'all'>('all')
+  const g5Flags = g5FlagsFromStore(exportStore)
+  const preferG5Print = g5Flags.procurementActive
+
+  const printDirectories = useMemo(
+    () => ({
+      items: warehouse.items.map((i) => ({
+        id: i.id,
+        internalCode: i.internalCode,
+        sku: i.sku,
+        name: i.name,
+      })),
+      warehouses: warehouse.locations.map((l) => ({ id: l.id, name: l.name })),
+      suppliers: (exportStore?.counterparties?.items ?? []).map((c) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+      })),
+    }),
+    [warehouse.items, warehouse.locations, exportStore?.counterparties?.items],
+  )
+  const [filterSource, setFilterSource] = useState<JournalSourceFilter>('all')
+  const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [journalNotice, setJournalNotice] = useState<string | null>(null)
   const [cancelTarget, setCancelTarget] = useState<WarehouseDocument | null>(null)
   const [cancelReason, setCancelReason] = useState('')
@@ -119,18 +173,31 @@ export function WarehouseDocumentsTab({
     [warehouse, whId],
   )
 
-  const docs = useMemo(() => {
-    let list = [...warehouse.documents]
-    if (warehouseId) list = list.filter((d) => d.warehouseId === warehouseId)
-    if (filterType !== 'all') list = list.filter((d) => d.type === filterType)
-    if (filterStatus !== 'all') {
-      list = list.filter((d) => (d.status ?? 'posted') === filterStatus)
-    }
-    if (filterPurpose !== 'all') list = list.filter((d) => d.purpose === filterPurpose)
-    return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [warehouse.documents, warehouseId, filterType, filterStatus, filterPurpose])
-
-  const journalRows = useMemo(() => buildDocumentJournalRows(warehouse, docs), [warehouse, docs])
+  const journalRows = useMemo(
+    () =>
+      queryDocumentJournal(warehouse, {
+        warehouseId: warehouseId || undefined,
+        type: filterType,
+        status: filterStatus,
+        purpose: filterPurpose,
+        source: filterSource,
+        search,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      }),
+    [
+      warehouse,
+      warehouseId,
+      filterType,
+      filterStatus,
+      filterPurpose,
+      filterSource,
+      search,
+      dateFrom,
+      dateTo,
+    ],
+  )
+  const docs = useMemo(() => journalRows.map((r) => r.doc), [journalRows])
   const journalTotals = useMemo(
     () =>
       journalRows.reduce(
@@ -163,6 +230,15 @@ export function WarehouseDocumentsTab({
 
   function handlePrint(doc: WarehouseDocument) {
     if (!printMeta) return
+    if (doc.type === 'reservation') {
+      setJournalNotice(t('warehouse.doc.reservationPrintNotice'))
+      return
+    }
+    const useG5 = preferG5Print || isG5WarehousePrintDoc(doc as unknown as Record<string, unknown>)
+    if (useG5) {
+      handleG5Print(doc)
+      return
+    }
     if (doc.type === 'receipt') {
       const model = buildReceiptPrintModelFromDocument(warehouse, doc, printMeta, {
         productionRequests,
@@ -178,17 +254,79 @@ export function WarehouseDocumentsTab({
     if (model) setIssuePrintPreview(model)
   }
 
+  function handleG5Print(doc: WarehouseDocument) {
+    const loose = doc as unknown as Record<string, unknown>
+    const isReversal =
+      doc.status === 'cancelled' ||
+      Boolean(doc.reversesDocumentId) ||
+      strDocRole(doc) === 'reversal' ||
+      strDocRole(doc) === 'finished_goods_shipment_cancel'
+
+    if (isReversal) {
+      const original = doc.reversesDocumentId
+        ? warehouse.documents.find((x) => x.id === doc.reversesDocumentId)
+        : undefined
+      setG5PrintModel(
+        warehouseDocToReversalPrintModel(loose, {
+          showPrices: canViewCommercial,
+          directories: printDirectories,
+          originalDocRef: original?.number || doc.reversesDocumentId || doc.number,
+          reason: doc.cancellationReason,
+        }),
+      )
+      return
+    }
+
+    if (doc.type === 'receipt' && (doc.purchaseOrderId || doc.purpose === 'purchase')) {
+      const po = exportStore?.procurement?.orders?.find((o) => o.id === doc.purchaseOrderId)
+      setG5PrintModel(
+        receiptToPrintModel(loose, (po as unknown as Record<string, unknown>) ?? null, {
+          showPrices: canViewCommercial,
+          directories: printDirectories,
+          title: t('g5.print.receipt.title'),
+        }),
+      )
+      return
+    }
+
+    // Fallback: legacy print if G5 marker but not receipt/reversal
+    if (doc.type === 'receipt') {
+      const model = buildReceiptPrintModelFromDocument(warehouse, doc, printMeta!, {
+        productionRequests,
+        counterparties,
+      })
+      if (model) setReceiptPrintPreview(model)
+      return
+    }
+    const model = buildIssuePrintModelFromDocument(warehouse, doc, printMeta!, {
+      productionRequests,
+      counterparties,
+    })
+    if (model) setIssuePrintPreview(model)
+  }
+
+  function strDocRole(doc: WarehouseDocument): string {
+    return String((doc as { docRole?: string }).docRole ?? '')
+  }
+
+  function canG5Print(doc: WarehouseDocument): boolean {
+    return preferG5Print || isG5WarehousePrintDoc(doc as unknown as Record<string, unknown>)
+  }
+
   function handleCancel(doc: WarehouseDocument) {
     if (!onCancelDocument) return
     setCancelReason('')
     setCancelTarget(doc)
   }
 
-  function confirmCancel() {
+  async function confirmCancel() {
     if (!onCancelDocument || !cancelTarget) return
-    const result = onCancelDocument(cancelTarget.id, {
-      reason: cancelReason.trim() || undefined,
-    })
+    const reason = cancelReason.trim()
+    if (!reason) {
+      setJournalNotice(t('warehouse.doc.errCancelReasonRequired'))
+      return
+    }
+    const result = await Promise.resolve(onCancelDocument(cancelTarget.id, { reason }))
     setCancelTarget(null)
     if (!result.ok) {
       setJournalNotice(t(result.error))
@@ -197,21 +335,16 @@ export function WarehouseDocumentsTab({
     setJournalNotice(t('warehouse.doc.cancelSuccess'))
   }
 
-  function handlePostExisting(doc: WarehouseDocument) {
+  async function handlePostExisting(doc: WarehouseDocument) {
     if (!onPostExistingDocument) return
-    const result = onPostExistingDocument(doc.id)
+    if (!window.confirm(t('warehouse.doc.postConfirm'))) return
+    const result = await Promise.resolve(onPostExistingDocument(doc.id))
     setJournalNotice(result.ok ? t('warehouse.doc.postSuccess') : t(result.error))
   }
 
-  function handleUnpost(doc: WarehouseDocument) {
-    if (!onUnpostDocument) return
-    const result = onUnpostDocument(doc.id)
-    setJournalNotice(result.ok ? t('warehouse.doc.unpostSuccess') : t(result.error))
-  }
-
-  function handleRemoveDraft(doc: WarehouseDocument) {
+  async function handleRemoveDraft(doc: WarehouseDocument) {
     if (!onRemoveDocumentDraft) return
-    const result = onRemoveDocumentDraft(doc.id)
+    const result = await Promise.resolve(onRemoveDocumentDraft(doc.id))
     setJournalNotice(result.ok ? t('warehouse.doc.draftRemoved') : t(result.error))
   }
 
@@ -238,28 +371,24 @@ export function WarehouseDocumentsTab({
 
   function closeDocModal() {
     setDocModal(null)
+    setDocDirty(false)
   }
 
   function docTypeLabel(type: WarehouseDocument['type']) {
     if (type === 'inventory') return t('warehouse.doc.type.inventory')
+    if (type === 'reservation') return t('warehouse.doc.type.reservation')
     if (type === 'receipt') return t('warehouse.receipt')
     return t('warehouse.issue')
   }
 
-  function requestCloseNewDoc() {
-    void requestModalClose(
-      { confirmUnsaved },
-      {
-        isDirty: () => docEditorRef.current?.isDirty() ?? false,
-        save: () => docEditorRef.current?.saveDraft() ?? false,
-        close: closeDocModal,
-      },
-    )
-  }
-
   function docModalTitle(): string {
     if (!docModal) return ''
-    if (docModal.mode === 'new') return t('warehouse.doc.new')
+    if (docModal.mode === 'new') {
+      const typ = docModal.aiPick?.type
+      if (typ === 'issue') return t('warehouse.issue')
+      if (typ === 'receipt') return t('warehouse.receipt')
+      return t('warehouse.doc.new')
+    }
     if (docModal.mode === 'view') {
       return tf('warehouse.doc.viewTitle', { number: docModal.doc.number || '—' })
     }
@@ -279,6 +408,33 @@ export function WarehouseDocumentsTab({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           <label className="text-xs text-stone-500">
+            {t('warehouse.doc.search')}
+            <Input
+              className="ml-1 min-w-[12rem]"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('warehouse.doc.searchPlaceholder')}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
+            {t('warehouse.doc.dateFrom')}
+            <input
+              type="date"
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
+            {t('warehouse.doc.dateTo')}
+            <input
+              type="date"
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-stone-500">
             {t('warehouse.type')}
             <select
               className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
@@ -289,6 +445,7 @@ export function WarehouseDocumentsTab({
               <option value="receipt">{t('warehouse.receipt')}</option>
               <option value="issue">{t('warehouse.issue')}</option>
               <option value="inventory">{t('warehouse.doc.type.inventory')}</option>
+              <option value="reservation">{t('warehouse.doc.type.reservation')}</option>
             </select>
           </label>
           <label className="text-xs text-stone-500">
@@ -305,6 +462,34 @@ export function WarehouseDocumentsTab({
             </select>
           </label>
           <label className="text-xs text-stone-500">
+            {t('warehouse.doc.source')}
+            <select
+              className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
+              value={filterSource}
+              onChange={(e) => setFilterSource(e.target.value as JournalSourceFilter)}
+            >
+              <option value="all">{t('warehouse.allCategories')}</option>
+              {(
+                [
+                  'manual',
+                  'production',
+                  'batch',
+                  'transfer',
+                  'loading',
+                  'opening',
+                  'reversal',
+                  'procurement',
+                ] as JournalSourceFilter[]
+              )
+                .filter((s) => s !== 'all')
+                .map((s) => (
+                  <option key={s} value={s}>
+                    {t(`warehouse.doc.source.${s}`)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="text-xs text-stone-500">
             {t('warehouse.doc.purpose')}
             <select
               className="ml-1 rounded-sm border border-grid px-2 py-1.5 text-sm"
@@ -318,9 +503,15 @@ export function WarehouseDocumentsTab({
                 [
                   'purchase',
                   'production_issue',
+                  'production_receipt',
+                  'production_material_transfer',
+                  'production_material_return',
+                  'production_reservation',
+                  'loading',
                   'return',
                   'writeoff',
                   'transfer',
+                  'opening_inventory',
                   'other',
                 ] as WarehouseDocumentPurpose[]
               ).map((p) => (
@@ -352,14 +543,16 @@ export function WarehouseDocumentsTab({
                 <th className="px-3 py-3">{t('warehouse.doc.number')}</th>
                 <th className="px-3 py-3">{t('warehouse.location')}</th>
                 <th className="px-3 py-3">{t('warehouse.type')}</th>
+                <th className="px-3 py-3">{t('warehouse.doc.source')}</th>
                 <th className="px-3 py-3">{t('warehouse.doc.status')}</th>
+                <th className="px-3 py-3">{t('warehouse.doc.lines')}</th>
                 <th className="px-3 py-3">{t('warehouse.doc.counterparty')}</th>
                 <th className="px-3 py-3 text-right">{t('warehouse.doc.total')}</th>
                 <th className="px-3 py-3 w-32">{t('warehouse.print.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {journalRows.map(({ doc: d, warehouseName, totalSum }) => (
+              {journalRows.map(({ doc: d, warehouseName, totalSum, lineCount }) => (
                 <tr
                   key={d.id}
                   className={`border-b border-grid/60 cursor-pointer hover:bg-stone-50 ${
@@ -369,17 +562,17 @@ export function WarehouseDocumentsTab({
                         ? 'bg-amber-50/40'
                         : ''
                   }`}
-                  title={t('warehouse.doc.doubleClickEdit')}
-                  onDoubleClick={() => openDocumentForEdit(d)}
+                  title={t('warehouse.doc.clickOpen')}
+                  onClick={() => openDocumentForEdit(d)}
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap">{d.date}</td>
                   <td className="px-3 py-2.5 font-medium font-mono text-xs">
                     {d.number}
-                    {d.invoiceKey && d.invoiceKey !== d.number && (
-                      <span className="block text-[10px] font-normal text-stone-400">
-                        RS: {d.invoiceKey}
+                    {isAutomaticDocument(d) ? (
+                      <span className="ml-1 rounded bg-sky-100 px-1 text-[10px] text-sky-800">
+                        auto
                       </span>
-                    )}
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5 text-stone-600">{warehouseName}</td>
                   <td className="px-3 py-2.5">
@@ -390,19 +583,27 @@ export function WarehouseDocumentsTab({
                       </span>
                     ) : null}
                   </td>
+                  <td className="px-3 py-2.5 text-xs text-stone-600">
+                    {t(`warehouse.doc.source.${documentSourceKind(d)}`)}
+                  </td>
                   <td className="px-3 py-2.5">
                     {d.status === 'cancelled' ? (
-                      <span className="text-red-700">{t('warehouse.doc.status.cancelled')}</span>
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">
+                        {t('warehouse.doc.status.cancelled')}
+                      </span>
                     ) : d.status === 'draft' ? (
-                      <span className="font-medium text-amber-700">
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">
                         {isDocumentLockedByOther(d, keeperId)
                           ? tf('warehouse.inventory.lockedBy', { name: d.lockedByName ?? '—' })
                           : t('warehouse.doc.status.draft')}
                       </span>
                     ) : (
-                      <span className="text-emerald-700">{t('warehouse.doc.status.posted')}</span>
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800">
+                        {t('warehouse.doc.status.posted')}
+                      </span>
                     )}
                   </td>
+                  <td className="px-3 py-2.5 tabular-nums text-stone-600">{lineCount}</td>
                   <td className="px-3 py-2.5 text-stone-600">
                     {resolveCounterpartyDisplayName(d, counterparties ?? [], '') ||
                       d.keeperName ||
@@ -411,15 +612,21 @@ export function WarehouseDocumentsTab({
                   <td className="px-3 py-2.5 text-right tabular-nums">
                     {totalSum > 0 ? `${formatQty(totalSum)} ₾` : '—'}
                   </td>
-                  <td className="px-3 py-2.5">
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-col gap-1">
-                      {printMeta && d.status !== 'cancelled' && (
+                      {printMeta && (d.type === 'receipt' || d.type === 'issue') && (
                         <button
                           type="button"
                           className="text-xs font-semibold text-teal-700 hover:underline text-left"
                           onClick={() => handlePrint(d)}
                         >
-                          {t('warehouse.print.previewBtn')}
+                          {canG5Print(d) &&
+                          (d.status === 'cancelled' || d.reversesDocumentId)
+                            ? t('g5.print.action.printCancel')
+                            : canG5Print(d) &&
+                                (d.purchaseOrderId || d.purpose === 'purchase')
+                              ? t('g5.print.action.printReceipt')
+                              : t('warehouse.print.previewBtn')}
                         </button>
                       )}
                       {d.status === 'draft' && onPostExistingDocument && (
@@ -440,19 +647,6 @@ export function WarehouseDocumentsTab({
                           {t('warehouse.doc.deleteDraft')}
                         </button>
                       )}
-                      {(d.status ?? 'posted') === 'posted' &&
-                        canUnpostDocuments &&
-                        onUnpostDocument &&
-                        documentCanBeCancelled(d) &&
-                        !d.transferPairId && (
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-amber-700 hover:underline text-left"
-                            onClick={() => handleUnpost(d)}
-                          >
-                            {t('warehouse.doc.unpost')}
-                          </button>
-                        )}
                       {onCancelDocument &&
                         canCancelDocuments &&
                         (d.status ?? 'posted') === 'posted' &&
@@ -465,6 +659,48 @@ export function WarehouseDocumentsTab({
                             {t('warehouse.doc.cancel')}
                           </button>
                         )}
+                      {d.reversesDocumentId && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-stone-600 hover:underline text-left"
+                          onClick={() => {
+                            const src = warehouse.documents.find((x) => x.id === d.reversesDocumentId)
+                            if (src) openDocumentForEdit(src)
+                          }}
+                        >
+                          {t('warehouse.doc.linkOriginal')}
+                        </button>
+                      )}
+                      {d.reversalDocumentId && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-stone-600 hover:underline text-left"
+                          onClick={() => {
+                            const rev = warehouse.documents.find((x) => x.id === d.reversalDocumentId)
+                            if (rev) openDocumentForEdit(rev)
+                          }}
+                        >
+                          {t('warehouse.doc.linkReversal')}
+                        </button>
+                      )}
+                      {d.type === 'receipt' &&
+                        (d.status ?? 'posted') === 'posted' &&
+                        access &&
+                        currentUser &&
+                        onCreateWorkTask ? (
+                          <CreateLinkedTaskButton
+                            draft={draftFromWarehouseReceipt({
+                              documentId: d.id,
+                              documentNumber: d.number,
+                              createdBy: currentUser.id,
+                              createdByName: currentUser.displayName,
+                            })}
+                            access={access}
+                            currentUser={currentUser}
+                            onCreate={onCreateWorkTask}
+                            labelKey="tasks.link.receiptDiscrepancy"
+                          />
+                        ) : null}
                     </div>
                   </td>
                 </tr>
@@ -472,7 +708,7 @@ export function WarehouseDocumentsTab({
             </tbody>
             <tfoot>
               <tr className="bg-stone-50 text-xs font-medium text-stone-600">
-                <td colSpan={6} className="px-4 py-2">
+                <td colSpan={8} className="px-4 py-2">
                   {tf('warehouse.doc.journalSummary', {
                     count: String(journalTotals.count),
                     lines: String(journalTotals.lines),
@@ -503,7 +739,7 @@ export function WarehouseDocumentsTab({
           }
           onSaveDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onCancelDocument={canCancelDocuments ? onCancelDocument : undefined}
           onAcquireLock={onAcquireDocumentLock}
           onReleaseLock={onReleaseDocumentLock}
           onQuickEditItem={onQuickEditItem}
@@ -512,15 +748,99 @@ export function WarehouseDocumentsTab({
       {docModal && (
         <AppDialog
           open
-          onClose={requestCloseNewDoc}
+          onClose={closeDocModal}
           title={docModalTitle()}
-          size="xl"
+          size="preview"
+          dirty={docModal.mode !== 'view' && docDirty}
+          onSaveDirty={async () => {
+            const ok = await Promise.resolve(docEditorRef.current?.saveDraft())
+            if (ok === false) throw new Error('draft_save_failed')
+          }}
           onPrimaryAction={
-            docModal.mode === 'view' ? undefined : () => docEditorRef.current?.saveDraft()
+            docModal.mode === 'view'
+              ? undefined
+              : async () => {
+                  await Promise.resolve(docEditorRef.current?.saveDraft())
+                }
           }
           initialFocus="none"
         >
-          <div className="px-4 py-4">
+          <div className="px-4 py-3">
+            {docModal.mode === 'view' && (
+              <div className="mb-3 space-y-2">
+                <p className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {t('warehouse.doc.immutableNotice')}
+                </p>
+                {(() => {
+                  const meta = buildDocumentCardMeta(warehouse, docModal.doc)
+                  return (
+                    <dl className="grid gap-2 rounded-sm border border-grid bg-stone-50 px-3 py-2 text-xs text-stone-700 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.source')}</dt>
+                        <dd>{t(`warehouse.doc.source.${meta.sourceKind}`)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.revision')}</dt>
+                        <dd>{meta.revision}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.createdAt')}</dt>
+                        <dd>{meta.createdLabel}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">{t('warehouse.doc.postedAt')}</dt>
+                        <dd>{meta.postedLabel}</dd>
+                      </div>
+                      {meta.originalId ? (
+                        <div>
+                          <dt className="text-stone-400">{t('warehouse.doc.linkOriginal')}</dt>
+                          <dd>
+                            <button
+                              type="button"
+                              className="text-teal-700 underline"
+                              onClick={() => {
+                                const src = warehouse.documents.find((x) => x.id === meta.originalId)
+                                if (src) openDocumentForEdit(src)
+                              }}
+                            >
+                              {srcNumber(warehouse, meta.originalId)}
+                            </button>
+                          </dd>
+                        </div>
+                      ) : null}
+                      {meta.reversalId ? (
+                        <div>
+                          <dt className="text-stone-400">{t('warehouse.doc.linkReversal')}</dt>
+                          <dd>
+                            <button
+                              type="button"
+                              className="text-teal-700 underline"
+                              onClick={() => {
+                                const rev = warehouse.documents.find((x) => x.id === meta.reversalId)
+                                if (rev) openDocumentForEdit(rev)
+                              }}
+                            >
+                              {srcNumber(warehouse, meta.reversalId)}
+                            </button>
+                          </dd>
+                        </div>
+                      ) : null}
+                      {meta.cancellationReason ? (
+                        <div className="sm:col-span-2">
+                          <dt className="text-stone-400">{t('warehouse.doc.cancelReasonLabel')}</dt>
+                          <dd>{meta.cancellationReason}</dd>
+                        </div>
+                      ) : null}
+                      {meta.technical.idempotencyKey ? (
+                        <div className="sm:col-span-2 font-mono text-[10px] text-stone-400">
+                          idempotency: {meta.technical.idempotencyKey}
+                        </div>
+                      ) : null}
+                    </dl>
+                  )
+                })()}
+              </div>
+            )}
             <WarehouseDocumentEditor
               ref={docEditorRef}
               warehouse={warehouse}
@@ -529,25 +849,31 @@ export function WarehouseDocumentsTab({
               brigades={brigades}
               warehouseId={whId}
               variant="modal"
+              lockType={docModal.mode !== 'new' || Boolean(docModal.aiPick?.type)}
               printMeta={printMeta}
               initialType={docModal.mode === 'new' ? docModal.aiPick?.type : undefined}
               initialPickSearch={docModal.mode === 'new' ? docModal.aiPick?.query : undefined}
               initialPickOpen={docModal.mode === 'new' ? Boolean(docModal.aiPick?.query) : false}
               existingDocument={docModal.mode !== 'new' ? docModal.doc : null}
               readOnly={docModal.mode === 'view'}
-              onPost={(doc) => {
+              exportStore={exportStore}
+              canViewCommercial={canViewCommercial}
+              onDirtyChange={setDocDirty}
+              onPost={async (doc) => {
                 const draftId = docModal.mode === 'edit' ? docModal.doc.id : undefined
                 if (draftId && onSaveDocumentDraft && onPostExistingDocument) {
-                  const saved = onSaveDocumentDraft({ ...doc, id: draftId })
+                  const saved = await Promise.resolve(
+                    onSaveDocumentDraft({ ...doc, id: draftId }),
+                  )
                   if (!saved.ok) return saved
-                  const result = onPostExistingDocument(draftId)
+                  const result = await Promise.resolve(onPostExistingDocument(draftId))
                   if (result.ok) {
                     closeDocModal()
                     setJournalNotice(t('warehouse.doc.postSuccess'))
                   }
                   return result
                 }
-                const result = onPostDocument(doc)
+                const result = await Promise.resolve(onPostDocument(doc))
                 if (result.ok) {
                   closeDocModal()
                 }
@@ -555,8 +881,8 @@ export function WarehouseDocumentsTab({
               }}
               onSaveDraft={
                 onSaveDocumentDraft && docModal.mode !== 'view'
-                  ? (doc) => {
-                      const result = onSaveDocumentDraft(doc)
+                  ? async (doc) => {
+                      const result = await Promise.resolve(onSaveDocumentDraft(doc))
                       if (result.ok) {
                         closeDocModal()
                         setJournalNotice(t('warehouse.doc.draftSaved'))
@@ -565,8 +891,10 @@ export function WarehouseDocumentsTab({
                     }
                   : undefined
               }
-              onPostTransfer={(doc) => {
-                const result = onPostTransfer?.(doc) ?? { ok: false as const, error: 'unknown' }
+              onPostTransfer={async (doc) => {
+                const result =
+                  (await Promise.resolve(onPostTransfer?.(doc))) ??
+                  ({ ok: false as const, error: 'unknown' } as const)
                 if (result.ok) {
                   closeDocModal()
                 }
@@ -580,7 +908,7 @@ export function WarehouseDocumentsTab({
               productionRequests={productionRequests}
               keeperId={keeperId}
               keeperName={keeperName}
-              onCancel={requestCloseNewDoc}
+              onCancel={closeDocModal}
             />
           </div>
         </AppDialog>
@@ -597,6 +925,13 @@ export function WarehouseDocumentsTab({
           onClose={() => setIssuePrintPreview(null)}
         />
       )}
+      {g5PrintModel ? (
+        <G5DocumentPrintModal
+          model={g5PrintModel}
+          onClose={() => setG5PrintModel(null)}
+          showCommercial={canViewCommercial}
+        />
+      ) : null}
       {cancelTarget && (
         <AppDialog
           open
@@ -608,7 +943,12 @@ export function WarehouseDocumentsTab({
               <Button variant="secondary" size="sm" onClick={() => setCancelTarget(null)}>
                 {t('common.cancel')}
               </Button>
-              <Button variant="danger" size="sm" onClick={confirmCancel}>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={!cancelReason.trim()}
+                onClick={confirmCancel}
+              >
                 {t('warehouse.doc.cancelConfirm')}
               </Button>
             </div>
@@ -625,7 +965,7 @@ export function WarehouseDocumentsTab({
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') confirmCancel()
+                  if (e.key === 'Enter' && cancelReason.trim()) confirmCancel()
                 }}
               />
             </label>

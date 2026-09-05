@@ -37,7 +37,7 @@ export function WelcomeGreeting({ user, employees }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/35 p-4 print:hidden">
+    <div className="fixed inset-0 z-[450] flex items-center justify-center bg-black/35 p-4 print:hidden">
       <div
         className="w-full max-w-md rounded-sm border border-grid bg-white p-6 shadow-lg"
         role="dialog"

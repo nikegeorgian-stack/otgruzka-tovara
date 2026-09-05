@@ -1,0 +1,11 @@
+connectorId: fst
+generate:
+  javascriptSdk:
+    outputDir: ../../src/lib/dataconnect-generated
+    package: "@fst/dataconnect-generated"
+    packageJsonDir: ..
+    react: true
+    angular: false
+    clientCache:
+      maxAge: 5s
+      storage: memory

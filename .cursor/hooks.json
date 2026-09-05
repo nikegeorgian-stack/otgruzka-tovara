@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/session-start.mjs"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "node .cursor/hooks/pre-compact-reminder.mjs"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/stop-memory-check.mjs"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/otgruzka-deploy-guard.mjs",
+        "failClosed": true
+      }
+    ]
+  }
+}

@@ -18,6 +18,7 @@ export function collectWebAllowedLogins(access: AccessStore): string[] {
   for (const admin of FST_ADMIN_EMAILS) set.add(admin.toLowerCase())
   for (const legacy of FST_WEB_ALLOWED_EMAILS) set.add(legacy.toLowerCase())
   for (const u of access.users) {
+    if (u.pendingDeletion) continue
     if (u.active && u.login.trim()) set.add(u.login.trim().toLowerCase())
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'ru'))

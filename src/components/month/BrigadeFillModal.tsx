@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react'
-import { EmployeeEditorHost } from '@/components/hr/EmployeeEditorHost'
 import { AppDialog } from '@/components/ui/AppDialog'
-import { useEmployeeEditor } from '@/hooks/useEmployeeEditor'
+import { useEmployeeEditorApi } from '@/context/EmployeeEditorContext'
 import { EmployeeAvatar } from '@/components/ui/EmployeeAvatar'
 import { useI18n } from '@/context/I18nContext'
 import { employeeSearchText } from '@/i18n'
 import {
   applyBrigadeRoster,
   employeesInBrigadeFromHr,
+  rosterIdsFromPreviousMonth,
   rosterIdsInMonthSheet,
 } from '@/lib/brigadeFill'
 import { brigadeLabel } from '@/lib/brigadeText'
+import { formatMonthTitle } from '@/lib/dates'
+import { findMonthAssignment } from '@/lib/monthAssignment'
 import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
 import type { AppStore, Employee, MonthSheet } from '@/lib/types'
 
@@ -18,7 +20,22 @@ type Props = {
   store: AppStore
   sheet: MonthSheet
   brigade: string
+  /**
+   * roster — состав бригады в табеле месяца (по умолчанию).
+   * pick — только выбор людей (ночная смена и т.п.), без записи в строки табеля.
+   */
+  mode?: 'roster' | 'pick'
+  /** Стартовый набор для mode=pick (иначе — состав бригады в листе). */
+  initialIds?: string[]
+  /** Подпись области вместо имени бригады (например группа ночной смены). */
+  scopeTitle?: string
+  /** Кандидаты вкладки «В бригаде/группе» и кнопки «Из кадров» (для групп ночи). */
+  scopeEmployeeIds?: string[]
+  /** Якоря коуча для ночной смены (mode=pick). */
+  pickCoach?: boolean
   onSave: (employeeIds: string[], syncHr: boolean) => void
+  /** Предупреждения о конфликтах при применении состава. */
+  onConflicts?: (messages: string[]) => void
   onUpsertEmployee: (employee: Employee) => void
   onClose: () => void
 }
@@ -29,20 +46,31 @@ export function BrigadeFillModal({
   store,
   sheet,
   brigade,
+  mode = 'roster',
+  initialIds,
+  scopeTitle,
+  scopeEmployeeIds,
+  pickCoach = false,
   onSave,
-  onUpsertEmployee,
+  onConflicts,
+  onUpsertEmployee: _onUpsertEmployee,
   onClose,
 }: Props) {
   const { t, tf, locale, employeeName } = useI18n()
-  const initial = useMemo(
-    () => rosterIdsInMonthSheet(sheet, brigade),
-    [sheet, brigade],
-  )
+  const pickMode = mode === 'pick'
+  const initial = useMemo(() => {
+    if (pickMode && initialIds) return initialIds
+    const ids = rosterIdsInMonthSheet(sheet, brigade)
+    const brigadierId = store.brigadiers?.[brigade]
+    if (brigadierId && !ids.includes(brigadierId)) return [...ids, brigadierId]
+    return ids
+  }, [pickMode, initialIds, sheet, brigade, store.brigadiers])
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initial))
   const [search, setSearch] = useState('')
-  const [syncHr, setSyncHr] = useState(true)
+  const [syncHr, setSyncHr] = useState(!pickMode)
   const [listFilter, setListFilter] = useState<ListFilter>('all')
-  const employeeEditor = useEmployeeEditor(store.brigades, store.employees)
+  const [warnId, setWarnId] = useState<string | null>(null)
+  const employeeEditor = useEmployeeEditorApi()
   const creating = employeeEditor.ctx !== null
 
   const q = search.trim().toLowerCase()
@@ -54,10 +82,28 @@ export function BrigadeFillModal({
     [store.employees, sheet.month],
   )
 
-  const hrInBrigade = useMemo(
-    () => employeesInBrigadeFromHr(store.employees, brigade, sheet.month),
-    [store.employees, brigade, sheet.month],
-  )
+  const hrInBrigade = useMemo(() => {
+    if (scopeEmployeeIds?.length) {
+      const want = new Set(scopeEmployeeIds)
+      return activeEmployees.filter((e) => want.has(e.id))
+    }
+    return employeesInBrigadeFromHr(store.employees, brigade, sheet.month)
+  }, [scopeEmployeeIds, activeEmployees, store.employees, brigade, sheet.month])
+
+  /** Состав этой же бригады в прошлом месяце (не из других групп). */
+  const fromPrevMonth = useMemo(() => {
+    const { prevMonth, ids } = rosterIdsFromPreviousMonth(
+      store.months,
+      sheet.month,
+      brigade,
+      store.employees,
+    )
+    if (scopeEmployeeIds?.length) {
+      const want = new Set(scopeEmployeeIds)
+      return { prevMonth, ids: ids.filter((id) => want.has(id)) }
+    }
+    return { prevMonth, ids }
+  }, [store.months, store.employees, sheet.month, brigade, scopeEmployeeIds])
 
   const filtered = useMemo(() => {
     let list = activeEmployees
@@ -75,13 +121,24 @@ export function BrigadeFillModal({
     [activeEmployees, selected],
   )
 
-  const brigadeTitle = brigadeLabel(brigade, store.brigadeNamesKa, locale)
+  const brigadeTitle =
+    scopeTitle || brigadeLabel(brigade, store.brigadeNamesKa, locale)
 
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+        if (warnId === id) setWarnId(null)
+      } else {
+        if (!pickMode) {
+          const elsewhere = findMonthAssignment(sheet, id)
+          if (elsewhere && elsewhere.brigade !== brigade) {
+            setWarnId(id)
+          }
+        }
+        next.add(id)
+      }
       return next
     })
   }
@@ -91,18 +148,53 @@ export function BrigadeFillModal({
     setListFilter('selected')
   }
 
+  function fillFromPreviousMonth() {
+    if (!fromPrevMonth.ids.length) return
+    setSelected(new Set(fromPrevMonth.ids))
+    setListFilter('selected')
+  }
+
   function clearAll() {
     setSelected(new Set())
+    setWarnId(null)
   }
 
   function handleSave() {
-    onSave([...selected], syncHr)
+    if (!pickMode) {
+      const messages: string[] = []
+      for (const id of selected) {
+        const emp = store.employees.find((e) => e.id === id)
+        if (!emp) continue
+        const elsewhere = findMonthAssignment(sheet, id)
+        if (elsewhere && elsewhere.brigade !== brigade) {
+          messages.push(
+            tf('brigadeFill.conflictMonth', {
+              name: employeeName(emp),
+              brigade: elsewhere.brigade,
+            }),
+          )
+        } else if (emp.brigade && emp.brigade !== brigade) {
+          messages.push(
+            tf('brigadeFill.conflictHr', {
+              name: employeeName(emp),
+              brigade: emp.brigade,
+            }),
+          )
+        }
+      }
+      if (messages.length) onConflicts?.(messages)
+    }
+    onSave([...selected], pickMode ? false : syncHr)
     onClose()
   }
 
   const tabs: { id: ListFilter; label: string; count?: number }[] = [
     { id: 'all', label: t('brigadeFill.tabAll'), count: activeEmployees.length },
-    { id: 'brigade', label: t('brigadeFill.tabBrigade'), count: hrInBrigade.length },
+    {
+      id: 'brigade',
+      label: pickMode && scopeEmployeeIds ? t('brigadeFill.tabScope') : t('brigadeFill.tabBrigade'),
+      count: hrInBrigade.length,
+    },
     { id: 'selected', label: t('brigadeFill.tabSelected'), count: selected.size },
   ]
 
@@ -113,19 +205,26 @@ export function BrigadeFillModal({
         onClose={onClose}
         size="xl"
         blockBackdropClose={creating}
+        ephemeral={pickMode}
         title={tf('brigadeFill.title', { brigade: brigadeTitle })}
-        subtitle={t('brigadeFill.subtitle')}
+        subtitle={pickMode ? t('brigadeFill.subtitlePick') : t('brigadeFill.subtitle')}
         footer={
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-stone-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-grid text-accent focus:ring-accent/30"
-                checked={syncHr}
-                onChange={(e) => setSyncHr(e.target.checked)}
-              />
-              {t('brigadeFill.syncHr')}
-            </label>
+            {pickMode ? (
+              <p className="text-sm text-stone-500">
+                {tf('brigadeFill.selectedCount', { count: String(selected.size) })}
+              </p>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm text-stone-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-grid text-accent focus:ring-accent/30"
+                  checked={syncHr}
+                  onChange={(e) => setSyncHr(e.target.checked)}
+                />
+                {t('brigadeFill.syncHr')}
+              </label>
+            )}
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -136,6 +235,7 @@ export function BrigadeFillModal({
               </button>
               <button
                 type="button"
+                data-coach={pickCoach ? 'nightShift:applyFill' : undefined}
                 className="rounded-sm bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
                 onClick={handleSave}
               >
@@ -152,6 +252,7 @@ export function BrigadeFillModal({
               type="button"
               className="inline-flex items-center gap-2 rounded-sm bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
               onClick={fillFromHr}
+              title={t('brigadeFill.fromHrHint')}
             >
               {t('brigadeFill.fromHr')}
               {hrInBrigade.length > 0 && (
@@ -162,8 +263,38 @@ export function BrigadeFillModal({
             </button>
             <button
               type="button"
+              className="inline-flex items-center gap-2 rounded-sm border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-900 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={fillFromPreviousMonth}
+              disabled={!fromPrevMonth.ids.length}
+              title={
+                fromPrevMonth.ids.length
+                  ? tf('brigadeFill.fromPrevMonthHint', {
+                      month: formatMonthTitle(fromPrevMonth.prevMonth, locale),
+                    })
+                  : tf('brigadeFill.fromPrevMonthEmpty', {
+                      month: formatMonthTitle(fromPrevMonth.prevMonth, locale),
+                    })
+              }
+            >
+              {t('brigadeFill.fromPrevMonth')}
+              {fromPrevMonth.ids.length > 0 && (
+                <span className="rounded-sm bg-sky-200/60 px-2 py-0.5 text-xs">
+                  {fromPrevMonth.ids.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               className="inline-flex items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-              onClick={() => employeeEditor.openNew({ brigade })}
+              onClick={() =>
+                employeeEditor.openNew({
+                  brigade,
+                  onSavedExtra: (emp) => {
+                    setSelected((prev) => new Set([...prev, emp.id]))
+                    setListFilter('selected')
+                  },
+                })
+              }
             >
               <span className="text-base leading-none">+</span>
               {t('employee.picker.addNew')}
@@ -246,7 +377,15 @@ export function BrigadeFillModal({
                   <button
                     type="button"
                     className="mt-3 text-sm font-semibold text-accent hover:underline"
-                    onClick={() => employeeEditor.openNew({ brigade })}
+                    onClick={() =>
+                employeeEditor.openNew({
+                  brigade,
+                  onSavedExtra: (emp) => {
+                    setSelected((prev) => new Set([...prev, emp.id]))
+                    setListFilter('selected')
+                  },
+                })
+              }
                   >
                     {t('employee.picker.addNew')}
                   </button>
@@ -257,6 +396,9 @@ export function BrigadeFillModal({
               const checked = selected.has(emp.id)
               const inHrBrigade = emp.brigade === brigade
               const inOtherBrigade = emp.brigade && emp.brigade !== brigade
+              const monthElsewhere = findMonthAssignment(sheet, emp.id)
+              const inOtherMonthBrigade =
+                monthElsewhere && monthElsewhere.brigade !== brigade
               return (
                 <li key={emp.id}>
                   <label
@@ -264,7 +406,7 @@ export function BrigadeFillModal({
                       checked
                         ? 'border-accent/40 bg-accent/5 shadow-sm'
                         : 'border-transparent bg-stone-50/80 hover:border-grid hover:bg-white'
-                    }`}
+                    } ${warnId === emp.id ? 'ring-2 ring-amber-400/60' : ''}`}
                   >
                     <input
                       type="checkbox"
@@ -290,12 +432,25 @@ export function BrigadeFillModal({
                             {t('brigadeFill.inHr')}
                           </span>
                         )}
-                        {inOtherBrigade && (
+                        {inOtherMonthBrigade ? (
+                          <span className="rounded-sm bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 ring-1 ring-amber-200">
+                            {tf('brigadeFill.inMonthElsewhere', {
+                              brigade: monthElsewhere!.brigade,
+                            })}
+                          </span>
+                        ) : inOtherBrigade ? (
                           <span className="text-amber-700">
                             {tf('brigadeFill.otherBrigade', { brigade: emp.brigade })}
                           </span>
-                        )}
+                        ) : null}
                       </span>
+                      {warnId === emp.id && inOtherMonthBrigade ? (
+                        <span className="mt-1 block text-[11px] text-amber-800">
+                          {tf('brigadeFill.conflictMonthHint', {
+                            brigade: monthElsewhere!.brigade,
+                          })}
+                        </span>
+                      ) : null}
                     </span>
                   </label>
                 </li>
@@ -304,21 +459,6 @@ export function BrigadeFillModal({
           </ul>
         </div>
       </AppDialog>
-
-      <EmployeeEditorHost
-        ctx={employeeEditor.ctx}
-        employees={store.employees}
-        brigades={store.brigades}
-        hrStructuralUnits={store.hrStructuralUnits}
-        hrPositions={store.hrPositions}
-        onSave={(emp) => {
-          onUpsertEmployee(emp)
-          setSelected((prev) => new Set([...prev, emp.id]))
-          setListFilter('selected')
-          employeeEditor.close()
-        }}
-        onClose={employeeEditor.close}
-      />
     </>
   )
 }

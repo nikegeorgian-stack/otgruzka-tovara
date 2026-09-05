@@ -1,0 +1,79 @@
+/** Stable-id entity arrays — fine-grained merge + explicit delete paths. */
+export const STABLE_ID_COLLECTION_PATHS = [
+  'employees',
+  'candidates',
+  'access.users',
+  'access.userGroups',
+  'warehouse.items',
+  'warehouse.documents',
+  'warehouse.movements',
+  'warehouse.categories',
+  'warehouse.locations',
+  'warehouse.accountingByWarehouse',
+  'warehouse.auditLog',
+  'warehouse.loadingShipments',
+  'warehouse.materialShortages',
+  'warehouse.productionLineBindings',
+  'sales.orders',
+  'procurement.orders',
+  'procurement.categories',
+  'procurement.routePoints',
+  'tasks.tasks',
+  'tasks.attachments',
+  'shiftTemplates',
+  'hrStructuralUnits',
+  'hrPositions',
+  'production.requests',
+  'production.planner.orders',
+  'production.shiftReports',
+  'production.packagingReports',
+  'production.finishedGoodsLots',
+  'production.qcAttachments',
+  'counterparties.items',
+  'finishedProducts.items',
+  'packagingRecipes.items',
+  'packagingRecipes.boxes',
+  'formulations.recipes',
+  'formulations.recipeVersions',
+  'formulations.batchRuns',
+  'otc.norms',
+  'otc.labTests',
+  'otc.alkaliSeries',
+  'otc.sorting',
+  'otc.defects',
+  'technologistQc.eadCalculations',
+  'technologistQc.eadControls',
+  'technologistQc.incomingControls',
+  'technologistQc.impregnationQc',
+  'technologistQc.roomClimateLog',
+  'technologistQc.shiftHandoffs',
+  'engineerLog.entries',
+  'wastewater.cubes',
+  'workwear.issuances',
+  'itOffice.assets',
+  'itOffice.acts',
+  'itOffice.maintenance',
+  'finance.advances',
+  'finance.adjustments',
+  'finance.payouts',
+  'finance.advanceDocuments',
+  'finance.payoutDocuments',
+  'finance.advanceAccruals',
+  'orgChart.nodes',
+  'trash.employees',
+  'trash.months',
+  'trash.candidates',
+  'externalEffects.outbox',
+] as const
+
+export type StableIdCollectionPath = (typeof STABLE_ID_COLLECTION_PATHS)[number]
+
+export function getPathValue(store: unknown, path: string): unknown {
+  const parts = path.split('.')
+  let cur: unknown = store
+  for (const p of parts) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    cur = (cur as Record<string, unknown>)[p]
+  }
+  return cur
+}

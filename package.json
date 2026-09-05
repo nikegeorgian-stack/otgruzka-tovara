@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "workspaces": [
-    "fst-web"
+    "fst-web",
+    "fst-desktop",
+    "fst-backup-tool"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=fst-web",
@@ -26,6 +28,7 @@
     "preview": "npm run preview --workspace=fst-web",
     "setup:firebase": "powershell -ExecutionPolicy Bypass -File fst-web/scripts/setup-firebase-db.ps1",
     "sync:vercel-env": "node scripts/sync-vercel-env.mjs",
+    "push:firebase-service-account": "node scripts/push-firebase-service-account.mjs",
     "deploy:cloud": "node scripts/build.mjs && vercel --prod",
     "deploy": "npm run deploy:cloud",
     "deploy:firebase": "npm run deploy:hosting --workspace=fst-web",
@@ -33,10 +36,11 @@
     "deploy:firestore-rules": "npm run deploy:firestore-rules --workspace=fst-web",
     "migrate:local-db": "node scripts/normalize-local-db.mjs",
     "migrate:cloud-store": "npm run migrate:cloud-store --workspace=fst-web",
-    "migrate:cloud-shards": "npm run migrate:cloud-shards --workspace=fst-web",
+    "migrate:sql-connect": "npm run migrate:sql-connect --workspace=fst-web",
     "export:cloud-backup": "npm run export:cloud-backup --workspace=fst-web",
     "export:cloud-backup:admin": "npm run export:cloud-backup:admin --workspace=fst-web",
     "import:cloud-backup": "npm run import:cloud-backup --workspace=fst-web",
+    "import:registry:cloud": "npm run import:registry:cloud --workspace=fst-web",
     "migrate:firebase-project": "npm run migrate:firebase-project --workspace=fst-web",
     "migrate:firebase-project:dry": "npm run migrate:firebase-project:dry --workspace=fst-web",
     "switch:firebase-project": "npm run switch:firebase-project --workspace=fst-web",
@@ -52,18 +56,32 @@
     "vercel:login:nika": "powershell -ExecutionPolicy Bypass -File scripts/vercel-login-as.ps1",
     "migrate:vercel": "powershell -ExecutionPolicy Bypass -File scripts/migrate-vercel.ps1",
     "deploy:otgruzka": "powershell -ExecutionPolicy Bypass -File scripts/deploy-otgruzka-vercel.ps1",
-    "deploy:otgruzka:quick": "powershell -ExecutionPolicy Bypass -Command \"Copy-Item fst-web/.env.target fst-web/.env.production -Force; node scripts/build.mjs; vercel link --yes --project otgruzka-tovara; vercel --prod --yes\"",
+    "deploy:otgruzka:quick": "powershell -ExecutionPolicy Bypass -File scripts/deploy-otgruzka-quick.ps1",
+    "deploy:otgruzka:mobile": "powershell -ExecutionPolicy Bypass -File scripts/deploy-otgruzka-mobile.ps1",
+    "agent:chain-brief": "node scripts/fst-chain-brief.mjs",
+    "agent:validate": "node scripts/validate-agent-system.mjs",
     "setup:e-drive": "node scripts/setup-e-drive.mjs",
     "clear:hr-cloud": "node fst-web/scripts/clear-hr-employees.mjs",
     "clear:hr-cloud:ps1": "powershell -ExecutionPolicy Bypass -File scripts/clear-hr-cloud.ps1",
     "reset-local": "node scripts/reset-local.mjs",
     "test:firebase": "node fst-web/scripts/test-cloud-save.mjs",
-    "test:e2": "node scripts/e2-journal-acceptance.mjs"
+    "test:e2": "node scripts/e2-journal-acceptance.mjs && node scripts/e2-cloud-conflict.mjs",
+    "test:cloud-conflict": "node scripts/e2-cloud-conflict.mjs",
+    "build:apk": "node scripts/build-android-apk.mjs",
+    "build:android": "node scripts/build-android-apk.mjs",
+    "build:web": "npm run build --workspace=fst-web",
+    "build:windows": "node scripts/build-windows.mjs",
+    "build:backup-tool": "npm install --workspace=fst-backup-tool && npm run dist --workspace=fst-backup-tool",
+    "build:otgruzka": "node scripts/build-otgruzka-all.mjs"
   },
   "dependencies": {
+    "@fst/dataconnect-admin-generated": "file:server/fst/dataconnect-admin-generated",
+    "@fst/dataconnect-generated": "file:../src/lib/dataconnect-sdk",
     "@tanstack/react-virtual": "^3.14.5",
+    "@vladmandic/face-api": "^1.7.15",
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "firebase": "^11.10.0",
     "firebase-admin": "^13.10.0",
@@ -72,11 +90,11 @@
     "jspdf": "^4.2.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@google-cloud/cloud-sql-connector": "^1.11.2",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.12.3",
     "@types/qrcode": "^1.5.6",
@@ -88,9 +106,21 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "pg": "^8.22.0",
+    "sharp": "^0.35.3",
     "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
+  },
+  "overrides": {
+    "brace-expansion@1": "1.1.18",
+    "brace-expansion@2": "2.1.4",
+    "fast-xml-parser": "5.11.1",
+    "websocket-driver": "0.7.5",
+    "dompurify": "3.4.14",
+    "protobufjs": "7.6.6",
+    "qs": "6.16.0",
+    "body-parser": "2.3.0"
   }
 }

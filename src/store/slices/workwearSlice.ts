@@ -4,9 +4,10 @@ import {
   type PostWorkwearIssueResult,
 } from '@/lib/workwear/issue'
 import type { WorkwearCatalogItem } from '@/lib/workwear/types'
+import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 
-export function createWorkwearSlice({ setStore, getStore }: StoreSliceDeps) {
+export function createWorkwearSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   return {
     upsertWorkwearCatalogItem(item: WorkwearCatalogItem) {
       patchStore(setStore, (s) => {
@@ -53,6 +54,7 @@ export function createWorkwearSlice({ setStore, getStore }: StoreSliceDeps) {
       const store = getStore()
       const iss = store.workwear.issuances.find((i) => i.id === id)
       if (!iss) return false
+      recordSliceExplicitDelete('workwear.issuances', id, actorFromGetter(getActor))
       patchStore(setStore, (s) => ({
         ...s,
         workwear: {

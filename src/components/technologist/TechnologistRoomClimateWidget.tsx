@@ -4,6 +4,7 @@ import { FormField } from '@/components/ui/FormField'
 import { Input } from '@/components/ui/Input'
 import { CloseIcon } from '@/components/ui/icons'
 import { useI18n } from '@/context/I18nContext'
+import { onCloseOverlays } from '@/lib/ui/overlayEvents'
 import type { RoomClimateRecord } from '@/lib/technologist/types'
 import { TechnologistRoomClimateJournal } from './TechnologistRoomClimateJournal'
 
@@ -29,7 +30,7 @@ function num(v: string): number | undefined {
 }
 
 const FAB_CLASS =
-  'fixed z-[90] bottom-5 left-5 max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))] print:hidden'
+  'fixed z-[90] bottom-5 left-5 lg:left-[calc(var(--app-sidebar-w,3.5rem)+1.25rem)] max-lg:bottom-[calc(5.5rem+env(safe-area-inset-bottom))] print:hidden'
 
 const DRAWER_CLASS =
   'fixed z-[90] inset-y-0 right-0 flex w-[min(20rem,calc(100vw-1rem))] flex-col border-l border-sky-200 bg-white shadow-2xl animate-[climateDrawerIn_0.2s_ease-out] max-lg:inset-x-0 max-lg:top-auto max-lg:max-h-[min(28rem,85vh)] max-lg:w-auto max-lg:rounded-t-md max-lg:border-l-0 max-lg:border-t print:hidden'
@@ -66,6 +67,11 @@ export function TechnologistRoomClimateWidget({
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    return onCloseOverlays(() => setOpen(false))
   }, [open])
 
   function handleFix() {

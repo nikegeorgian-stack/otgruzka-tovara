@@ -7,17 +7,37 @@ import {
   providerLabelKey,
   type AiProviderId,
 } from '@/lib/ai/providers'
+import { roleLabel } from '@/lib/access/roles'
+import type { AccessRoleId } from '@/lib/access/types'
 import { viewLabel, type Locale } from '@/lib/ai/coachTargets'
+import { suggestionsVisibleTo } from '@/lib/aiChat/init'
+import type { FeedbackStatus } from '@/lib/aiChat/types'
 import type { AppStore } from '@/lib/types'
 
 type Props = {
   store: AppStore
   onUpdateSettings: (patch: Partial<AppStore['settings']>) => void
+  onSetSuggestionStatus?: (id: string, status: FeedbackStatus, byName?: string) => void
+  adminName?: string
+  /** Текущий пользователь: для фильтра «только свои», если не админ. */
+  currentUserId?: string | null
+  currentUserName?: string
+  currentUserLogin?: string | null
+  isFeedbackAdmin?: boolean
 }
 
 const sectionClass = 'rounded-sm border border-grid bg-white p-5 shadow-sm'
 
-export function CoachSettingsPanel({ store, onUpdateSettings }: Props) {
+export function CoachSettingsPanel({
+  store,
+  onUpdateSettings,
+  onSetSuggestionStatus,
+  adminName,
+  currentUserId,
+  currentUserName,
+  currentUserLogin,
+  isFeedbackAdmin = false,
+}: Props) {
   const { t, locale } = useI18n()
   const loc = locale as Locale
   const ai = store.settings.ai
@@ -49,13 +69,26 @@ export function CoachSettingsPanel({ store, onUpdateSettings }: Props) {
   }, [store.aiChat])
 
   const suggestions = useMemo(
-    () => [...(store.aiChat?.suggestions ?? [])].sort((a, b) => b.ts - a.ts),
-    [store.aiChat],
+    () =>
+      suggestionsVisibleTo(store.aiChat, {
+        isAdmin: isFeedbackAdmin,
+        userId: currentUserId,
+        userName: currentUserName,
+        userLogin: currentUserLogin,
+      }),
+    [store.aiChat, isFeedbackAdmin, currentUserId, currentUserName, currentUserLogin],
   )
 
   const fmtDate = (ts: number) => new Date(ts).toLocaleString(loc === 'ka' ? 'ka-GE' : 'ru-RU')
   const topicName = (key: string) =>
     key === '__none__' ? t('coachAnalytics.noTopic') : viewLabel(key, loc) ?? key
+  const roleOf = (roleId: string) => {
+    try {
+      return roleLabel(roleId as AccessRoleId, loc)
+    } catch {
+      return roleId
+    }
+  }
 
   return (
     <>
@@ -240,29 +273,114 @@ export function CoachSettingsPanel({ store, onUpdateSettings }: Props) {
       </section>
 
       <section className={sectionClass}>
-        <h2 className="text-sm font-bold text-ink">{t('coachSuggestions.title')}</h2>
-        <p className="mt-1 text-xs text-stone-500">{t('coachSuggestions.hint')}</p>
+        <h2 className="text-sm font-bold text-ink">
+          {isFeedbackAdmin ? t('feedback.admin.journalTitle') : t('feedback.mine.journalTitle')}
+        </h2>
+        <p className="mt-1 text-xs text-stone-500">
+          {isFeedbackAdmin ? t('feedback.admin.journalHint') : t('feedback.mine.hint')}
+        </p>
         {suggestions.length === 0 ? (
-          <p className="mt-4 text-sm text-stone-400">{t('coachSuggestions.empty')}</p>
+          <p className="mt-4 text-sm text-stone-400">
+            {isFeedbackAdmin ? t('feedback.admin.empty') : t('feedback.mine.empty')}
+          </p>
         ) : (
-          <table className="mt-4 w-full text-xs">
-            <thead>
-              <tr className="text-left text-stone-400">
-                <th className="py-1">{t('coachAnalytics.colUser')}</th>
-                <th className="py-1">{t('coachSuggestions.colText')}</th>
-                <th className="py-1 text-right">{t('coachAnalytics.colLast')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suggestions.map((s) => (
-                <tr key={s.id} className="border-t border-grid align-top">
-                  <td className="py-1 pr-2 text-stone-700">{s.userName}</td>
-                  <td className="py-1 pr-2 text-stone-700">{s.text}</td>
-                  <td className="py-1 text-right text-stone-400">{fmtDate(s.ts)}</td>
+          <div className="mt-4 space-y-3">
+            {isFeedbackAdmin ? (
+              <p className="text-xs text-stone-500">
+                {t('feedback.admin.newCount')}:{' '}
+                {suggestions.filter((s) => s.status === 'new').length} / {suggestions.length}
+              </p>
+            ) : null}
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-stone-400">
+                  <th className="py-1">{t('coachAnalytics.colLast')}</th>
+                  <th className="py-1">{t('feedback.colKind')}</th>
+                  {isFeedbackAdmin ? (
+                    <th className="py-1">{t('feedback.colSender')}</th>
+                  ) : null}
+                  <th className="py-1">{t('feedback.colStatus')}</th>
+                  <th className="py-1">{t('coachSuggestions.colText')}</th>
+                  {isFeedbackAdmin ? (
+                    <th className="py-1">{t('feedback.colActions')}</th>
+                  ) : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {suggestions.map((s) => (
+                    <tr
+                      key={s.id}
+                      className={`border-t border-grid align-top ${
+                        s.status === 'new' ? 'bg-amber-50/60' : ''
+                      }`}
+                    >
+                      <td className="py-2 pr-2 whitespace-nowrap text-stone-400">
+                        {fmtDate(s.ts)}
+                      </td>
+                      <td className="py-2 pr-2 font-medium text-stone-700">
+                        {s.kind === 'bug' ? t('feedback.kind.bug') : t('feedback.kind.idea')}
+                      </td>
+                      {isFeedbackAdmin ? (
+                        <td className="py-2 pr-2 text-stone-700">
+                          <div className="font-semibold">{s.userName}</div>
+                          {s.roleId ? (
+                            <div className="text-[10px] text-stone-500">{roleOf(s.roleId)}</div>
+                          ) : null}
+                          <div className="text-[10px] text-stone-400">
+                            {viewLabel(s.view, loc) ?? s.view}
+                          </div>
+                        </td>
+                      ) : null}
+                      <td className="py-2 pr-2 text-stone-600">
+                        {t(`feedback.status.${s.status}`)}
+                      </td>
+                      <td className="py-2 pr-2 text-stone-800">
+                        {s.title ? (
+                          <div className="font-semibold text-ink">{s.title}</div>
+                        ) : null}
+                        <div className="whitespace-pre-wrap">{s.text}</div>
+                      </td>
+                      {isFeedbackAdmin ? (
+                      <td className="py-2">
+                        {onSetSuggestionStatus ? (
+                          <div className="flex flex-col gap-1">
+                            {s.status === 'new' ? (
+                              <button
+                                type="button"
+                                className="rounded border border-grid px-2 py-1 text-[11px] font-semibold hover:bg-white"
+                                onClick={() => onSetSuggestionStatus(s.id, 'seen', adminName)}
+                              >
+                                {t('feedback.status.seen')}
+                              </button>
+                            ) : null}
+                            {s.status !== 'done' ? (
+                              <button
+                                type="button"
+                                className="rounded bg-teal-700 px-2 py-1 text-[11px] font-semibold text-white"
+                                onClick={() => onSetSuggestionStatus(s.id, 'done', adminName)}
+                              >
+                                {t('feedback.status.done')}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="rounded border border-grid px-2 py-1 text-[11px] font-semibold hover:bg-white"
+                                onClick={() => onSetSuggestionStatus(s.id, 'new', adminName)}
+                              >
+                                {t('feedback.status.reopen')}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      ) : null}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </>

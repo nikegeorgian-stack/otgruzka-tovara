@@ -1,10 +1,12 @@
-﻿import { useMemo, useState, Fragment, useCallback, useEffect, useRef } from 'react'
+import { useMemo, useState, Fragment, useCallback, useEffect, useRef } from 'react'
+import { intlLocale } from '@/i18n/localeFormat'
 import { AppDialog } from '@/components/ui/AppDialog'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { TabBar } from '@/components/ui/TabBar'
+import { WarehouseLedgerNav } from '@/components/warehouse/WarehouseLedgerNav'
 import { WarehouseAnalyticsTab } from '@/components/warehouse/WarehouseAnalyticsTab'
 import { WarehouseAuditTab } from '@/components/warehouse/WarehouseAuditTab'
 import { WarehouseDocumentsTab } from '@/components/warehouse/WarehouseDocumentsTab'
@@ -14,6 +16,7 @@ import { WarehouseDailyIssueModal } from '@/components/warehouse/WarehouseDailyI
 import { WarehouseWorkwearTab } from '@/components/warehouse/WarehouseWorkwearTab'
 import { WarehouseItemRenameRequestsPanel } from '@/components/warehouse/WarehouseItemRenameRequestsPanel'
 import { WarehouseItemRequestsPanel } from '@/components/warehouse/WarehouseItemRequestsPanel'
+import { WarehouseMixReservesPanel } from '@/components/warehouse/WarehouseMixReservesPanel'
 import { ProductionRequestsPanel } from '@/components/warehouse/ProductionRequestsPanel'
 import { BatchConfirmRequestsPanel } from '@/components/warehouse/BatchConfirmRequestsPanel'
 import { WarehouseInventoryTab } from '@/components/warehouse/WarehouseInventoryTab'
@@ -32,7 +35,9 @@ import {
 } from '@/components/ui/workspace/WorkspaceWidgetRail'
 import { useWorkspaceWidgets } from '@/hooks/useWorkspaceWidgets'
 import type { WorkspaceWidgetDef } from '@/lib/ui/workspaceWidgets'
+import { WarehouseItemName } from '@/components/warehouse/WarehouseItemName'
 import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
+import { canSetTechnicalName, isProductionNomenclature, warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import {
   UNITS,
   WAREHOUSE_TABS,
@@ -43,7 +48,12 @@ import {
 import { findOpenDailyIssue, sessionLineCount } from '@/lib/warehouse/dailyIssue'
 import { compressItemPhoto } from '@/lib/warehouse/itemPhoto'
 import { useI18n } from '@/context/I18nContext'
+import {
+  getWarehouseAccountingState,
+  isWarehouseAccountingActive,
+} from '@/lib/warehouse/accountingStatus'
 import { useConfirm } from '@/context/ConfirmContext'
+import { accessPersona } from '@/lib/access/accessPersona'
 import { requestModalClose } from '@/lib/ui/requestModalClose'
 import { WAREHOUSE_PICK_EVENT, consumePendingWarehousePick, type WarehousePickDetail } from '@/lib/ai/warehousePickEvent'
 import { printWarehouseBalances } from '@/lib/warehouse/print'
@@ -85,6 +95,8 @@ export function WarehousePage(props: WarehousePageProps) {
     onPostDocument,
     onRunInventory,
     onPostOpeningBalances,
+    onSaveOpeningInventoryDraft,
+    onPostOpeningInventory,
     onImportExcel,
     onExportExcel,
     onMergeInvoiceRegistry,
@@ -92,14 +104,12 @@ export function WarehousePage(props: WarehousePageProps) {
     keeperName,
     allowNegativeStock = false,
     canCancelDocuments = false,
-    canUnpostDocuments = false,
     counterparties,
     productionRequests,
     onPostTransfer,
     onCancelDocument,
     onSaveDocumentDraft,
     onPostExistingDocument,
-    onUnpostDocument,
     onRemoveDocumentDraft,
     onAcquireDocumentLock,
     onReleaseDocumentLock,
@@ -119,6 +129,7 @@ export function WarehousePage(props: WarehousePageProps) {
     onPostLoadingShipment,
     onRemoveLoadingShipment,
     finishedProducts,
+    finishedGoodsLots,
     packagingRecipes,
     salesOrders,
     onOpenSalesOrder,
@@ -126,6 +137,7 @@ export function WarehousePage(props: WarehousePageProps) {
     onUpsertCounterparty,
     onOpenCounterparties,
     pendingBatchRuns,
+    mixTasks,
     onConfirmFormulationBatch,
     onRejectFormulationBatch,
     onUpsertWorkwearCatalogItem,
@@ -139,6 +151,10 @@ export function WarehousePage(props: WarehousePageProps) {
     userWarehouseDefaults,
     currentUserId,
     onSaveViewDefaults,
+    access,
+    currentUser,
+    onCreateWorkTask,
+    exportStore,
   } = props
 
   const { t, tf } = useI18n()
@@ -182,6 +198,8 @@ export function WarehousePage(props: WarehousePageProps) {
   const resolvedKeeperId = keeperId ?? 'local'
   const resolvedKeeperName = keeperName ?? printMeta?.responsible ?? 'Кладовщик'
   const whId = warehouseId || warehouse.locations[0]?.id || ''
+  const accountingState = getWarehouseAccountingState(warehouse, whId)
+  const accountingActive = isWarehouseAccountingActive(warehouse, whId)
 
   const openDailySession = useMemo(
     () =>
@@ -283,6 +301,7 @@ export function WarehousePage(props: WarehousePageProps) {
     const cat = catMap.get(item.categoryId)?.name ?? ''
     return (
       item.name.toLowerCase().includes(q) ||
+      (item.technicalName?.toLowerCase().includes(q) ?? false) ||
       cat.toLowerCase().includes(q) ||
       item.internalCode?.toLowerCase().includes(q) ||
       item.sku?.toLowerCase().includes(q) ||
@@ -321,6 +340,11 @@ export function WarehousePage(props: WarehousePageProps) {
       sortOrder: warehouse.items.length,
     })
     setIsNew(true)
+  }
+
+  function openNewProductForKeeper() {
+    setTab('nomenclature')
+    openNewItem()
   }
 
   const tabLabels: Record<WarehouseTab, string> = {
@@ -506,7 +530,18 @@ export function WarehousePage(props: WarehousePageProps) {
           subtitle={webWarehouseMode ? t('web.warehouse.pageSubtitle') : t('warehouse.subtitle')}
           actions={
             <div className="flex flex-wrap items-center gap-2">
+              {webWarehouseMode ? (
+                <button
+                  type="button"
+                  className="btn-add"
+                  onClick={openNewProductForKeeper}
+                  data-coach="warehouse:addProduct"
+                >
+                  {t('warehouse.addProduct')}
+                </button>
+              ) : null}
               <TabBar
+                coachPrefix="warehouse"
                 tabs={visibleTabs.map((id) => ({ id, label: tabLabels[id] }))}
                 value={tab}
                 onChange={setTab}
@@ -524,6 +559,37 @@ export function WarehousePage(props: WarehousePageProps) {
             </div>
           }
         />
+      )}
+
+      {!embedded && whId && !accountingActive && (
+        <div className="rounded-sm border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p className="font-semibold">{t('warehouse.accounting.bannerTitle')}</p>
+          <p className="mt-1 text-xs">
+            {t('warehouse.accounting.bannerBody')}{' '}
+            <span className="font-medium">
+              ({t('warehouse.accounting.statusLabel')}:{' '}
+              {accountingState.status === 'reconciling'
+                ? t('warehouse.accounting.statusReconciling')
+                : t('warehouse.accounting.statusUninitialized')}
+              )
+            </span>
+          </p>
+          {onPostOpeningInventory && (
+            <button
+              type="button"
+              className="btn-add mt-2"
+              onClick={() => setTab('inventory')}
+            >
+              {t('warehouse.accounting.openOpeningInventory')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!embedded && whId && accountingActive && (
+        <div className="rounded-sm border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-xs text-emerald-900">
+          {t('warehouse.accounting.statusActive')}
+        </div>
       )}
 
       {!embedded && onOpenDailyIssueSession && (
@@ -555,6 +621,8 @@ export function WarehousePage(props: WarehousePageProps) {
           </span>
         </button>
       )}
+
+      {!embedded && <WarehouseLedgerNav value={tab} onChange={setTab} />}
 
       {!embedded && (
         <WorkspaceWidgetRail
@@ -650,6 +718,9 @@ export function WarehousePage(props: WarehousePageProps) {
 
       {!embedded && tab === 'balances' && (
         <div className="mb-4 space-y-4">
+          {mixTasks ? (
+            <WarehouseMixReservesPanel warehouse={warehouse} mixTasks={mixTasks} />
+          ) : null}
           {!webWarehouseMode &&
             pendingBatchRuns &&
             onConfirmFormulationBatch &&
@@ -743,6 +814,10 @@ export function WarehousePage(props: WarehousePageProps) {
           onAddMovement={onAddMovement}
           onDeleteMovement={onDeleteMovement}
           asOfIso={asOfIsoMemo}
+          onOpenWarehouseDocument={(documentId) => {
+            setTab('documents')
+            setPendingJournalDocId(documentId)
+          }}
         />
       )}
       {!embedded && tab === 'documents' && (
@@ -754,19 +829,18 @@ export function WarehousePage(props: WarehousePageProps) {
           printMeta={printMeta}
           allowNegativeStock={allowNegativeStock}
           canCancelDocuments={canCancelDocuments}
-          canUnpostDocuments={canUnpostDocuments}
           counterparties={counterparties}
           onUpsertCounterparty={onUpsertCounterparty}
           onOpenCounterparties={onOpenCounterparties}
           productionRequests={productionRequests}
           keeperId={keeperId}
           keeperName={keeperName}
+          exportStore={exportStore}
           onPostDocument={onPostDocument}
           onPostTransfer={onPostTransfer}
           onCancelDocument={onCancelDocument}
           onSaveDocumentDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
           onRemoveDocumentDraft={onRemoveDocumentDraft}
           onAcquireDocumentLock={onAcquireDocumentLock}
           onReleaseDocumentLock={onReleaseDocumentLock}
@@ -779,6 +853,9 @@ export function WarehousePage(props: WarehousePageProps) {
           onConsumeAiPick={() => setPendingAiPick(null)}
           pendingOpenDocumentId={pendingJournalDocId}
           onPendingOpenConsumed={() => setPendingJournalDocId(null)}
+          access={access}
+          currentUser={currentUser}
+          onCreateWorkTask={onCreateWorkTask}
         />
       )}
       {!embedded && tab === 'inventory' && (
@@ -792,9 +869,11 @@ export function WarehousePage(props: WarehousePageProps) {
           asOfIso={asOfIsoMemo}
           onRunInventory={onRunInventory}
           onPostOpeningBalances={onPostOpeningBalances}
+          onSaveOpeningInventoryDraft={onSaveOpeningInventoryDraft}
+          onPostOpeningInventory={onPostOpeningInventory}
           onSaveDocumentDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={canUnpostDocuments ? onUnpostDocument : undefined}
+          onCancelDocument={onCancelDocument}
           onAcquireDocumentLock={onAcquireDocumentLock}
           onReleaseDocumentLock={onReleaseDocumentLock}
           onQuickEditItem={(item) => {
@@ -886,6 +965,7 @@ export function WarehousePage(props: WarehousePageProps) {
             warehouseId={warehouseId}
             counterparties={counterparties ?? []}
             finishedProducts={finishedProducts ?? []}
+            finishedGoodsLots={finishedGoodsLots ?? []}
             packagingRecipes={packagingRecipes ?? []}
             keeperId={keeperId}
             keeperName={resolvedKeeperName}
@@ -909,6 +989,7 @@ export function WarehousePage(props: WarehousePageProps) {
           isNew={isNew}
           categories={categories}
           locations={warehouse.locations}
+          actorRoleId={accessPersona(currentUser)?.roleId}
           onClose={() => setEditItem(null)}
           onSave={(item) => {
             onUpsertItem(item)
@@ -1069,9 +1150,14 @@ function BalancesTable({
                     onClick={() => onEdit(item)}
                   >
                     <td className="px-2 py-2.5">
-                      <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} />
+                      <WarehouseItemThumb
+                        photoDataUrl={item.photoDataUrl}
+                        name={warehouseItemDisplayName(item)}
+                      />
                     </td>
-                    <td className="px-4 py-2.5 font-medium text-ink">{item.name}</td>
+                    <td className="px-4 py-2.5 text-ink">
+                      <WarehouseItemName item={item} />
+                    </td>
                     <td className="px-3 py-2.5 text-stone-500">{unitLabel(item.unit, locale)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-stone-600">
                       {formatQty(b?.reserved ?? 0)}
@@ -1144,7 +1230,10 @@ function NomenclatureTable({
             <tr key={item.id} className="border-b border-grid/60 hover:bg-stone-50/80">
               <td className="px-2 py-2.5">
                 <button type="button" className="block" onClick={() => onEdit(item)}>
-                  <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} />
+                  <WarehouseItemThumb
+                    photoDataUrl={item.photoDataUrl}
+                    name={warehouseItemDisplayName(item)}
+                  />
                 </button>
               </td>
               <td className="px-3 py-2.5 font-mono text-xs text-teal-800">
@@ -1153,10 +1242,10 @@ function NomenclatureTable({
               <td className="px-4 py-2.5">
                 <button
                   type="button"
-                  className="text-left font-medium text-ink hover:text-teal-800 hover:underline"
+                  className="text-left text-ink hover:text-teal-800 hover:underline"
                   onClick={() => onEdit(item)}
                 >
-                  {item.name}
+                  <WarehouseItemName item={item} />
                 </button>
               </td>
               <td className="px-3 py-2.5 text-stone-600">{catMap.get(item.categoryId)?.name ?? '—'}</td>
@@ -1239,6 +1328,7 @@ function ItemEditModal({
   isNew,
   categories,
   locations,
+  actorRoleId,
   onClose,
   onSave,
   onAddCategory,
@@ -1248,6 +1338,7 @@ function ItemEditModal({
   isNew: boolean
   categories: WarehouseCategory[]
   locations: WarehouseLocation[]
+  actorRoleId?: string
   onClose: () => void
   onSave: (item: WarehouseItem) => void
   onAddCategory: (name: string) => string
@@ -1265,6 +1356,8 @@ function ItemEditModal({
   const [showPackaging, setShowPackaging] = useState((item.unitConversions?.length ?? 0) > 0)
   const [error, setError] = useState<string | null>(null)
   const [photoBusy, setPhotoBusy] = useState(false)
+  const showTechnicalName = isProductionNomenclature(draft, locations)
+  const editTechnicalName = canSetTechnicalName(actorRoleId, draft, locations)
 
   function isDirty() {
     return JSON.stringify(draft) !== baselineRef.current
@@ -1382,6 +1475,27 @@ function ItemEditModal({
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             />
           </label>
+          {showTechnicalName ? (
+            <label className="block text-xs font-semibold text-stone-500">
+              {t('warehouse.col.technicalName')}
+              <input
+                data-coach="warehouse:technicalName"
+                readOnly={!editTechnicalName}
+                className={`mt-1 w-full rounded-sm border border-grid px-3 py-2.5 text-sm ${
+                  editTechnicalName ? '' : 'cursor-not-allowed bg-stone-50 text-stone-600'
+                }`}
+                value={draft.technicalName ?? ''}
+                onChange={(e) =>
+                  setDraft({ ...draft, technicalName: e.target.value || undefined })
+                }
+              />
+              <p className="mt-1 text-[11px] text-stone-400">
+                {editTechnicalName
+                  ? t('warehouse.technicalNameHint')
+                  : t('warehouse.technicalNameReadonly')}
+              </p>
+            </label>
+          ) : null}
           <label className="block text-xs font-semibold text-stone-500">
             {t('warehouse.col.category')}
             <select
@@ -1684,7 +1798,7 @@ function ItemCardModal({
     <AppDialog
       open
       onClose={onClose}
-      title={item.name}
+      title={warehouseItemDisplayName(item)}
       subtitle={`${item.internalCode} · ${cat?.name} · ${loc?.name}`}
       size="md"
       footer={
@@ -1706,9 +1820,17 @@ function ItemCardModal({
       }
     >
       <div className="flex gap-4 border-b border-grid px-6 py-4">
-        <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} size="lg" />
+        <WarehouseItemThumb
+          photoDataUrl={item.photoDataUrl}
+          name={warehouseItemDisplayName(item)}
+          size="lg"
+        />
         <div className="min-w-0">
           <p className="font-mono text-xs font-semibold text-teal-700">{item.internalCode}</p>
+          <p className="text-sm font-medium text-ink">{warehouseItemDisplayName(item)}</p>
+          {item.technicalName?.trim() && item.technicalName.trim() !== item.name.trim() ? (
+            <p className="text-xs text-stone-400">{item.name}</p>
+          ) : null}
           <p className="text-sm text-stone-500">
             {cat?.name} · {loc?.name}
           </p>
@@ -1750,7 +1872,7 @@ function ItemCardModal({
                 <li key={h.id} className="rounded-sm bg-stone-50 px-2 py-1.5">
                   <div className="flex justify-between gap-2 text-[10px] text-stone-400">
                     <span>
-                      {new Date(h.at).toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+                      {new Date(h.at).toLocaleString(intlLocale(locale), {
                         day: '2-digit',
                         month: '2-digit',
                         year: 'numeric',

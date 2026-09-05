@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/ui/icons'
 import { useModalMinimizeOptional } from '@/context/ModalMinimizeContext'
 import { useI18n } from '@/context/I18nContext'
@@ -17,8 +18,8 @@ export function WorkspaceTaskbar({ panes, activePaneId, onActivate, onClose }: P
 
   if (panes.length === 0 && modalItems.length === 0) return null
 
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-300/90 bg-[#f3f1ec] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] print:hidden">
+  const bar = (
+    <div className="workspace-taskbar fixed bottom-0 right-0 left-0 border-t border-stone-300/90 bg-[#f3f1ec] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] print:hidden">
       <div className="mx-auto flex max-w-[1600px] flex-col gap-1 px-3 py-2">
         {modalItems.length > 0 && (
           <div className="flex items-center gap-2">
@@ -104,4 +105,7 @@ export function WorkspaceTaskbar({ panes, activePaneId, onActivate, onClose }: P
       </div>
     </div>
   )
+
+  if (typeof document === 'undefined') return bar
+  return createPortal(bar, document.body)
 }

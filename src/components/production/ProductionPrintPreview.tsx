@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ProductionPrintSheet } from '@/components/production/ProductionPrintSheet'
 import { useI18n } from '@/context/I18nContext'
-import { fitPrintPages, resetPrintFit } from '@/lib/printFit'
+import { usePrintFit } from '@/hooks/usePrintFit'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 import { PRODUCTION_LINES, type ProductionRequest } from '@/lib/production/types'
 
@@ -22,6 +22,10 @@ export function ProductionPrintPreview({
   const { t } = useI18n()
   const printRef = useRef<HTMLDivElement>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const { runFit } = usePrintFit(printRef, {
+    shrinkOnly: true,
+    deps: [request, foremanName, rosterLines],
+  })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,22 +36,14 @@ export function ProductionPrintPreview({
     return () => {
       window.removeEventListener('keydown', onKey)
       document.body.classList.remove('print-preview-open')
-      resetPrintFit(printRef.current)
     }
   }, [onClose])
-
-  useLayoutEffect(() => {
-    const id = requestAnimationFrame(() => {
-      fitPrintPages(printRef.current)
-    })
-    return () => cancelAnimationFrame(id)
-  }, [request, foremanName, rosterLines])
 
   const lineLabel =
     PRODUCTION_LINES.find((l) => l.id === request.lineId)?.labelRu ?? ''
 
   function handlePrint() {
-    fitPrintPages(printRef.current)
+    runFit()
     requestAnimationFrame(() => window.print())
   }
 
@@ -55,7 +51,7 @@ export function ProductionPrintPreview({
     if (!printRef.current) return
     setPdfBusy(true)
     try {
-      fitPrintPages(printRef.current)
+      runFit()
       await exportPrintAreaToPdf(
         printRef.current,
         `zayavka_${request.lineId}_${request.date}.pdf`,
@@ -66,7 +62,7 @@ export function ProductionPrintPreview({
   }
 
   const content = (
-    <div className="print-modal-root fixed inset-0 z-[110] flex flex-col bg-stone-900/60">
+    <div className="print-modal-root fixed inset-0 z-[420] flex flex-col bg-stone-900/60">
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <div>
           <h2 className="text-lg font-bold">{t('print.preview')}</h2>

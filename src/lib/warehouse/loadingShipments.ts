@@ -1,6 +1,12 @@
 import { appendWarehouseAudit } from './audit'
+import { postWarehouseDocument } from './documents'
 import { computeLoadingTotals, LOADING_CONTAINERS, type LoadingLine } from './loading'
+import { suggestDocNumber } from './nomenclatureSearch'
+import { computeAllBalances, formatIssueShortages, validateIssueLines } from './stock'
 import type { LoadingShipment, LoadingShipmentLine, WarehouseStore } from './types'
+import type { FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
+import { computeLoadingLine } from './loading'
+import { assertLoadingLineShippable } from '@/lib/production/shipmentGate'
 
 export type UpsertLoadingShipmentInput = {
   id?: string
@@ -27,8 +33,14 @@ export type UpsertLoadingShipmentInput = {
 }
 
 export type PostLoadingShipmentResult =
-  | { ok: true; number: string }
-  | { ok: false; error: string }
+  | { ok: true; number: string; lotUsages?: LoadingShipmentLotUsage[] }
+  | { ok: false; error: string; detail?: string }
+
+export type LoadingShipmentLotUsage = {
+  lineId: string
+  lotId: string
+  quantity: number
+}
 
 function suggestNumber(shipments: LoadingShipment[], date: string): string {
   const day = date.replace(/-/g, '')
@@ -74,6 +86,58 @@ function computeTotals(lines: LoadingShipmentLine[]) {
     totalsAreaM2: t.areaM2,
     totalsPalletPlaces: t.palletPlaces,
   }
+}
+
+export function resolveLoadingShipmentLotUsages(
+  lines: LoadingShipmentLine[],
+  lots: FinishedGoodsLot[],
+): { ok: true; usages: LoadingShipmentLotUsage[] } | { ok: false; error: string } {
+  const usages: LoadingShipmentLotUsage[] = []
+
+  for (const line of lines) {
+    if (line.rolls <= 0) continue
+    if (!line.itemId || !line.finishedProductId) {
+      return { ok: false, error: 'production.ship.errLotRequired' }
+    }
+    if (!line.lotId && !line.batchNo) {
+      return { ok: false, error: 'production.ship.errLotRequired' }
+    }
+
+    const lineQty = computeLoadingLine({
+      id: line.id,
+      name: line.name,
+      note: line.note,
+      rollLengthM: line.rollLengthM ?? 0,
+      grammageGsm: line.grammageGsm ?? 0,
+      rollWidthM: line.rollWidthM ?? 0,
+      rolls: line.rolls,
+      weightPerRollKg: line.weightPerRollKg ?? 0,
+      areaPerRollM2: line.areaPerRollM2 ?? 0,
+      rollsPerBox: line.rollsPerBox ?? 0,
+      topRolls: line.topRolls ?? 0,
+      rollsPerPallet: line.rollsPerPallet ?? 0,
+      palletLayers: line.palletLayers ?? 0,
+      boxLayers: line.boxLayers ?? 0,
+      palletTareKg: line.palletTareKg ?? 0,
+      boxes: line.boxes ?? 0,
+      boxTareKg: line.boxTareKg ?? 0,
+      palletPlaces: line.palletPlaces ?? 0,
+    }).areaM2
+
+    const gate = assertLoadingLineShippable(lots, {
+      quantity: lineQty,
+      finishedProductId: line.finishedProductId,
+      warehouseItemId: line.itemId,
+      lotId: line.lotId,
+      batchNo: line.batchNo,
+      name: line.name,
+    })
+    if (!gate.ok) return { ok: false, error: gate.error }
+
+    usages.push({ lineId: line.id, lotId: gate.lot.id, quantity: lineQty })
+  }
+
+  return { ok: true, usages }
 }
 
 export function listLoadingShipments(store: WarehouseStore): LoadingShipment[] {
@@ -167,8 +231,13 @@ export function postLoadingShipment(
   store: WarehouseStore,
   shipmentId: string,
   args?: { keeperId?: string; keeperName?: string },
+  finishedGoodsLots: FinishedGoodsLot[] = [],
 ): { store: WarehouseStore; result: PostLoadingShipmentResult } {
   const shipments = store.loadingShipments ?? []
+  const existing = shipments.find((s) => s.id === shipmentId)
+  if (existing?.status === 'posted') {
+    return { store, result: { ok: true, number: existing.number } }
+  }
   const idx = shipments.findIndex((s) => s.id === shipmentId && s.status === 'draft')
   if (idx < 0) {
     return { store, result: { ok: false, error: 'warehouse.loading.errNotFound' } }
@@ -180,6 +249,46 @@ export function postLoadingShipment(
   }
   if (!prev.counterpartyName.trim()) {
     return { store, result: { ok: false, error: 'warehouse.loading.errCustomer' } }
+  }
+
+  const lotRequirement = prev.lines.filter((line) => line.rolls > 0)
+  if (lotRequirement.some((line) => !line.itemId || !line.finishedProductId || (!line.lotId && !line.batchNo))) {
+    return { store, result: { ok: false, error: 'production.ship.errLotRequired' } }
+  }
+
+  /** Авто-расход ГП по строкам с номенклатурой склада (кг нетто). */
+  const issueLines = prev.lines
+    .filter((l) => l.itemId && l.rolls > 0)
+    .map((l) => {
+      const netKg =
+        (l.weightPerRollKg || 0) * (l.rolls || 0) ||
+        (l.areaPerRollM2 || 0) * (l.rolls || 0) * ((l.grammageGsm || 0) / 1000)
+      return { itemId: l.itemId!, quantity: Math.max(netKg, l.rolls) }
+    })
+    .filter((l) => l.quantity > 0)
+
+  const lotUsage = resolveLoadingShipmentLotUsages(prev.lines, finishedGoodsLots)
+  if (!lotUsage.ok) {
+    return { store, result: { ok: false, error: lotUsage.error } }
+  }
+
+  if (issueLines.length > 0) {
+    if (!prev.warehouseId) {
+      return { store, result: { ok: false, error: 'warehouse.doc.errWarehouse' } }
+    }
+    const balances = computeAllBalances(store, prev.warehouseId)
+    const activeItems = store.items.filter((i) => i.active)
+    const stockCheck = validateIssueLines(activeItems, balances, issueLines)
+    if (!stockCheck.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: 'warehouse.loading.errStock',
+          detail: formatIssueShortages(stockCheck.shortages),
+        },
+      }
+    }
   }
 
   const now = new Date().toISOString()
@@ -197,14 +306,61 @@ export function postLoadingShipment(
   const nextShipments = [...shipments]
   nextShipments[idx] = posted
   let next: WarehouseStore = { ...store, loadingShipments: nextShipments }
+
+  if (issueLines.length > 0) {
+    const docNumber = suggestDocNumber(next.documents, 'issue', posted.date)
+    const out = postWarehouseDocument(next, {
+      type: 'issue',
+      number: docNumber || `${posted.number}-Р`,
+      date: posted.actualShipDate || posted.date,
+      warehouseId: posted.warehouseId,
+      purpose: 'loading',
+      counterparty: posted.counterpartyName,
+      counterpartyId: posted.counterpartyId,
+      comment: `Отгрузка ${posted.number} · ${posted.counterpartyName}`,
+      lines: issueLines,
+      keeperId: posted.keeperId,
+      keeperName: posted.keeperName,
+      loadingShipmentId: posted.id,
+      docRole: 'loading_issue',
+      idempotencyKey: [
+        'loading',
+        posted.id,
+        'loading_issue',
+        posted.warehouseId,
+      ].join('::'),
+    })
+    if (!out.result.ok) {
+      return {
+        store,
+        result: {
+          ok: false,
+          error: out.result.error ?? 'warehouse.loading.errGeneric',
+          detail: out.result.shortages
+            ? out.result.shortages.map((s) => s.name).join(', ')
+            : undefined,
+        },
+      }
+    }
+    next = out.store
+    const withDoc: LoadingShipment = {
+      ...posted,
+      postedDocumentId: out.result.documentId,
+    }
+    nextShipments[idx] = withDoc
+    next = { ...next, loadingShipments: [...nextShipments] }
+  }
+
   next = appendWarehouseAudit(next, {
     action: 'loading_shipment',
-    detail: `Погрузка ${posted.number} · ${posted.counterpartyName} · ${posted.lines.length} поз. · ${(posted.totalsGrossKg / 1000).toFixed(3)} т`,
+    detail: `Погрузка ${posted.number} · ${posted.counterpartyName} · ${posted.lines.length} поз. · ${(posted.totalsGrossKg / 1000).toFixed(3)} т${
+      issueLines.length ? ` · расход ${issueLines.length} поз.` : ''
+    }`,
     actorId: posted.keeperId,
     actorName: posted.keeperName,
   })
 
-  return { store: next, result: { ok: true, number: posted.number } }
+  return { store: next, result: { ok: true, number: posted.number, lotUsages: lotUsage.usages } }
 }
 
 export function removeLoadingShipment(store: WarehouseStore, shipmentId: string): WarehouseStore {

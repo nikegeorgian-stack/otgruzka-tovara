@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { dispatchMinimizeOverlays } from '@/lib/ui/overlayEvents'
 
 export type MinimizedModalItem = {
   id: string
@@ -34,11 +35,15 @@ export function ModalMinimizeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const restore = useCallback((id: string) => {
-    setItems((prev) => {
-      const item = prev.find((p) => p.id === id)
-      item?.restore()
-      return prev.filter((p) => p.id !== id)
-    })
+    // Сначала свернуть другие открытые окна, потом восстановить выбранное.
+    dispatchMinimizeOverlays()
+    window.setTimeout(() => {
+      setItems((prev) => {
+        const item = prev.find((p) => p.id === id)
+        item?.restore()
+        return prev.filter((p) => p.id !== id)
+      })
+    }, 0)
   }, [])
 
   const remove = useCallback((id: string) => {

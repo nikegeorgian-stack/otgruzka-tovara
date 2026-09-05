@@ -22,6 +22,18 @@ export type ProcurementActions = {
   onReceiveOrder: ReturnType<
     typeof import('@/store/slices/procurementSlice').createProcurementSlice
   >['receivePurchaseOrder']
+  onUpsertProcurementCategory: ReturnType<
+    typeof import('@/store/slices/procurementSlice').createProcurementSlice
+  >['upsertProcurementCategory']
+  onRemoveProcurementCategory: ReturnType<
+    typeof import('@/store/slices/procurementSlice').createProcurementSlice
+  >['removeProcurementCategory']
+  onUpsertRoutePoint: ReturnType<
+    typeof import('@/store/slices/procurementSlice').createProcurementSlice
+  >['upsertRoutePoint']
+  onRemoveRoutePoint: ReturnType<
+    typeof import('@/store/slices/procurementSlice').createProcurementSlice
+  >['removeRoutePoint']
   onUpsertCounterparty: (c: Counterparty) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onNavigateToDirectory: (section: DirectorySection) => void

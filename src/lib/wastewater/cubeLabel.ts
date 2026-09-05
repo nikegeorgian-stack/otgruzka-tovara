@@ -63,7 +63,9 @@ export async function buildWastewaterCubeLabelModel(
   return { cube, site, statusLabel, qrDataUrl, fields: opts }
 }
 
-export function formatWwDate(iso: string | undefined, locale: 'ru' | 'ka'): string {
+import type { Locale } from '@/i18n/types'
+
+export function formatWwDate(iso: string | undefined, locale: Locale): string {
   if (!iso) return '—'
   const [y, m, d] = iso.split('-')
   if (!y || !m || !d) return iso

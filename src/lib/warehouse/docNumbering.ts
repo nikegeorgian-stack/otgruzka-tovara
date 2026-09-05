@@ -3,6 +3,7 @@ import type { WarehouseDocument } from './types'
 export function documentNumberPrefix(type: WarehouseDocument['type']): string {
   if (type === 'receipt') return 'ПР'
   if (type === 'issue') return 'РС'
+  if (type === 'reservation') return 'РЗВ'
   return 'ИНВ'
 }
 

@@ -39,6 +39,11 @@ export function useModalScope({
 }: UseModalScopeOptions): { zIndex: number } {
   const modalId = useId()
   const restoreFocusRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  const onPrimaryActionRef = useRef(onPrimaryAction)
+  onCloseRef.current = onClose
+  onPrimaryActionRef.current = onPrimaryAction
+
   const openRef = useRef(open)
   openRef.current = open
 
@@ -54,11 +59,9 @@ export function useModalScope({
     () => peekModalZIndexForNew(),
   )
 
-  useEffect(() => {
+  /** Фокус только при открытии — не сбрасывать при ре-рендере родителя (облако, store). */
+  useLayoutEffect(() => {
     if (!open) return
-
-    restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
 
     const focusTimer = window.setTimeout(() => {
       const el = containerRef.current
@@ -82,6 +85,24 @@ export function useModalScope({
       focusable[0]?.focus({ preventScroll: true })
     }, 0)
 
+    return () => clearTimeout(focusTimer)
+  }, [open, initialFocus, containerRef])
+
+  useEffect(() => {
+    if (open) {
+      restoreFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null
+      return
+    }
+    const restore = restoreFocusRef.current
+    if (restore && document.contains(restore)) {
+      requestAnimationFrame(() => restore.focus({ preventScroll: true }))
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+
     function onKeyDown(e: KeyboardEvent) {
       if (!isTopModal(modalId)) return
 
@@ -91,7 +112,7 @@ export function useModalScope({
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
 
@@ -100,7 +121,8 @@ export function useModalScope({
         return
       }
 
-      if (!onPrimaryAction || disableEnterSubmit) return
+      const primary = onPrimaryActionRef.current
+      if (!primary || disableEnterSubmit) return
 
       const isCtrlEnter = e.key === 'Enter' && (e.ctrlKey || e.metaKey)
       const isPlainEnter =
@@ -109,7 +131,7 @@ export function useModalScope({
       if (isCtrlEnter) {
         e.preventDefault()
         e.stopPropagation()
-        onPrimaryAction()
+        primary()
         return
       }
 
@@ -121,29 +143,12 @@ export function useModalScope({
 
       e.preventDefault()
       e.stopPropagation()
-      onPrimaryAction()
+      primary()
     }
 
     window.addEventListener('keydown', onKeyDown, true)
-
-    return () => {
-      window.clearTimeout(focusTimer)
-      window.removeEventListener('keydown', onKeyDown, true)
-
-      const restore = restoreFocusRef.current
-      if (restore && document.contains(restore)) {
-        requestAnimationFrame(() => restore.focus({ preventScroll: true }))
-      }
-    }
-  }, [
-    open,
-    onClose,
-    onPrimaryAction,
-    disableEnterSubmit,
-    initialFocus,
-    modalId,
-    containerRef,
-  ])
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [open, disableEnterSubmit, modalId, containerRef])
 
   return { zIndex }
 }

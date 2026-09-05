@@ -7,7 +7,6 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { Input } from '@/components/ui/Input'
 import { TabBar } from '@/components/ui/TabBar'
 import { useI18n } from '@/context/I18nContext'
-import { employmentAgreementLabel } from '@/lib/hr/labels'
 import { calcWorkwearAmortization, calcWorkwearWithholding } from '@/lib/workwear/amortization'
 import { checkWorkwearEligibility } from '@/lib/workwear/eligibility'
 import { filterEmployeesForDate } from '@/lib/hr/employeeActive'
@@ -72,8 +71,6 @@ function parsePrice(raw: string): number {
 
 function errorKey(error: string): string {
   const map: Record<string, string> = {
-    no_agreement: 'workwear.error.noAgreement',
-    fixed_term: 'workwear.error.fixedTerm',
     inactive: 'workwear.error.inactive',
     employee_not_found: 'workwear.error.employeeNotFound',
     item_not_found: 'workwear.error.itemNotFound',
@@ -244,7 +241,7 @@ export function WarehouseWorkwearTab({
     if (!eligibility?.ok) {
       setNotice({
         type: 'error',
-        key: errorKey(eligibility?.reason ?? 'no_agreement'),
+        key: errorKey(eligibility?.reason ?? 'inactive'),
       })
       return
     }
@@ -376,15 +373,6 @@ export function WarehouseWorkwearTab({
             ) : (
               <>
                 <Card title={selectedEmployee.fullName}>
-                  <p className="text-sm text-stone-600">
-                    {t('workwear.agreement')}:{' '}
-                    <span className="font-medium text-ink">
-                      {employmentAgreementLabel(
-                        selectedEmployee.employmentAgreementKind,
-                        locale,
-                      )}
-                    </span>
-                  </p>
                   {eligibility && !eligibility.ok && (
                     <div className="mt-3">
                       <FormNotice type="error" message={t(errorKey(eligibility.reason))} />

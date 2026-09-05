@@ -1,6 +1,7 @@
 import { DEFAULT_BRIGADES } from './brigades.constants'
 import { createEmptyBrigadeRow } from './brigadeRows'
-import { monthKey } from './dates'
+import { isWorkDayCode } from './codes'
+import { monthKey, shiftMonth } from './dates'
 import { employeeActiveInMonth } from './hr/employeeActive'
 import { buildPlanRow } from './schedule'
 import type { AppStore, DayCode, Employee, MonthSheet, TimesheetRow } from './types'
@@ -55,7 +56,9 @@ export function createMonthSheet(
     factExtraHours: {},
     brigadierDays: {},
     factHoursOverride: {},
+    brigadeSignoffs: {},
     dayTransfers: {},
+    rowBounds: {},
   }
 }
 
@@ -75,7 +78,7 @@ export function syncPlanRow(
   rowId: string,
   employee: Employee,
 ): MonthSheet {
-  const planRow = buildPlanRow(employee, sheet.month)
+  const planRow = buildPlanRow(employee, sheet.month, sheet.rowBounds?.[rowId])
   const nextPlan = { ...sheet.plan, [rowId]: planRow }
   const nextFact = { ...sheet.fact }
   const kept: Record<string, DayCode> = {}
@@ -93,6 +96,99 @@ export function syncPlanRow(
   return { ...sheet, plan: nextPlan, fact: nextFact }
 }
 
-export function defaultMonths(): string[] {
-  return [monthKey(2026, 6), monthKey(2026, 7), monthKey(2026, 8)]
+/**
+ * Ручная правка плана по дню.
+ * Если факт этой ячейки не трогали руками — подтягиваем факт к плану
+ * (и чистим +N / точные часы, если код нерабочий). Иначе факт не меняем.
+ */
+export function applyPlanDayMark(
+  sheet: MonthSheet,
+  rowId: string,
+  dateKey: string,
+  code: DayCode,
+): MonthSheet {
+  const oKey = `${rowId}|${dateKey}`
+  const next: MonthSheet = {
+    ...sheet,
+    plan: {
+      ...sheet.plan,
+      [rowId]: { ...(sheet.plan[rowId] ?? {}), [dateKey]: code },
+    },
+  }
+  if (sheet.factOverrides.includes(oKey)) return next
+
+  const cellKey = `${rowId}|${dateKey}`
+  const factExtraHours = { ...(sheet.factExtraHours ?? {}) }
+  const factHoursOverride = { ...(sheet.factHoursOverride ?? {}) }
+  if (!isWorkDayCode(code)) {
+    delete factExtraHours[cellKey]
+    delete factHoursOverride[cellKey]
+  }
+
+  return {
+    ...next,
+    fact: {
+      ...sheet.fact,
+      [rowId]: { ...(sheet.fact[rowId] ?? {}), [dateKey]: code },
+    },
+    factExtraHours,
+    factHoursOverride,
+  }
+}
+
+/**
+ * Перенос план/факт/override с одной строки на другую (смена слота в составе).
+ * Не затирает уже заполненные ячейки на целевой строке.
+ */
+export function moveRowMarks(
+  sheet: MonthSheet,
+  fromRowId: string,
+  toRowId: string,
+): MonthSheet {
+  if (!fromRowId || !toRowId || fromRowId === toRowId) return sheet
+
+  const fromPlan = sheet.plan[fromRowId]
+  const fromFact = sheet.fact[fromRowId]
+  const plan = { ...sheet.plan }
+  const fact = { ...sheet.fact }
+
+  if (fromPlan) {
+    plan[toRowId] = { ...fromPlan, ...(plan[toRowId] ?? {}) }
+    delete plan[fromRowId]
+  }
+  if (fromFact) {
+    fact[toRowId] = { ...fromFact, ...(fact[toRowId] ?? {}) }
+    delete fact[fromRowId]
+  }
+
+  const prefixFrom = `${fromRowId}|`
+  const factOverrides = sheet.factOverrides.map((k) =>
+    k.startsWith(prefixFrom) ? `${toRowId}|${k.slice(prefixFrom.length)}` : k,
+  )
+  const remapKeyed = <T,>(rec: Record<string, T> | undefined): Record<string, T> => {
+    if (!rec) return {}
+    const out: Record<string, T> = {}
+    for (const [k, v] of Object.entries(rec)) {
+      if (k.startsWith(prefixFrom)) out[`${toRowId}|${k.slice(prefixFrom.length)}`] = v
+      else out[k] = v
+    }
+    return out
+  }
+
+  return {
+    ...sheet,
+    plan,
+    fact,
+    factOverrides: [...new Set(factOverrides)],
+    comments: remapKeyed(sheet.comments),
+    substitutions: remapKeyed(sheet.substitutions),
+    factExtraHours: remapKeyed(sheet.factExtraHours),
+    factHoursOverride: remapKeyed(sheet.factHoursOverride),
+  }
+}
+
+/** Текущий и следующий календарный месяц — без ручного добавления. */
+export function defaultMonths(now = new Date()): string[] {
+  const cur = monthKey(now.getFullYear(), now.getMonth() + 1)
+  return [cur, shiftMonth(cur, 1)]
 }

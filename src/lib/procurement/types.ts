@@ -28,6 +28,41 @@ export type OrderCategory =
   | 'consumables'
   | 'other'
 
+/** Узел справочника категорий закупок (код + подгруппы, как в 1С). */
+export type ProcurementCategoryNode = {
+  id: string
+  /** Стабильный код для фильтров/отчётов: 01, 01.01 */
+  code: string
+  name: string
+  nameKa?: string
+  parentId?: string
+  /** Связь со старым enum заказа (корневые узлы). */
+  legacyKey?: OrderCategory
+  active: boolean
+  sortOrder: number
+}
+
+export type RoutePointKind =
+  | 'port'
+  | 'station'
+  | 'terminal'
+  | 'warehouse'
+  | 'customs'
+  | 'other'
+
+/** Пункт маршрута: порт / станция / терминал — по коду, не по свободному тексту. */
+export type RoutePoint = {
+  id: string
+  code: string
+  name: string
+  kind: RoutePointKind
+  transportModes: TransportMode[]
+  countryCode?: string
+  active: boolean
+  sortOrder: number
+  note?: string
+}
+
 export type PurchaseOrderStatus =
   | 'draft'
   | 'ordered'
@@ -84,6 +119,9 @@ export type ShipmentLeg = {
   vesselOrTrain?: string
   origin: string
   destination: string
+  /** Ссылки на справочник пунктов (порты/станции). */
+  originPointId?: string
+  destinationPointId?: string
   /** Плановая дата отгрузки */
   plannedDepartureDate?: string
   actualDepartureDate?: string
@@ -126,6 +164,8 @@ export type PurchaseOrder = {
   contractId?: string
   scope: ProcurementScope
   category: OrderCategory
+  /** Узел справочника категорий (предпочтительно лист/подгруппа). */
+  categoryId?: string
   status: PurchaseOrderStatus
   orderDate: string
   /** Желаемая дата поставки */
@@ -161,4 +201,8 @@ export type PurchaseOrder = {
 export type ProcurementStore = {
   orders: PurchaseOrder[]
   nextOrderSeq: number
+  /** Справочник категорий/подгрупп с кодами. */
+  categories: ProcurementCategoryNode[]
+  /** Справочник пунктов маршрута (порты, станции…). */
+  routePoints: RoutePoint[]
 }

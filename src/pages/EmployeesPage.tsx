@@ -1,17 +1,17 @@
 import { useMemo, useState } from 'react'
 import { BilingualText } from '@/components/employee/BilingualText'
-import { EmployeeEditorHost } from '@/components/hr/EmployeeEditorHost'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
-import { useEmployeeEditor } from '@/hooks/useEmployeeEditor'
+import { useEmployeeEditorApi } from '@/context/EmployeeEditorContext'
 import { hrStatusLabel } from '@/lib/hr/labels'
 import { employeeSearchHr } from '@/lib/hr/sync'
 import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
 import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
 import type { HrPosition, HrStructuralUnit } from '@/lib/hr/types'
+import { is52Schedule, scheduleDisplayLabel } from '@/lib/schedules'
 import type { Employee } from '@/lib/types'
 
 type Props = {
@@ -28,10 +28,10 @@ type Props = {
 
 export function EmployeesPage({
   employees,
-  brigades,
-  hrStructuralUnits,
-  hrPositions,
-  onSave,
+  brigades: _brigades,
+  hrStructuralUnits: _hrStructuralUnits,
+  hrPositions: _hrPositions,
+  onSave: _onSave,
   onRemove,
   embedded = false,
   showIndividualSalary = false,
@@ -44,7 +44,7 @@ export function EmployeesPage({
     key: null,
     dir: 'asc',
   })
-  const editor = useEmployeeEditor(brigades, employees)
+  const editor = useEmployeeEditorApi()
 
   function handleEmployeeSort(key: EmployeeSortKey) {
     setEmployeeSort((prev) => toggleTableSort(prev, key))
@@ -102,6 +102,13 @@ export function EmployeesPage({
           <thead>
             <tr>
               <SortableTableHeader
+                label={t('hr.employeeNumber.short')}
+                sortKey="employeeNumber"
+                activeKey={employeeSort.key}
+                dir={employeeSort.dir}
+                onSort={handleEmployeeSort}
+              />
+              <SortableTableHeader
                 label={t('employees.colTab')}
                 sortKey="tab"
                 activeKey={employeeSort.key}
@@ -158,6 +165,7 @@ export function EmployeesPage({
             ) : (
               filtered.map((emp) => (
                 <tr key={emp.id} className="hover:bg-paper/50">
+                  <td className="font-mono text-xs font-semibold">{emp.employeeNumber || '—'}</td>
                   <td className="font-mono text-xs">{emp.tabNumber}</td>
                   <td className="font-medium">
                     <BilingualText lines={employeeNameLines(emp)} />
@@ -166,14 +174,14 @@ export function EmployeesPage({
                     <BilingualText lines={employeePositionLines(emp)} />
                   </td>
                   <td className="text-xs">{emp.brigade || '—'}</td>
-                  <td className="text-xs">{emp.schedule}</td>
+                  <td className="text-xs">{scheduleDisplayLabel(emp)}</td>
                   <td className="text-xs">
                     {hrStatusLabel(emp.hrStatus ?? 'active', locale)}
                     {emp.statusUntil ? ` (${emp.statusUntil})` : ''}
                   </td>
                   <td className="font-mono text-xs">{emp.group2x2 || '—'}</td>
                   <td className="font-mono text-xs">
-                    {emp.schedule === '5/2 8ч'
+                    {is52Schedule(emp.schedule)
                       ? emp.monthlySalary
                         ? `${emp.monthlySalary.toLocaleString('ru-RU')} ₾`
                         : '—'
@@ -217,16 +225,6 @@ export function EmployeesPage({
           </tbody>
         </table>
       </div>
-
-      <EmployeeEditorHost
-        ctx={editor.ctx}
-        employees={employees}
-        brigades={brigades}
-        hrStructuralUnits={hrStructuralUnits}
-        hrPositions={hrPositions}
-        onSave={onSave}
-        onClose={editor.close}
-      />
     </div>
   )
 }

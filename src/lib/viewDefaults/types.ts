@@ -3,10 +3,15 @@ import type { WarehouseTab } from '@/components/warehouse/warehouseTypes'
 import type { MonthGroupMode, MonthViewDisplay } from '@/lib/monthViewOptions'
 import type { MonthRowSort } from '@/lib/monthRowSort'
 import type { HrSection, ViewId } from '@/lib/types'
+import type { Locale } from '@/i18n/types'
 
 export type MonthViewLayout = 'dual' | 'plan' | 'fact'
 
+/** Оболочка экрана табеля: классический или бригадный рабочий стол. */
+export type MonthViewShell = 'classic' | 'workspace'
+
 export type MonthViewDefaults = {
+  shell?: MonthViewShell
   layout?: MonthViewLayout
   viewDisplay?: Partial<MonthViewDisplay>
   defaultBrigades?: string[]
@@ -32,6 +37,8 @@ export type HrViewDefaults = {
 export type GlobalViewDefaults = {
   lastView?: ViewId
   lastMonth?: string
+  /** Язык интерфейса — личный для учётки (не общий settings.locale). */
+  locale?: Locale
 }
 
 export type UserViewDefaults = {
@@ -74,7 +81,11 @@ export function resolveFinanceViewDefaults(
 export function resolveHrViewDefaults(
   viewDefaults?: UserViewDefaults,
 ): HrViewDefaults | undefined {
-  return viewDefaults?.hr
+  const hr = viewDefaults?.hr
+  if (!hr?.section) return hr
+  // Legacy section id after merging Cards into Employees
+  if ((hr.section as string) === 'cards') return { ...hr, section: 'employees' }
+  return hr
 }
 
 export function mergeUserViewDefaults<K extends keyof UserViewDefaults>(

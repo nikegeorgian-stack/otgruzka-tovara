@@ -1,0 +1,14 @@
+---
+description: Print/PDF/Excel layout rules (scoped)
+globs: src/styles/print.css,src/**/*Print*.tsx,src/**/*Excel*.ts,src/lib/**/*print*
+alwaysApply: false
+---
+
+# Бланки Otgruzka
+
+Скил: **`fst-print-layout`**.
+
+- Сквозные № строк между листами
+- Первый лист (логотип): ≤ **16** строк списка
+- Excel: шапка, фильтры, A4 альбом `fitToWidth: 1`
+- PDF/html2canvas: бордеры ≥ 1px

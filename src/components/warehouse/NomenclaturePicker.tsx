@@ -3,6 +3,7 @@ import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
 import { useI18n } from '@/context/I18nContext'
 import { formatQty } from '@/lib/warehouse/stock'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import type { ItemBalance, WarehouseItem } from '@/lib/warehouse/types'
 
 type Props = {
@@ -39,7 +40,7 @@ export function NomenclaturePicker({
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
 
-  const results = searchNomenclature(items, query || (selected?.name ?? ''), {
+  const results = searchNomenclature(items, query || (selected ? warehouseItemDisplayName(selected) : ''), {
     categoryNames,
     warehouseId,
     limit: 20,
@@ -89,7 +90,7 @@ export function NomenclaturePicker({
     }
   }
 
-  const displayValue = open ? query : selected?.name ?? query
+  const displayValue = open ? query : selected ? warehouseItemDisplayName(selected) : query
 
   return (
     <div ref={rootRef} className="relative min-w-0 flex-1">
@@ -110,9 +111,11 @@ export function NomenclaturePicker({
           if (!e.target.value.trim()) onChange(null)
         }}
         onFocus={() => {
-          setOpen(true)
+          // Не открываем список по одному фокусу — иначе при открытии окна прихода
+          // autoFocus на пустой строке сразу показывает всю номенклатуру.
           if (selected) setQuery('')
         }}
+        onClick={() => setOpen(true)}
         onKeyDown={onKeyDown}
       />
       {open && results.length > 0 && (
@@ -139,10 +142,15 @@ export function NomenclaturePicker({
                 }}
               >
                 <div className="flex items-start gap-2">
-                  <WarehouseItemThumb photoDataUrl={item.photoDataUrl} name={item.name} />
+                  <WarehouseItemThumb
+                    photoDataUrl={item.photoDataUrl}
+                    name={warehouseItemDisplayName(item)}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 font-medium leading-snug">{item.name}</span>
+                      <span className="min-w-0 font-medium leading-snug">
+                        {warehouseItemDisplayName(item)}
+                      </span>
                       <span className="shrink-0 tabular-nums text-xs text-stone-500">
                         {formatQty(bal?.available ?? 0)} {item.unit}
                       </span>

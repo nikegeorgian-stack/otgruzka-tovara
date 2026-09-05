@@ -1,3 +1,4 @@
+import type { Locale } from '@/i18n/types'
 import {
   defaultBrigadeForLine,
   defaultForemanId,
@@ -107,7 +108,7 @@ function buildPlanSegments(tasks: PlannerTask[]): ProductionPlanSegment[] {
 function materialFieldsFromTasks(
   tasks: PlannerTask[],
   recipes: PackagingRecipe[],
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ) {
   const primary = tasks[0]?.order
   if (!primary) return {}
@@ -135,7 +136,7 @@ export function buildProductionRequestFromPlannerTasks(
   monthSheet: MonthSheet | null | undefined,
   existing?: ProductionRequest,
   recipes: PackagingRecipe[] = [],
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
 ): ProductionRequest | null {
   if (!tasks.length) return null
 
@@ -186,7 +187,7 @@ export type GeneratePlannerRequestsOptions = {
   /** Обновлять черновики, созданные из планировщика */
   overwritePlannerDrafts?: boolean
   packagingRecipes?: PackagingRecipe[]
-  locale?: 'ru' | 'ka'
+  locale?: Locale
 }
 
 export type GeneratePlannerRequestsResult = {
@@ -283,7 +284,7 @@ export function previewRequestFromPlanner(
   monthSheet: MonthSheet | null | undefined,
   orderIds?: string[],
   recipes: PackagingRecipe[] = [],
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
 ): ProductionRequest | null {
   const tasks = collectPlannerTasksForDate(orders, date, orderIds).filter(
     (t) => t.lineId === lineId,

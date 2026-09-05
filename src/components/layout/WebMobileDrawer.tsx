@@ -1,16 +1,27 @@
 import { useEffect } from 'react'
 import { FiberCellBrand } from '@/components/brand/FiberCellBrand'
 import { AdminCabinetSwitcher } from '@/components/auth/AdminCabinetSwitcher'
+import { AboutAppBlock } from '@/components/web/AboutAppBlock'
 import { Button } from '@/components/ui/Button'
 import { CloseIcon } from '@/components/ui/icons'
 import { useConfirm } from '@/context/ConfirmContext'
+import { lockBodyScroll } from '@/lib/ui/bodyScrollLock'
+import { onCloseOverlays } from '@/lib/ui/overlayEvents'
+import { SupportToolsBar } from '@/components/layout/SupportToolsBar'
 import { viewNavIcon } from '@/components/layout/webMobileNavIcons'
 import { useI18n } from '@/context/I18nContext'
+import { LOCALES, type Locale } from '@/i18n'
 import { isNavActive } from '@/lib/nav/viewRouting'
 import type { AdminCabinetId } from '@/lib/access/adminCabinet'
 import { roleLabel } from '@/lib/access/roles'
 import type { AccessRoleId } from '@/lib/access/types'
 import type { ViewId } from '@/lib/types'
+
+function localeShort(id: Locale): string {
+  if (id === 'ka') return 'GE'
+  if (id === 'en') return 'EN'
+  return 'RU'
+}
 
 export type MobileNavItem = {
   id: ViewId
@@ -36,6 +47,9 @@ type Props = {
   onExport?: () => void
   onImport?: () => void
   onReset?: () => void
+  showSupportMail?: boolean
+  onAnnounceMaintenance?: () => void
+  brandOnDark?: boolean
 }
 
 export function WebMobileDrawer({
@@ -56,18 +70,22 @@ export function WebMobileDrawer({
   onExport,
   onImport,
   onReset,
+  showSupportMail = false,
+  onAnnounceMaintenance,
+  brandOnDark,
 }: Props) {
   const { t, locale, setLocale } = useI18n()
   const { confirm } = useConfirm()
 
   useEffect(() => {
     if (!open) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prev
-    }
+    return lockBodyScroll()
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    return onCloseOverlays(onClose)
+  }, [open, onClose])
 
   if (!open) return null
 
@@ -82,7 +100,7 @@ export function WebMobileDrawer({
       <div className="web-mobile-drawer__panel">
         <div className="flex items-start justify-between gap-3 border-b border-grid px-4 py-4">
           <div className="min-w-0">
-            <FiberCellBrand variant="page" className="mb-2" />
+            <FiberCellBrand variant={brandOnDark ? 'onDark' : 'page'} className="mb-2" />
             <h2 className="text-base font-bold text-ink">{title}</h2>
             {subtitle && <p className="mt-0.5 text-xs text-stone-500">{subtitle}</p>}
           </div>
@@ -137,17 +155,23 @@ export function WebMobileDrawer({
         </nav>
 
         <div className="space-y-3 border-t border-grid px-4 py-4">
+          <SupportToolsBar
+            showMail={showSupportMail}
+            onAnnounceMaintenance={onAnnounceMaintenance}
+            showDownloads
+            onAfterOpen={onClose}
+          />
           <div className="fc-tabbar !gap-0.5 !p-0.5 !text-xs">
-            {(['ru', 'ka'] as const).map((l) => (
+            {LOCALES.map(({ id }) => (
               <button
-                key={l}
+                key={id}
                 type="button"
                 className={`fc-tabbar__tab flex-1 !px-2 !py-2 !text-xs ${
-                  locale === l ? 'fc-tabbar__tab--active' : ''
+                  locale === id ? 'fc-tabbar__tab--active' : ''
                 }`}
-                onClick={() => setLocale(l)}
+                onClick={() => setLocale(id)}
               >
-                {l === 'ru' ? 'RU' : 'GE'}
+                {localeShort(id)}
               </button>
             ))}
           </div>
@@ -188,6 +212,8 @@ export function WebMobileDrawer({
               {t('access.switchAccount')}
             </Button>
           )}
+
+          <AboutAppBlock variant="footer" />
         </div>
       </div>
     </div>

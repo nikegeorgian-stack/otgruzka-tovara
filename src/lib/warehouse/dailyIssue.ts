@@ -158,6 +158,7 @@ export function postDailyIssueSession(
   sessionId: string,
   options?: { allowNegativeStock?: boolean },
 ): { store: WarehouseStore; result: PostDailyIssueResult } {
+  void options // W0: allowNegativeStock ignored — stock safety is mandatory in post core.
   const sessions = store.dailyIssueSessions ?? []
   const idx = sessions.findIndex((s) => s.id === sessionId)
   if (idx < 0) return { store, result: { ok: false, reason: 'not_found' } }
@@ -172,7 +173,7 @@ export function postDailyIssueSession(
   const balances = computeAllBalances(store, session.warehouseId)
   const activeItems = store.items.filter((i) => i.active)
   const validation = validateIssueLines(activeItems, balances, docLines)
-  if (!validation.ok && options?.allowNegativeStock !== true) {
+  if (!validation.ok) {
     return {
       store,
       result: {
@@ -192,7 +193,7 @@ export function postDailyIssueSession(
     .filter(Boolean)
     .join(' · ')
 
-  let next = postWarehouseDocument(store, {
+  const posted = postWarehouseDocument(store, {
     type: 'issue',
     number: docNumber,
     date: session.date,
@@ -202,15 +203,31 @@ export function postDailyIssueSession(
     lines: docLines,
     keeperId: session.keeperId,
     keeperName: session.keeperName,
-    skipValidation: true,
-  }).store
+    skipFieldValidation: true,
+    idempotencyKey: [
+      'dailyIssue',
+      session.id,
+      'issue',
+      session.warehouseId,
+    ].join('::'),
+  })
+  if (!posted.result.ok) {
+    return {
+      store,
+      result: {
+        ok: false,
+        reason: 'stock',
+        detail: posted.result.shortages?.map((s) => s.name).join(', ') ?? posted.result.error,
+      },
+    }
+  }
 
-  const doc = next.documents[next.documents.length - 1]!
+  let next = posted.store
   const nextSessions = [...(next.dailyIssueSessions ?? sessions)]
   nextSessions[idx] = {
     ...session,
     status: 'posted',
-    postedDocumentId: doc.id,
+    postedDocumentId: posted.result.documentId,
     updatedAt: new Date().toISOString(),
   }
   next = {
@@ -224,7 +241,7 @@ export function postDailyIssueSession(
 
   return {
     store: next,
-    result: { ok: true, documentId: doc.id, documentNumber: docNumber },
+    result: { ok: true, documentId: posted.result.documentId, documentNumber: docNumber },
   }
 }
 

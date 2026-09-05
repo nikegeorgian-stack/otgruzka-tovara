@@ -4,6 +4,7 @@ import { BilingualText } from '@/components/employee/BilingualText'
 import { EmployeePicker } from '@/components/ui/EmployeePicker'
 import { useI18n } from '@/context/I18nContext'
 import { employeeName, employeeSearchText } from '@/i18n'
+import { brigadeAllowsBrigadier } from '@/lib/brigadeHasBrigadier'
 import { brigadeLabel } from '@/lib/brigadeText'
 import { getBrigades } from '@/lib/brigades'
 import { getCellComment } from '@/lib/bulkOps'
@@ -12,6 +13,7 @@ import {
   dayDateKey,
   daysInMonth,
   formatMonthTitle,
+  isoDateLocal,
   isWeekend,
   parseMonthKey,
   weekdayShort,
@@ -20,9 +22,13 @@ import {
   georgiaHolidayNameBilingual,
   isGeorgiaPublicHoliday,
 } from '@/lib/georgiaCalendar'
-import { getFactExtraHours, getFactHoursOverride } from '@/lib/factExtra'
-import { getFactMark, rowStats } from '@/lib/stats'
-import { isCyclicSchedule, usesGroup2x2 } from '@/lib/schedules'
+import { getFactExtraHours, getFactHoursOverride, isWorkCode } from '@/lib/factExtra'
+import { hoursForCode, workCodeForExactHours } from '@/lib/codes'
+import { hasRowPeriodBounds, rowPeriodOffReason } from '@/lib/rowPeriod'
+import { absenceConfirmForEmployee } from '@/lib/absenceConfirm'
+import { getRowHoursSnapshot } from '@/lib/finance/rowHours'
+import { getFactMark } from '@/lib/stats'
+import { isCyclicSchedule, scheduleDisplayLabel, usesGroup2x2 } from '@/lib/schedules'
 import {
   DEFAULT_MONTH_VIEW_DISPLAY,
   isBrigadeVisible,
@@ -31,7 +37,7 @@ import {
   type MonthGroupMode,
   type MonthTableDisplay,
 } from '@/lib/monthViewOptions'
-import { buildTimesheetLayout, flattenTimesheetLayout, layoutNavRowIds } from '@/lib/monthTimesheetLayout'
+import { buildTimesheetLayout, flattenTimesheetLayout, layoutNavRowIds, type BrigadeHeaderMode } from '@/lib/monthTimesheetLayout'
 import {
   DEFAULT_MONTH_ROW_SORT,
   toggleMonthRowSort,
@@ -40,7 +46,15 @@ import {
 } from '@/lib/monthRowSort'
 import { employeeStructuralUnitLabel } from '@/lib/hr/orgStructure'
 import { employeeActiveInMonth } from '@/lib/hr/employeeActive'
+import { monthAssignmentsByEmployee } from '@/lib/monthAssignment'
 import type { AppStore, DayCode, Employee, MonthSheet } from '@/lib/types'
+import {
+  monthCellSnapshotEqual,
+  readMonthCellSnapshot,
+  type MonthCellSnapshot,
+  type RemoteCellConflictInfo,
+} from '@/lib/monthCellSnapshot'
+import { KANBAN_DRAG_MIME } from '@/components/kanban/useKanbanDrag'
 import { CellCodePicker } from './CellCodePicker'
 import { CellContextMenu } from './CellContextMenu'
 import { DayCell } from './DayCell'
@@ -56,6 +70,8 @@ type Props = {
   embedded?: boolean
   /** Полноэкранный редактор — крупнее ячейки, на всю высоту. */
   focusMode?: boolean
+  /** Заголовки бригад в таблице: полные, только название или скрыты (контекст-бар). */
+  brigadeHeaderMode?: BrigadeHeaderMode
   search?: string
   selectedBrigades?: Set<string>
   brigadeSearch?: string
@@ -69,8 +85,20 @@ type Props = {
   readOnly?: boolean
   onCycle: (rowId: string, dateKey: string) => void
   onSetCode: (rowId: string, dateKey: string, code: DayCode) => void
+  /** Пакетная установка кода (мультивыбор) — один апдейт store. */
+  onSetCodesBatch?: (
+    cells: Array<{ rowId: string; dateKey: string }>,
+    code: DayCode,
+  ) => void
   onSetFactExtra?: (rowId: string, dateKey: string, hours: number) => void
+  onSetFactHours?: (rowId: string, dateKey: string, hours: number | null) => void
   onAssign: (rowId: string, employeeId: string | null) => void
+  /** Конфликт: человек уже в другой бригаде месяца / кадрах. */
+  onAssignConflict?: (info: {
+    employeeId: string
+    fromBrigade: string
+    toBrigade: string
+  }) => void
   onAddEmployee?: (rowId: string, brigade: string) => void
   onFillBrigade?: (brigade: string) => void
   onRegenerateRow: (rowId: string) => void
@@ -89,10 +117,25 @@ type Props = {
   ) => void
   /** Назначить бригадира бригады (null — снять). */
   onSetBrigadier?: (brigade: string, employeeId: string | null) => void
+  canSignoff?: boolean
+  onSetBrigadeSignoff?: (brigade: string, verified: boolean) => void
   /** Отметить/снять бригадирство в конкретный день (для бригадирской премии). */
   onMarkBrigadier?: (rowId: string, dateKey: string, on: boolean) => void
   /** Отметить/снять бригадирство на весь месяц по строке. */
   onMarkBrigadierMonth?: (rowId: string, on: boolean) => void
+  onRowInactiveFrom?: (rowId: string, dateKey: string) => void
+  onRowActiveFrom?: (rowId: string, dateKey: string) => void
+  onClearRowPeriod?: (rowId: string) => void
+  /** Ячейка изменилась удалённо, пока открыт picker / меню. */
+  onRemoteCellConflict?: (info: RemoteCellConflictInfo) => void
+  /** Показать только строки с расхождением план≠факт. */
+  mismatchOnly?: boolean
+  /** Порядок строк в бригаде (как ⠿ на плитках). */
+  onReorderRow?: (brigade: string, rowId: string, beforeRowId: string | null) => void
+  /** Порядок № без режима «Редактировать» (ячейки остаются read-only). */
+  allowRowReorder?: boolean
+  /** Drop ⠿ на другую бригаду — окно переноса. */
+  onMoveToOtherBrigade?: (rowId: string, toBrigade: string) => void
 }
 
 type FocusCell = { rowId: string; day: number }
@@ -105,6 +148,7 @@ export function PlanFactTable({
   assignEditable = false,
   embedded = false,
   focusMode = false,
+  brigadeHeaderMode = 'full',
   search = '',
   selectedBrigades,
   brigadeSearch = '',
@@ -118,8 +162,11 @@ export function PlanFactTable({
   readOnly = false,
   onCycle,
   onSetCode,
+  onSetCodesBatch,
   onSetFactExtra,
+  onSetFactHours,
   onAssign,
+  onAssignConflict,
   onAddEmployee,
   onFillBrigade,
   onRegenerateRow,
@@ -131,10 +178,20 @@ export function PlanFactTable({
   onChangeGroup2x2,
   onSetCycleFromDay,
   onSetBrigadier,
+  canSignoff = false,
+  onSetBrigadeSignoff,
   onMarkBrigadier,
   onMarkBrigadierMonth,
+  onRowInactiveFrom,
+  onRowActiveFrom,
+  onClearRowPeriod,
+  onRemoteCellConflict,
+  mismatchOnly = false,
+  onReorderRow,
+  allowRowReorder,
+  onMoveToOtherBrigade,
 }: Props) {
-  const { t, locale, employeeNameLines, employeePositionLines } = useI18n()
+  const { t, tf, locale, employeeNameLines, employeePositionLines } = useI18n()
   const { year, month } = parseMonthKey(sheet.month)
   const days = daysInMonth(year, month)
   const dayNums = Array.from({ length: days }, (_, i) => i + 1)
@@ -154,7 +211,58 @@ export function PlanFactTable({
     y: number
     current: DayCode
     currentExtra: number
+    currentOverride: number | null
   } | null>(null)
+  const ignoreCellConflictRef = useRef(false)
+  const contextSnapshotRef = useRef<MonthCellSnapshot | null>(null)
+  const remoteFlashTimerRef = useRef<number | null>(null)
+  const [remoteFlashCell, setRemoteFlashCell] = useState<string | null>(null)
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(() => new Set())
+  const selectionAnchorRef = useRef<{ rowId: string; day: number } | null>(null)
+  const dragSelectRef = useRef(false)
+  const [draggingRowId, setDraggingRowId] = useState<string | null>(null)
+  const draggingRowIdRef = useRef<string | null>(null)
+  const [dropBeforeId, setDropBeforeId] = useState<string | null | undefined>(undefined)
+  const canReorder = Boolean(onReorderRow && (allowRowReorder ?? !readOnly))
+  const canTransferDrop = Boolean(onMoveToOtherBrigade && (allowRowReorder ?? !readOnly))
+  const canRowDrag = canReorder || canTransferDrop
+
+  const beginRowDrag = (e: React.DragEvent, rowId: string) => {
+    e.dataTransfer.setData(KANBAN_DRAG_MIME, rowId)
+    e.dataTransfer.setData('text/plain', rowId)
+    e.dataTransfer.effectAllowed = 'move'
+    draggingRowIdRef.current = rowId
+    setDraggingRowId(rowId)
+    onRowSortChange?.(DEFAULT_MONTH_ROW_SORT)
+  }
+
+  const endRowDrag = () => {
+    draggingRowIdRef.current = null
+    setDraggingRowId(null)
+    setDropBeforeId(undefined)
+  }
+
+
+  const clearSelection = useCallback(() => {
+    setSelectedCells(new Set())
+    selectionAnchorRef.current = null
+    dragSelectRef.current = false
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') clearSelection()
+    }
+    const onUp = () => {
+      dragSelectRef.current = false
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [clearSelection])
 
   const openCodePicker = useCallback(
     (
@@ -164,11 +272,191 @@ export function PlanFactTable({
       x: number,
       y: number,
       currentExtra = 0,
+      currentOverride: number | null = null,
     ) => {
       setContextMenu(null)
-      setCodePicker({ rowId, dateKey, x, y, current, currentExtra })
+      setCodePicker({
+        rowId,
+        dateKey,
+        x,
+        y,
+        current,
+        currentExtra,
+        currentOverride,
+      })
     },
     [],
+  )
+
+  const closeCellEditors = useCallback(() => {
+    setCodePicker(null)
+    setContextMenu(null)
+    contextSnapshotRef.current = null
+  }, [])
+
+  const notifyRemoteConflict = useCallback(
+    (info: RemoteCellConflictInfo) => {
+      closeCellEditors()
+      const key = `${info.rowId}|${info.dateKey}`
+      setRemoteFlashCell(key)
+      if (remoteFlashTimerRef.current) window.clearTimeout(remoteFlashTimerRef.current)
+      remoteFlashTimerRef.current = window.setTimeout(() => {
+        setRemoteFlashCell(null)
+        remoteFlashTimerRef.current = null
+      }, 4500)
+      onRemoteCellConflict?.(info)
+    },
+    [closeCellEditors, onRemoteCellConflict],
+  )
+
+  useEffect(
+    () => () => {
+      if (remoteFlashTimerRef.current) window.clearTimeout(remoteFlashTimerRef.current)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!codePicker && !contextMenu) {
+      ignoreCellConflictRef.current = false
+      return
+    }
+    if (ignoreCellConflictRef.current) return
+
+    const target = codePicker ?? contextMenu
+    if (!target) return
+
+    const row = sheet.rows.find((r) => r.id === target.rowId)
+    if (!row) {
+      notifyRemoteConflict({
+        rowId: target.rowId,
+        dateKey: target.dateKey,
+        was: codePicker?.current ?? '',
+        now: '',
+        mode,
+      })
+      return
+    }
+
+    const live = readMonthCellSnapshot(sheet, target.rowId, target.dateKey, mode)
+
+    if (codePicker) {
+      const opened: MonthCellSnapshot = {
+        code: codePicker.current,
+        extraHours: codePicker.currentExtra,
+      }
+      if (!monthCellSnapshotEqual(opened, live)) {
+        notifyRemoteConflict({
+          rowId: codePicker.rowId,
+          dateKey: codePicker.dateKey,
+          was: codePicker.current,
+          now: live.code,
+          mode,
+        })
+      }
+      return
+    }
+
+    if (contextMenu && contextSnapshotRef.current) {
+      if (!monthCellSnapshotEqual(contextSnapshotRef.current, live)) {
+        notifyRemoteConflict({
+          rowId: contextMenu.rowId,
+          dateKey: contextMenu.dateKey,
+          was: contextSnapshotRef.current.code,
+          now: live.code,
+          mode,
+        })
+      }
+    }
+  }, [sheet, codePicker, contextMenu, mode, notifyRemoteConflict])
+
+  const handlePickCode = useCallback(
+    (code: DayCode) => {
+      if (!codePicker) return
+      ignoreCellConflictRef.current = true
+      const targets =
+        selectedCells.size > 1
+          ? [...selectedCells].map((k) => {
+              const i = k.indexOf('|')
+              return { rowId: k.slice(0, i), dateKey: k.slice(i + 1) }
+            })
+          : [{ rowId: codePicker.rowId, dateKey: codePicker.dateKey }]
+      if (onSetCodesBatch) {
+        onSetCodesBatch(targets, code)
+      } else {
+        for (const c of targets) {
+          onSetCode(c.rowId, c.dateKey, code)
+        }
+      }
+      if (targets.length > 1) {
+        clearSelection()
+        setCodePicker(null)
+        queueMicrotask(() => {
+          ignoreCellConflictRef.current = false
+        })
+        return
+      }
+      const work = isWorkCode(code)
+      // В факте после рабочей смены оставляем пикер — чтобы сразу указать 4 / 7 ч и т.д.
+      if (mode === 'fact' && onSetFactHours && work) {
+        setCodePicker((prev) =>
+          prev
+            ? {
+                ...prev,
+                current: code,
+                currentExtra: 0,
+                currentOverride: null,
+              }
+            : null,
+        )
+        // ignore остаётся true, пока пикер открыт — иначе свой же setStore даёт ложный «remote flash».
+        return
+      }
+      // Закрываем окно сразу: иначе оно «переезжает» на следующий день и перекрывает ячейку.
+      const day = Number(codePicker.dateKey.slice(8))
+      const nextDay = day + 1
+      if (Number.isFinite(day) && nextDay <= days) {
+        setFocus({ rowId: codePicker.rowId, day: nextDay })
+      }
+      setCodePicker(null)
+      queueMicrotask(() => {
+        ignoreCellConflictRef.current = false
+      })
+    },
+    [codePicker, onSetCode, onSetCodesBatch, days, mode, onSetFactHours, selectedCells, clearSelection],
+  )
+
+  const handlePickExtra = useCallback(
+    (hours: number) => {
+      if (!codePicker || !onSetFactExtra) return
+      ignoreCellConflictRef.current = true
+      onSetFactExtra(codePicker.rowId, codePicker.dateKey, hours)
+      setCodePicker((prev) => (prev ? { ...prev, currentExtra: hours } : null))
+    },
+    [codePicker, onSetFactExtra],
+  )
+
+  const handlePickHoursOverride = useCallback(
+    (hours: number | null) => {
+      if (!codePicker || !onSetFactHours) return
+      ignoreCellConflictRef.current = true
+      onSetFactHours(codePicker.rowId, codePicker.dateKey, hours)
+      setCodePicker((prev) => {
+        if (!prev) return null
+        let current = prev.current
+        let currentOverride = hours
+        if (hours != null && hours > 0 && !isWorkCode(current)) {
+          current = workCodeForExactHours(hours)
+          const norm = hoursForCode(current)
+          currentOverride = hours === norm ? null : hours
+        } else if (hours != null && isWorkCode(current)) {
+          const norm = hoursForCode(current)
+          currentOverride = hours === norm ? null : hours
+        }
+        return { ...prev, current, currentOverride, currentExtra: 0 }
+      })
+    },
+    [codePicker, onSetFactHours],
   )
 
   const q = search.trim().toLowerCase()
@@ -194,16 +482,10 @@ export function PlanFactTable({
       ),
     [brigadeSearch, effectiveSelected, store.brigadeNamesKa],
   )
-  const canAssign = assignEditable || (metaEditable && !readOnly)
-  const canEditCells = metaEditable && !readOnly
+  const canAssign = !readOnly && (assignEditable || metaEditable)
+  const canEditCells = !readOnly
 
-  const assignedInMonth = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const row of sheet.rows) {
-      if (row.employeeId) map.set(row.employeeId, row.id)
-    }
-    return map
-  }, [sheet.rows])
+  const assignedInMonth = useMemo(() => monthAssignmentsByEmployee(sheet), [sheet])
 
   const employeesById = useMemo(() => {
     const map = new Map<string, Employee>()
@@ -212,12 +494,15 @@ export function PlanFactTable({
   }, [store.employees])
 
   const rowStatsMap = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof rowStats>>()
+    const map = new Map<string, ReturnType<typeof getRowHoursSnapshot>>()
     for (const row of sheet.rows) {
-      map.set(row.id, rowStats(sheet, row.id, days, year, month))
+      const emp = row.employeeId ? employeesById.get(row.employeeId) : undefined
+      if (!emp) continue
+      const confirm = absenceConfirmForEmployee(store, row.employeeId!, sheet.month)
+      map.set(row.id, getRowHoursSnapshot(sheet, row.id, emp, year, month, confirm))
     }
     return map
-  }, [sheet, days, year, month])
+  }, [sheet, year, month, employeesById, store.finance])
 
   const focusNextEmptySlot = useCallback(
     (brigade: string, afterRowId: string) => {
@@ -236,8 +521,21 @@ export function PlanFactTable({
     [sheet.rows],
   )
 
+  const rowHasMismatch = useCallback(
+    (rowId: string) => {
+      for (let d = 1; d <= days; d++) {
+        const dk = dayDateKey(year, month, d)
+        const plan = sheet.plan[rowId]?.[dk] ?? ''
+        const fact = getFactMark(sheet, rowId, dk)
+        if (plan !== fact) return true
+      }
+      return false
+    },
+    [sheet, days, year, month],
+  )
+
   const rowVisible = useCallback(
-    (_rowId: string, brigade: string, employeeId: string | null) => {
+    (rowId: string, brigade: string, employeeId: string | null) => {
       if (!brigadeShown(brigade)) return false
       const emp = employeeId ? employeesById.get(employeeId) ?? null : null
       if (unitFilterActive && selectedUnits && !isEmployeeUnitVisible(emp, selectedUnits)) {
@@ -246,11 +544,13 @@ export function PlanFactTable({
       if (filterSchedule && emp?.schedule !== filterSchedule) return false
       if (q) {
         if (!emp) return false
-        return employeeSearchText(emp).includes(q)
+        if (!employeeSearchText(emp).includes(q)) return false
       }
+      if (mismatchOnly && employeeId && !rowHasMismatch(rowId)) return false
+      if (mismatchOnly && !employeeId) return false
       return true
     },
-    [brigadeShown, employeesById, filterSchedule, q, selectedUnits, unitFilterActive],
+    [brigadeShown, employeesById, filterSchedule, q, selectedUnits, unitFilterActive, mismatchOnly, rowHasMismatch],
   )
 
   const layoutBlocks = useMemo(
@@ -273,16 +573,19 @@ export function PlanFactTable({
     [store.employees, store.brigadeNamesKa, store.brigadeUnits, store.hrStructuralUnits, sheet, brigades, groupMode, brigadeShown, rowVisible, q, rowSort, employeesById, locale, t],
   )
 
-  const flatItems = useMemo(() => flattenTimesheetLayout(layoutBlocks), [layoutBlocks])
+  const flatItems = useMemo(
+    () => flattenTimesheetLayout(layoutBlocks, { brigadeHeaderMode }),
+    [layoutBlocks, brigadeHeaderMode],
+  )
 
-  const shouldVirtualize = flatItems.length >= 48
+  const shouldVirtualize = flatItems.length >= 20
 
   const rowVirtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => tableRef.current,
     estimateSize: (index) => {
       const kind = flatItems[index]?.kind
-      if (kind === 'data') return focusMode ? 48 : 40
+      if (kind === 'data') return focusMode ? 44 : 40
       if (kind === 'unit') return 38
       return 44
     },
@@ -362,6 +665,8 @@ export function PlanFactTable({
           const current = (mode === 'plan' ? planCode : factCode) as DayCode
           const extra =
             mode === 'fact' ? getFactExtraHours(sheet, focus.rowId, dateKey) : 0
+          const override =
+            mode === 'fact' ? getFactHoursOverride(sheet, focus.rowId, dateKey) : null
           const btn = root.querySelector(
             `[data-cell="${focus.rowId}|${dateKey}"]`,
           ) as HTMLButtonElement | null
@@ -373,6 +678,7 @@ export function PlanFactTable({
             rect?.left ?? 0,
             (rect?.bottom ?? 0) + 4,
             extra,
+            override,
           )
         }
         return
@@ -432,7 +738,7 @@ export function PlanFactTable({
     )
   }
 
-  const cellSize = focusMode ? 'lg' : 'sm'
+  const cellSize = focusMode || mode === 'fact' ? 'lg' : 'sm'
   const showGroupCol = mode === 'plan' && !!onChangeGroup2x2
   const leadingCols =
     2 +
@@ -441,30 +747,55 @@ export function PlanFactTable({
     (display.showUnit ? 1 : 0) +
     (display.showSchedule ? 1 : 0) +
     (showGroupCol ? 1 : 0)
-  const trailingCols = display.showTotals ? 3 : 0
+  const trailingCols = display.showTotals ? 6 : 0
+  const todayKey = isoDateLocal(new Date())
+  const headSticky = 'pf-th'
+
+  function employeeMetaTitle(emp: (typeof store.employees)[number] | null | undefined): string | undefined {
+    if (!emp) return undefined
+    const parts: string[] = []
+    const pos = employeePositionLines(emp).primary
+    if (pos && pos !== '—') parts.push(pos)
+    if (emp.tabNumber?.trim()) parts.push(`№ ${emp.tabNumber.trim()}`)
+    const unit = employeeStructuralUnitLabel(emp, store.hrStructuralUnits)
+    if (unit) parts.push(unit)
+    parts.push(scheduleDisplayLabel(emp))
+    return parts.filter(Boolean).join(' · ') || undefined
+  }
 
   return (
-    <div
-      ref={tableRef}
-      tabIndex={-1}
-      className={`bg-white/80 outline-none ${
-        focusMode
-          ? 'h-full min-h-0 flex-1 overflow-auto'
-          : `overflow-auto ${embedded ? '' : 'rounded-sm border border-grid shadow-sm'}`
-      }`}
-    >
-      <table className="w-max min-w-full border-collapse text-sm">
-        <thead className="sticky top-0 z-20 bg-[#faf8f4]">
+    <>
+      {selectedCells.size > 0 ? (
+        <div className="pf-selection-bar print:hidden">
+          <span>{tf('month.selection.count', { count: selectedCells.size })}</span>
+          <span className="text-stone-500">{t('month.selection.hint')}</span>
+          <button type="button" className="bw-toolbar__btn" onClick={clearSelection}>
+            {t('month.selection.clear')}
+          </button>
+        </div>
+      ) : null}
+      <div
+        ref={tableRef}
+        tabIndex={-1}
+        data-pf-mode={mode}
+        className={`pf-sheet pf-sheet--${mode} outline-none ${
+          focusMode || embedded
+            ? 'h-full min-h-0 flex-1 overflow-auto'
+            : 'overflow-auto rounded-sm border border-grid shadow-sm'
+        }`}
+      >
+      <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
+        <thead className="pf-sheet__head sticky top-0 z-20">
           <tr>
             {sortableTh(
               'default',
               '№',
-              'sticky left-0 z-30 min-w-[2rem] border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-xs',
+              `sticky left-0 z-30 min-w-[2rem] border-b border-r border-grid px-2 py-2 text-xs ${headSticky}`,
             )}
             {sortableTh(
               'name',
               t('table.colName'),
-              `sticky left-[2rem] z-30 border-b border-r border-grid bg-[#faf8f4] px-2 py-2 text-left text-xs font-semibold ${
+              `sticky left-[2rem] z-30 border-b border-r border-grid px-2 py-2 text-left text-xs font-semibold ${headSticky} ${
                 focusMode ? 'min-w-[14rem]' : 'min-w-[10rem]'
               }`,
             )}
@@ -472,16 +803,16 @@ export function PlanFactTable({
               sortableTh(
                 'tab',
                 t('table.colTab'),
-                'border-b border-grid px-2 py-2 text-xs',
+                `border-b border-grid px-2 py-2 text-xs ${headSticky}`,
               )}
             {display.showPosition &&
               sortableTh(
                 'position',
                 t('table.colPosition'),
-                'min-w-[8rem] border-b border-grid px-2 py-2 text-left text-xs',
+                `min-w-[8rem] border-b border-grid px-2 py-2 text-left text-xs ${headSticky}`,
               )}
             {display.showUnit && (
-              <th className="min-w-[9rem] border-b border-grid px-2 py-2 text-left text-xs">
+              <th className={`min-w-[9rem] border-b border-grid px-2 py-2 text-left text-xs ${headSticky}`}>
                 {t('table.colUnit')}
               </th>
             )}
@@ -489,10 +820,10 @@ export function PlanFactTable({
               sortableTh(
                 'schedule',
                 t('table.colSchedule'),
-                'border-b border-grid px-2 py-2 text-xs',
+                `border-b border-grid px-2 py-2 text-xs ${headSticky}`,
               )}
             {showGroupCol && (
-              <th className="border-b border-grid px-1 py-2 text-center text-xs">
+              <th className={`border-b border-grid px-1 py-2 text-center text-xs ${headSticky}`}>
                 {t('table.colGroup')}
               </th>
             )}
@@ -500,20 +831,28 @@ export function PlanFactTable({
               const dateKey = dayDateKey(year, month, d)
               const holiday = isGeorgiaPublicHoliday(dateKey)
               const holidayName = georgiaHolidayNameBilingual(dateKey)
+              const dow = new Date(year, month - 1, d).getDay()
+              const weekend = isWeekend(year, month, d)
+              const weekStart = dow === 1
+              const isToday = dateKey === todayKey
               return (
                 <th
                   key={d}
                   title={holidayName ?? undefined}
-                  className={`border-b border-grid px-0 py-1 text-center ${
+                  className={`border-b border-grid px-0 py-1 text-center ${headSticky} ${
                     holiday
-                      ? 'bg-violet-100 text-violet-800'
-                      : isWeekend(year, month, d)
-                        ? 'bg-accent-soft/30 text-accent'
+                      ? 'pf-th--holiday'
+                      : weekend
+                        ? 'pf-th--weekend'
                         : ''
-                  }`}
+                  } ${weekend && dow === 6 ? 'pf-th--weekend-start' : ''} ${weekStart ? 'pf-th--week' : ''} ${isToday ? 'pf-th--today' : ''}`}
                 >
                   <div className="font-mono text-xs font-semibold">{d}</div>
-                  <div className="text-[9px] text-stone-400">
+                  <div
+                    className={`text-[9px] ${
+                      weekend && !holiday ? 'font-bold uppercase text-amber-800' : 'text-stone-400'
+                    }`}
+                  >
                     {weekdayShort(year, month, d, locale)}
                   </div>
                 </th>
@@ -521,9 +860,50 @@ export function PlanFactTable({
             })}
             {display.showTotals && (
               <>
-                <th className="border-b border-grid px-2 text-xs">{t('table.planH')}</th>
-                <th className="border-b border-grid px-2 text-xs">{t('table.factH')}</th>
-                <th className="border-b border-grid px-2 text-xs">Δ</th>
+                <th
+                  className={`border-b border-grid px-1.5 ${headSticky} ${
+                    mode === 'plan'
+                      ? 'text-xs font-bold text-sky-900'
+                      : 'text-[10px] font-medium text-stone-500'
+                  }`}
+                  title={t('table.planHNormHint')}
+                >
+                  {t('table.planH')}
+                </th>
+                <th
+                  className={`border-b border-grid px-1.5 ${headSticky} ${
+                    mode === 'fact'
+                      ? 'text-xs font-bold text-rose-900'
+                      : 'text-[10px] font-medium text-stone-500'
+                  }`}
+                  title={t('table.factHWorkHint')}
+                >
+                  {t('table.factH')}
+                </th>
+                <th
+                  className={`border-b border-grid px-1.5 text-[10px] ${headSticky}`}
+                  title={t('table.deltaHint')}
+                >
+                  Δ
+                </th>
+                <th
+                  className={`border-b border-grid px-1.5 text-[10px] ${headSticky}`}
+                  title={t('table.prHint')}
+                >
+                  {t('table.pr')}
+                </th>
+                <th
+                  className={`border-b border-grid px-1.5 text-[10px] ${headSticky}`}
+                  title={t('table.nightHint')}
+                >
+                  {t('table.nightH')}
+                </th>
+                <th
+                  className={`border-b border-grid px-1.5 text-[10px] ${headSticky}`}
+                  title={t('table.otHint')}
+                >
+                  {t('table.otH')}
+                </th>
               </>
             )}
           </tr>
@@ -556,6 +936,24 @@ export function PlanFactTable({
                 const emptyRowCount = block.emptyRowCount
                 const canRemoveEmpty = brigadeRowCount > 1 && emptyRowCount > 0
 
+                if (brigadeHeaderMode === 'label') {
+                  return (
+                    <tr
+                      key={item.key}
+                      className={block.kind === 'unit-brigade' ? 'bg-stone-50/50' : 'bg-stone-50/80'}
+                    >
+                      <td
+                        colSpan={leadingCols + days + trailingCols}
+                        className={`sticky left-0 border-b border-grid py-1.5 text-[11px] font-semibold uppercase tracking-wide text-accent/90 ${
+                          block.kind === 'unit-brigade' ? 'px-3 pl-8' : 'px-3'
+                        }`}
+                      >
+                        {brigadeLabel(brigade, store.brigadeNamesKa, locale)}
+                      </td>
+                    </tr>
+                  )
+                }
+
                 return (
                   <tr
                     key={item.key}
@@ -570,6 +968,8 @@ export function PlanFactTable({
                     <span className="flex flex-wrap items-center gap-2">
                       <span>{brigadeLabel(brigade, store.brigadeNamesKa, locale)}</span>
                       {(() => {
+                        // Бригада без роли бригадира — ни выбора, ни подписи в табеле.
+                        if (!brigadeAllowsBrigadier(store, brigade)) return null
                         const brigadierId = store.brigadiers?.[brigade] ?? ''
                         const brigadierEmp = brigadierId
                           ? store.employees.find((e) => e.id === brigadierId)
@@ -623,6 +1023,28 @@ export function PlanFactTable({
                           </span>
                         )
                       })()}
+                      {canSignoff && onSetBrigadeSignoff ? (
+                        <label
+                          className={`inline-flex cursor-pointer items-center gap-1 rounded-sm border px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal ${
+                            sheet.brigadeSignoffs?.[brigade]?.verified
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                              : 'border-amber-200 bg-amber-50 text-amber-950'
+                          }`}
+                          title={t('month.signoff.hint')}
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded-sm"
+                            checked={sheet.brigadeSignoffs?.[brigade]?.verified === true}
+                            onChange={(e) => onSetBrigadeSignoff(brigade, e.target.checked)}
+                          />
+                          {t('month.signoff.label')}
+                        </label>
+                      ) : sheet.brigadeSignoffs?.[brigade]?.verified ? (
+                        <span className="rounded-sm border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-emerald-800">
+                          ✓ {t('month.signoff.done')}
+                        </span>
+                      ) : null}
                       {canAssign && onFillBrigade && (
                         <button
                           type="button"
@@ -665,17 +1087,107 @@ export function PlanFactTable({
               const emp = row.employeeId
                 ? employeesById.get(row.employeeId) ?? null
                 : null
-              const rs = rowStatsMap.get(row.id)!
+              const rs = rowStatsMap.get(row.id)
+              const confirm = row.employeeId
+                ? absenceConfirmForEmployee(store, row.employeeId, sheet.month)
+                : undefined
+              const nextInBrigadeId = block.rows[idx + 1]?.id ?? null
+              const draggedRow = draggingRowId
+                ? sheet.rows.find((r) => r.id === draggingRowId)
+                : undefined
+              const dropInThisBrigade = draggedRow?.brigade === brigade
+              const dropBeforeHere = dropInThisBrigade && dropBeforeId === row.id
+              const dropAfterHere =
+                dropInThisBrigade && dropBeforeId === null && nextInBrigadeId === null
               return (
-                <tr key={item.key} className="group hover:bg-paper/60">
-                      <td className="sticky left-0 border-b border-r border-grid bg-white px-1 py-1 font-mono text-xs group-hover:bg-paper/60">
-                        <span className="flex items-center gap-1">
+                <tr
+                  key={item.key}
+                  className={`group hover:bg-paper/60${dropBeforeHere ? ' pf-row--drop-before' : ''}${
+                    dropAfterHere ? ' pf-row--drop-after' : ''
+                  }${draggingRowId === row.id ? ' opacity-60' : ''}`}
+                  onDragOver={
+                    canRowDrag
+                      ? (e) => {
+                          const dragId = draggingRowIdRef.current
+                          if (!dragId || dragId === row.id) return
+                          const dragged = sheet.rows.find((r) => r.id === dragId)
+                          if (!dragged) return
+                          if (dragged.brigade !== brigade) {
+                            if (!canTransferDrop || !dragged.employeeId) return
+                            e.preventDefault()
+                            e.dataTransfer.dropEffect = 'move'
+                            setDropBeforeId(undefined)
+                            return
+                          }
+                          if (!canReorder) return
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const before =
+                            e.clientY < rect.top + rect.height / 2
+                          setDropBeforeId(before ? row.id : nextInBrigadeId)
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    canRowDrag
+                      ? (e) => {
+                          e.preventDefault()
+                          const rowId =
+                            e.dataTransfer.getData(KANBAN_DRAG_MIME) ||
+                            e.dataTransfer.getData('text/plain') ||
+                            draggingRowIdRef.current
+                          if (!rowId) return
+                          const dragged = sheet.rows.find((r) => r.id === rowId)
+                          if (!dragged) return
+                          endRowDrag()
+                          if (dragged.brigade !== brigade) {
+                            if (dragged.employeeId) onMoveToOtherBrigade?.(rowId, brigade)
+                            return
+                          }
+                          if (!canReorder) return
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const before =
+                            e.clientY < rect.top + rect.height / 2
+                          const beforeRowId = before ? row.id : nextInBrigadeId
+                          if (rowId !== beforeRowId) {
+                            onReorderRow?.(brigade, rowId, beforeRowId)
+                            onRowSortChange?.(DEFAULT_MONTH_ROW_SORT)
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                      <td
+                        className={`sticky left-0 border-b border-r border-grid bg-white px-1 py-1 font-mono text-xs group-hover:bg-paper/60${
+                          canReorder ? ' pf-td--ord' : ''
+                        }`}
+                        data-coach={canReorder && row.employeeId ? 'month:reorderRow' : undefined}
+                        draggable={canReorder}
+                        title={canReorder ? t('table.reorderHint') : undefined}
+                        onDragStart={
+                          canReorder
+                            ? (e) => {
+                                beginRowDrag(e, row.id)
+                              }
+                            : undefined
+                        }
+                        onDragEnd={canReorder ? endRowDrag : undefined}
+                      >
+                        <span className="flex items-center gap-0.5">
+                          {canReorder ? (
+                            <span className="pf-row-handle" aria-hidden>
+                              ⠿
+                            </span>
+                          ) : null}
                           <span>{idx + 1}</span>
                           {canAssign && onRemoveRow && brigadeRowCount > 1 && (
                             <button
                               type="button"
                               className="rounded px-0.5 text-stone-400 hover:bg-red-50 hover:text-red-600"
                               title={t('table.removeSlot')}
+                              draggable={false}
+                              onPointerDown={(e) => e.stopPropagation()}
                               onClick={() => onRemoveRow(row.id)}
                             >
                               ×
@@ -684,38 +1196,97 @@ export function PlanFactTable({
                         </span>
                       </td>
                       <td
-                        className="sticky left-[2rem] border-b border-r border-grid bg-white px-1 py-1 group-hover:bg-paper/60"
+                        className={`sticky left-[2rem] border-b border-r border-grid bg-white px-1 py-1 group-hover:bg-paper/60${
+                          canReorder && !canAssign ? ' pf-td--ord' : ''
+                        }`}
                         data-employee-row={row.id}
+                        title={employeeMetaTitle(emp)}
+                        draggable={canReorder && !canAssign && Boolean(row.employeeId)}
+                        onDragStart={
+                          canReorder && !canAssign && row.employeeId
+                            ? (e) => beginRowDrag(e, row.id)
+                            : undefined
+                        }
+                        onDragEnd={
+                          canReorder && !canAssign ? endRowDrag : undefined
+                        }
                       >
-                        {canAssign ? (
-                          <EmployeePicker
-                            employees={store.employees}
-                            value={row.employeeId}
-                            brigade={brigade}
-                            month={sheet.month}
-                            assignedInMonth={assignedInMonth}
-                            currentRowId={row.id}
-                            compact
-                            placeholder={t('table.freeSlot')}
-                            onChange={(id) => {
-                              onAssign(row.id, id)
-                              if (id) focusNextEmptySlot(brigade, row.id)
-                            }}
-                            onAddNew={
-                              onAddEmployee
-                                ? () => onAddEmployee(row.id, brigade)
-                                : undefined
-                            }
-                          />
+                        <div className="flex min-w-0 items-start gap-0.5">
+                          {canAssign ? (
+                          <div className="flex min-w-0 flex-col gap-0.5">
+                            <EmployeePicker
+                              employees={store.employees}
+                              value={row.employeeId}
+                              brigade={brigade}
+                              month={sheet.month}
+                              assignedInMonth={assignedInMonth}
+                              currentRowId={row.id}
+                              compact
+                              placeholder={t('table.freeSlot')}
+                              onChange={(id) => {
+                                onAssign(row.id, id)
+                                if (id) focusNextEmptySlot(brigade, row.id)
+                              }}
+                              onConflictPick={onAssignConflict}
+                              onAddNew={
+                                onAddEmployee
+                                  ? () => onAddEmployee(row.id, brigade)
+                                  : undefined
+                              }
+                            />
+                            {(() => {
+                              const b = sheet.rowBounds?.[row.id]
+                              if (b?.inactiveFrom) {
+                                const d = Number(b.inactiveFrom.slice(8, 10))
+                                return (
+                                  <span className="px-1 text-[10px] font-medium text-amber-800">
+                                    {tf('transfer.splitUntil', { day: String(d) })}
+                                  </span>
+                                )
+                              }
+                              if (b?.inactiveUntil) {
+                                const d = Number(b.inactiveUntil.slice(8, 10)) + 1
+                                return (
+                                  <span className="px-1 text-[10px] font-medium text-sky-800">
+                                    {tf('transfer.splitFrom', { day: String(d) })}
+                                  </span>
+                                )
+                              }
+                              return null
+                            })()}
+                          </div>
                         ) : (
-                          <span className="block max-w-[12rem] truncate px-1 text-sm font-medium">
+                          <span className="block max-w-[12rem] px-1 text-sm font-medium">
                             {emp ? (
-                              <BilingualText lines={employeeNameLines(emp)} />
+                              <>
+                                <BilingualText lines={employeeNameLines(emp)} />
+                                {(() => {
+                                  const b = sheet.rowBounds?.[row.id]
+                                  if (b?.inactiveFrom) {
+                                    const d = Number(b.inactiveFrom.slice(8, 10))
+                                    return (
+                                      <span className="mt-0.5 block text-[10px] font-medium text-amber-800">
+                                        {tf('transfer.splitUntil', { day: String(d) })}
+                                      </span>
+                                    )
+                                  }
+                                  if (b?.inactiveUntil) {
+                                    const d = Number(b.inactiveUntil.slice(8, 10)) + 1
+                                    return (
+                                      <span className="mt-0.5 block text-[10px] font-medium text-sky-800">
+                                        {tf('transfer.splitFrom', { day: String(d) })}
+                                      </span>
+                                    )
+                                  }
+                                  return null
+                                })()}
+                              </>
                             ) : (
                               '—'
                             )}
                           </span>
                         )}
+                        </div>
                       </td>
                       {display.showTab && (
                         <td className="border-b border-grid px-2 font-mono text-xs text-stone-500">
@@ -762,10 +1333,10 @@ export function PlanFactTable({
                                 title={t('table.regenerateTitle')}
                                 onClick={() => onRegenerateRow(row.id)}
                               >
-                                {emp.schedule}
+                                {scheduleDisplayLabel(emp)}
                               </button>
                             ) : (
-                              <span>{emp.schedule}</span>
+                              <span>{scheduleDisplayLabel(emp)}</span>
                             )
                           ) : (
                             '—'
@@ -816,6 +1387,7 @@ export function PlanFactTable({
                       )}
                       {dayNums.map((d) => {
                         const dateKey = dayDateKey(year, month, d)
+                        const dow = new Date(year, month - 1, d).getDay()
                         const planCode = sheet.plan[row.id]?.[dateKey] ?? ''
                         const factCode = getFactMark(sheet, row.id, dateKey)
                         const code = mode === 'plan' ? planCode : factCode
@@ -832,35 +1404,127 @@ export function PlanFactTable({
                         const subLabel = substitution
                           ? substitutionLabel(sheet, store.employees, row.id, dateKey)
                           : undefined
-                        const isBrigadier = !!sheet.brigadierDays?.[`${row.id}|${dateKey}`]
+                        const rowBounds = sheet.rowBounds?.[row.id]
+                        const periodOff = emp
+                          ? rowPeriodOffReason(emp, dateKey, rowBounds)
+                          : null
+                        const isBrigadier =
+                          brigadeAllowsBrigadier(store, row.brigade) &&
+                          !!sheet.brigadierDays?.[`${row.id}|${dateKey}`]
                         const titleParts = [
                           subLabel,
                           comment,
+                          periodOff === 'inactiveFrom'
+                            ? t('month.rowPeriod.hintInactiveFrom')
+                            : periodOff === 'inactiveUntil'
+                              ? t('month.rowPeriod.hintInactiveUntil')
+                              : '',
                           extraHours > 0 ? `+${extraHours} ${t('common.hoursShort')}` : '',
-                          overrideHours != null ? `${overrideHours} ${t('common.hoursShort')}` : '',
+                          overrideHours != null
+                            ? (() => {
+                                const planNorm = hoursForCode(planCode)
+                                if (planNorm <= 0) {
+                                  return tf('table.overrideOtHint', { n: overrideHours })
+                                }
+                                const d = overrideHours - planNorm
+                                if (d < 0) return tf('table.overrideShortHint', { n: Math.abs(d), got: overrideHours, plan: planNorm })
+                                if (d > 0) return tf('table.overrideOtHint', { n: d })
+                                return `${overrideHours} ${t('common.hoursShort')}`
+                              })()
+                            : '',
                           mismatch
                             ? `${t('month.plan')} «${planCode || '·'}» → ${t('month.fact')} «${factCode || '·'}»`
                             : `${dateKey} ${mode}`,
                         ].filter(Boolean)
+                        const payRisk: 'idle' | 'pending' | null =
+                          mode === 'fact' && factCode === 'ПР'
+                            ? 'idle'
+                            : mode === 'fact' &&
+                                factCode === 'Б' &&
+                                confirm?.sickConfirmed !== true
+                              ? 'pending'
+                              : mode === 'fact' &&
+                                  factCode === 'ОТ' &&
+                                  confirm?.vacationConfirmed !== true
+                                ? 'pending'
+                                : null
+                        if (payRisk === 'idle') titleParts.push(t('table.prHint'))
+                        if (payRisk === 'pending') titleParts.push(t('table.pendingAbsenceHint'))
                         return (
-                          <td key={d} className="border-b border-grid p-0">
+                          <td
+                            key={d}
+                            className={`border-b border-grid p-0 ${
+                              dow === 1 ? 'pf-td--week' : ''
+                            } ${
+                              isWeekend(year, month, d)
+                                ? `pf-td--weekend${dow === 6 ? ' pf-td--weekend-start' : ''}`
+                                : ''
+                            } ${dateKey === todayKey ? 'pf-td--today' : ''}`}
+                          >
                             <DayCell
                               code={code}
+                              layer={mode}
+                              planCode={planCode}
+                              otherCode={
+                                mismatch
+                                  ? mode === 'fact'
+                                    ? planCode
+                                    : factCode
+                                  : undefined
+                              }
                               extraHours={extraHours}
                               overrideHours={overrideHours}
                               size={cellSize}
                               mismatch={mismatch}
-                              dimmed={mode === 'plan' && mismatch}
+                              selected={selectedCells.has(`${row.id}|${dateKey}`)}
                               hasComment={!!comment}
                               hasSubstitution={!!substitution}
                               isBrigadier={isBrigadier}
+                              periodOff={!!periodOff}
+                              payRisk={payRisk}
                               dataCell={`${row.id}|${dateKey}`}
+                              remoteFlash={remoteFlashCell === `${row.id}|${dateKey}`}
+                              onMouseDown={(e) => {
+                                if (!emp || !canEditCells || e.button !== 0) return
+                                if (e.ctrlKey || e.metaKey) {
+                                  e.preventDefault()
+                                  dragSelectRef.current = true
+                                  selectionAnchorRef.current = { rowId: row.id, day: d }
+                                  const key = `${row.id}|${dateKey}`
+                                  setSelectedCells((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(key)) next.delete(key)
+                                    else next.add(key)
+                                    return next
+                                  })
+                                }
+                              }}
+                              onMouseEnter={() => {
+                                if (!dragSelectRef.current || !canEditCells) return
+                                const anchor = selectionAnchorRef.current
+                                if (!anchor || anchor.rowId !== row.id) return
+                                const from = Math.min(anchor.day, d)
+                                const to = Math.max(anchor.day, d)
+                                const next = new Set<string>()
+                                for (let day = from; day <= to; day++) {
+                                  next.add(`${row.id}|${dayDateKey(year, month, day)}`)
+                                }
+                                setSelectedCells(next)
+                              }}
                               onClick={(e) => {
                                 if (emp && canEditCells) {
                                   setFocus({ rowId: row.id, day: d })
-                                  if (e.shiftKey) {
+                                  if (e.ctrlKey || e.metaKey) {
+                                    e.preventDefault()
+                                    return
+                                  }
+                                  if (e.shiftKey && !e.altKey) {
                                     onCycle(row.id, dateKey)
                                     return
+                                  }
+                                  const key = `${row.id}|${dateKey}`
+                                  if (selectedCells.size > 0 && !selectedCells.has(key)) {
+                                    clearSelection()
                                   }
                                   openCodePicker(
                                     row.id,
@@ -869,16 +1533,28 @@ export function PlanFactTable({
                                     e.clientX,
                                     e.clientY + 4,
                                     extraHours,
+                                    overrideHours,
                                   )
                                 }
                               }}
                               onContextMenu={(e) => {
                                 if (!emp || !canEditCells) return
-                                if (!onCommentRequest && !onSubstitutionRequest && !onMarkBrigadier)
+                                if (
+                                  !onCommentRequest &&
+                                  !onSubstitutionRequest &&
+                                  !onMarkBrigadier &&
+                                  !onRowInactiveFrom
+                                )
                                   return
                                 e.preventDefault()
                                 setCodePicker(null)
                                 setFocus({ rowId: row.id, day: d })
+                                contextSnapshotRef.current = readMonthCellSnapshot(
+                                  sheet,
+                                  row.id,
+                                  dateKey,
+                                  mode,
+                                )
                                 setContextMenu({
                                   rowId: row.id,
                                   dateKey,
@@ -894,18 +1570,65 @@ export function PlanFactTable({
                       })}
                       {display.showTotals && (
                         <>
-                          <td className="border-b border-grid px-2 text-center font-mono text-xs">
-                            {emp ? rs.planHours : '—'}
-                          </td>
-                          <td className="border-b border-grid px-2 text-center font-mono text-xs">
-                            {emp ? rs.factHours : '—'}
+                          <td
+                            className={`border-b border-grid px-1.5 text-center font-mono ${
+                              mode === 'plan'
+                                ? 'text-sm font-bold text-sky-900'
+                                : 'text-[11px] text-stone-500'
+                            }`}
+                            title={t('table.planHNormHint')}
+                          >
+                            {emp && rs ? rs.planHours : '—'}
                           </td>
                           <td
-                            className={`border-b border-grid px-2 text-center font-mono text-xs ${
-                              rs.mismatches ? 'font-semibold text-amber-700' : ''
+                            className={`border-b border-grid px-1.5 text-center font-mono ${
+                              mode === 'fact'
+                                ? 'text-sm font-bold text-rose-900'
+                                : 'text-[11px] text-stone-500'
+                            }`}
+                            title={t('table.factHWorkHint')}
+                          >
+                            {emp && rs ? rs.factHours : '—'}
+                          </td>
+                          <td
+                            className={`border-b border-grid px-1.5 text-center font-mono text-[11px] ${
+                              emp && rs && rs.workHoursDelta !== 0
+                                ? 'font-semibold text-amber-700'
+                                : ''
+                            }`}
+                            title={t('table.deltaHint')}
+                          >
+                            {emp && rs
+                              ? `${rs.workHoursDelta > 0 ? '+' : ''}${rs.workHoursDelta}`
+                              : '—'}
+                          </td>
+                          <td
+                            className={`border-b border-grid px-1.5 text-center font-mono text-[11px] ${
+                              emp && rs && rs.pr > 0 ? 'font-semibold text-orange-700' : 'text-stone-400'
+                            }`}
+                            title={t('table.prHint')}
+                          >
+                            {emp && rs ? rs.pr : '—'}
+                          </td>
+                          <td
+                            className={`border-b border-grid px-1.5 text-center font-mono text-[11px] ${
+                              emp && rs && rs.nightHours > 0 ? 'text-violet-700' : 'text-stone-400'
                             }`}
                           >
-                            {emp ? rs.mismatches : '—'}
+                            {emp && rs ? rs.nightHours : '—'}
+                          </td>
+                          <td
+                            className={`border-b border-grid px-1.5 text-center font-mono text-[11px] ${
+                              emp && rs && rs.monthDeltaOtHours > 0
+                                ? 'font-semibold text-amber-800'
+                                : 'text-stone-400'
+                            }`}
+                          >
+                            {emp && rs && rs.monthDeltaOtHours > 0
+                              ? `+${rs.monthDeltaOtHours}`
+                              : emp && rs
+                                ? '0'
+                                : '—'}
                           </td>
                         </>
                       )}
@@ -916,9 +1639,11 @@ export function PlanFactTable({
         </tbody>
       </table>
       {!embedded && (
-        <p className="border-t border-grid px-3 py-2 text-xs text-stone-400">
+        <p className="pf-sheet__footer border-t border-grid px-3 py-2 text-xs text-stone-500">
           {formatMonthTitle(sheet.month, locale)} ·{' '}
-          <strong>{mode === 'plan' ? t('table.planUpper') : t('table.factUpper')}</strong>
+          <strong className={mode === 'plan' ? 'text-sky-800' : 'text-teal-800'}>
+            {mode === 'plan' ? t('table.planUpper') : t('table.factUpper')}
+          </strong>
           {' · '}
           <span className="inline-block h-2 w-2 rounded-sm bg-amber-400 align-middle" />{' '}
           {t('table.mismatch')}
@@ -934,6 +1659,11 @@ export function PlanFactTable({
                 +N
               </span>{' '}
               {t('cellPicker.extraLegend')}
+              {' · '}
+              <span className="inline-block rounded bg-stone-500 px-0.5 text-[8px] font-bold text-white align-middle">
+                −N
+              </span>{' '}
+              {t('cellPicker.hoursShortLegend')}
             </>
           )}
         </p>
@@ -954,27 +1684,36 @@ export function PlanFactTable({
             <CellCodePicker
               x={codePicker.x}
               y={codePicker.y}
-              dateLabel={codePicker.dateKey}
+              dateLabel={selectedCells.size > 1 ? tf('month.selection.fillLabel', { count: selectedCells.size }) : codePicker.dateKey}
               mode={mode}
               current={codePicker.current}
               currentExtra={codePicker.currentExtra}
-              onPick={(code) => onSetCode(codePicker.rowId, codePicker.dateKey, code)}
-              onPickExtra={
-                mode === 'fact' && onSetFactExtra
-                  ? (hours) =>
-                      onSetFactExtra(codePicker.rowId, codePicker.dateKey, hours)
+              currentOverrideHours={codePicker.currentOverride}
+              planCode={
+                mode === 'fact'
+                  ? ((sheet.plan[codePicker.rowId]?.[codePicker.dateKey] ?? '') as DayCode)
                   : undefined
+              }
+              onPick={handlePickCode}
+              onPickExtra={
+                mode === 'fact' && onSetFactExtra ? handlePickExtra : undefined
+              }
+              onPickHoursOverride={
+                mode === 'fact' && onSetFactHours ? handlePickHoursOverride : undefined
               }
               cycleSchedule={canCycle ? pickerEmp!.schedule : undefined}
               onPickCycle={
                 canCycle
-                  ? (variant) =>
+                  ? (variant) => {
+                      ignoreCellConflictRef.current = true
                       onSetCycleFromDay!(
                         codePicker.rowId,
                         pickerEmp!.id,
                         pickerDay,
                         variant,
                       )
+                      setCodePicker(null)
+                    }
                   : undefined
               }
               onClose={() => setCodePicker(null)}
@@ -986,7 +1725,13 @@ export function PlanFactTable({
           x={contextMenu.x}
           y={contextMenu.y}
           showSubstitution={mode === 'fact' && !!onSubstitutionRequest}
-          showBrigadier={!!onMarkBrigadier}
+          showBrigadier={
+            !!onMarkBrigadier &&
+            brigadeAllowsBrigadier(
+              store,
+              sheet.rows.find((r) => r.id === contextMenu.rowId)?.brigade ?? '',
+            )
+          }
           isBrigadier={!!sheet.brigadierDays?.[`${contextMenu.rowId}|${contextMenu.dateKey}`]}
           onComment={() => onCommentRequest?.(contextMenu.rowId, contextMenu.dateKey)}
           onSubstitution={() =>
@@ -1011,9 +1756,29 @@ export function PlanFactTable({
                   )
               : undefined
           }
-          onClose={() => setContextMenu(null)}
+          showPeriod={!!onRowInactiveFrom}
+          periodDay={Number.parseInt(contextMenu.dateKey.slice(8), 10) || undefined}
+          hasPeriodMark={hasRowPeriodBounds(sheet.rowBounds?.[contextMenu.rowId])}
+          onInactiveFrom={
+            onRowInactiveFrom
+              ? () => onRowInactiveFrom(contextMenu.rowId, contextMenu.dateKey)
+              : undefined
+          }
+          onActiveFrom={
+            onRowActiveFrom
+              ? () => onRowActiveFrom(contextMenu.rowId, contextMenu.dateKey)
+              : undefined
+          }
+          onClearPeriod={
+            onClearRowPeriod ? () => onClearRowPeriod(contextMenu.rowId) : undefined
+          }
+          onClose={() => {
+            setContextMenu(null)
+            contextSnapshotRef.current = null
+          }}
         />
       )}
-    </div>
+      </div>
+    </>
   )
 }

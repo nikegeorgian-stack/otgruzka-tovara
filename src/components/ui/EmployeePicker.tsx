@@ -12,7 +12,8 @@ type Props = {
   value: string | null
   brigade?: string
   excludeId?: string
-  assignedInMonth?: Map<string, string>
+  /** employeeId → rowId (устаревший компактный вид) или полное назначение */
+  assignedInMonth?: Map<string, string | { rowId: string; brigade: string }>
   currentRowId?: string
   compact?: boolean
   placeholder?: string
@@ -21,7 +22,23 @@ type Props = {
   /** Месяц табеля YYYY-MM */
   month?: string
   onChange: (employeeId: string | null) => void
+  /** Выбор человека, уже стоящего в другой бригаде месяца. */
+  onConflictPick?: (info: {
+    employeeId: string
+    fromBrigade: string
+    toBrigade: string
+  }) => void
   onAddNew?: () => void
+}
+
+function assignmentOf(
+  assignedInMonth: Props['assignedInMonth'],
+  employeeId: string,
+): { rowId: string; brigade?: string } | undefined {
+  const raw = assignedInMonth?.get(employeeId)
+  if (!raw) return undefined
+  if (typeof raw === 'string') return { rowId: raw }
+  return raw
 }
 
 export function EmployeePicker({
@@ -36,9 +53,10 @@ export function EmployeePicker({
   asOfDate,
   month,
   onChange,
+  onConflictPick,
   onAddNew,
 }: Props) {
-  const { t, employeeName } = useI18n()
+  const { t, tf, employeeName } = useI18n()
   const listId = useId()
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -58,9 +76,6 @@ export function EmployeePicker({
     limit: 30,
     asOfDate,
     month,
-  }).filter((emp) => {
-    const takenRow = assignedInMonth?.get(emp.id)
-    return !takenRow || takenRow === currentRowId
   })
 
   const showClearSlot = open && !query.trim()
@@ -69,11 +84,28 @@ export function EmployeePicker({
 
   const pick = useCallback(
     (emp: Employee | null) => {
+      if (emp && brigade) {
+        const taken = assignmentOf(assignedInMonth, emp.id)
+        if (taken && taken.rowId !== currentRowId) {
+          const fromBrigade = taken.brigade || t('employee.picker.otherSlot')
+          onConflictPick?.({
+            employeeId: emp.id,
+            fromBrigade,
+            toBrigade: brigade,
+          })
+        } else if (emp.brigade && emp.brigade !== brigade) {
+          onConflictPick?.({
+            employeeId: emp.id,
+            fromBrigade: emp.brigade,
+            toBrigade: brigade,
+          })
+        }
+      }
       onChange(emp?.id ?? null)
       setQuery('')
       setOpen(false)
     },
-    [onChange],
+    [assignedInMonth, brigade, currentRowId, onChange, onConflictPick, t],
   )
 
   function pickHighlighted() {
@@ -184,6 +216,13 @@ export function EmployeePicker({
         )}
         {results.map((emp, idx) => {
           const itemIdx = (showClearSlot ? 1 : 0) + idx
+          const taken = assignmentOf(assignedInMonth, emp.id)
+          const elsewhere =
+            taken && taken.rowId !== currentRowId
+              ? taken.brigade || t('employee.picker.otherSlot')
+              : emp.brigade && brigade && emp.brigade !== brigade
+                ? emp.brigade
+                : null
           return (
             <button
               key={emp.id}
@@ -207,6 +246,11 @@ export function EmployeePicker({
                 <span className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-stone-500">
                   <span className="font-mono">№ {emp.tabNumber}</span>
                   <span className="truncate">{emp.brigade}</span>
+                  {elsewhere ? (
+                    <span className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 ring-1 ring-amber-200/80">
+                      {tf('employee.picker.plannedElsewhere', { brigade: elsewhere })}
+                    </span>
+                  ) : null}
                 </span>
               </span>
             </button>

@@ -1,4 +1,5 @@
 import { useI18n } from '@/context/I18nContext'
+import { intlLocale } from '@/i18n/localeFormat'
 import type { ShipmentMilestone } from '@/lib/procurement/types'
 import { carrierLabel } from '@/lib/procurement/tracking/carrierUrls'
 
@@ -23,16 +24,22 @@ export function ContainerPathTimeline({ milestones }: Props) {
       {pathEvents.map((m, idx) => {
         const isLast = idx === pathEvents.length - 1
         return (
-          <li key={m.id} className="relative pb-4 last:pb-0">
+          <li
+            key={m.id}
+            className="relative pb-4 last:pb-0 animate-[fadeSlideIn_0.45s_ease-out_both]"
+            style={{ animationDelay: `${Math.min(idx, 8) * 60}ms` }}
+          >
             <span
-              className={`absolute -left-[1.35rem] top-1 flex h-4 w-4 items-center justify-center rounded-sm ${
-                isLast ? 'bg-teal-600 ring-4 ring-teal-100' : 'border-2 border-teal-500 bg-white'
+              className={`absolute -left-[1.35rem] top-1 flex h-4 w-4 items-center justify-center rounded-sm transition-transform duration-300 ${
+                isLast
+                  ? 'scale-110 bg-teal-600 ring-4 ring-teal-100'
+                  : 'border-2 border-teal-500 bg-white'
               }`}
             />
-            <div className="rounded-sm border border-grid bg-white px-3 py-2">
+            <div className="rounded-sm border border-grid bg-white px-3 py-2 shadow-sm transition-shadow hover:shadow">
               <div className="flex flex-wrap items-center gap-2">
                 <time className="font-mono text-[11px] text-stone-500">
-                  {new Date(m.at).toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU', {
+                  {new Date(m.at).toLocaleString(intlLocale(locale), {
                     day: '2-digit',
                     month: '2-digit',
                     year: '2-digit',
@@ -43,6 +50,11 @@ export function ContainerPathTimeline({ milestones }: Props) {
                 {m.carrier && (
                   <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-stone-600">
                     {carrierLabel(m.carrier)}
+                  </span>
+                )}
+                {m.source === 'manual' && (
+                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                    {t('procurement.routeMonitor.manual')}
                   </span>
                 )}
               </div>

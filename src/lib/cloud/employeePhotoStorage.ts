@@ -55,12 +55,23 @@ async function syncPersonPhoto<T extends Employee | Candidate>(
   }
 }
 
+function storeHasInlineDataPhotos(store: AppStore): boolean {
+  const isData = (url: string | undefined) => !!url?.startsWith('data:')
+  if (store.employees.some((e) => isData(e.photoDataUrl))) return true
+  if (store.candidates.some((c) => isData(c.photoDataUrl))) return true
+  if (store.trash.employees.some((t) => isData(t.employee.photoDataUrl))) return true
+  if (store.trash.candidates.some((t) => isData(t.candidate.photoDataUrl))) return true
+  return false
+}
+
 /** Перед записью в Firestore: загрузить base64-фото в Storage. */
 export async function syncStorePhotosForCloud(
   store: AppStore,
   storeDocId: string,
 ): Promise<AppStore> {
   if (!isFirebaseConfigured()) return store
+  // Типичный save табеля — без новых data:-фото; не гонять Promise.all по всем HR.
+  if (!storeHasInlineDataPhotos(store)) return store
 
   const employees = await Promise.all(
     store.employees.map((e) => syncPersonPhoto(e, storeDocId, 'employees')),

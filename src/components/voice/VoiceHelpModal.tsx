@@ -1,4 +1,5 @@
 import { useI18n } from '@/context/I18nContext'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 
 type Props = { onClose: () => void }
 
@@ -22,7 +23,7 @@ export function VoiceHelpModal({ onClose }: Props) {
   const { t } = useI18n()
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
+    <div className={`${CHROME_BACKDROP_CLASS} z-[120] bg-black/40`}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-sm bg-white p-6 shadow-sm">
         <h3 className="text-lg font-bold">{t('voice.helpTitle')}</h3>
         <p className="mt-1 text-sm text-stone-500">{t('voice.helpHint')}</p>

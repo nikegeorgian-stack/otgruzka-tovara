@@ -1,6 +1,12 @@
 import { lazy } from 'react'
 import type { ViewId } from '@/lib/types'
 
+export const MyCabinetPage = lazy(() =>
+  import('@/pages/MyCabinetPage').then((m) => ({ default: m.MyCabinetPage })),
+)
+export const TimeclockPage = lazy(() =>
+  import('@/pages/TimeclockPage').then((m) => ({ default: m.TimeclockPage })),
+)
 export const MonthPage = lazy(() =>
   import('@/pages/MonthPage').then((m) => ({ default: m.MonthPage })),
 )
@@ -32,6 +38,9 @@ export const ProcurementPage = lazy(() =>
 export const TechnologistPage = lazy(() =>
   import('@/pages/TechnologistPage').then((m) => ({ default: m.TechnologistPage })),
 )
+export const OtcPage = lazy(() =>
+  import('@/pages/OtcPage').then((m) => ({ default: m.OtcPage })),
+)
 export const MixerPage = lazy(() =>
   import('@/pages/MixerPage').then((m) => ({ default: m.MixerPage })),
 )
@@ -44,8 +53,26 @@ export const SettingsPage = lazy(() =>
 export const JournalsPage = lazy(() =>
   import('@/pages/JournalsPage').then((m) => ({ default: m.JournalsPage })),
 )
+export const EngineerLogPage = lazy(() =>
+  import('@/pages/EngineerLogPage').then((m) => ({ default: m.EngineerLogPage })),
+)
+export const TasksPage = lazy(() =>
+  import('@/pages/TasksPage').then((m) => ({ default: m.TasksPage })),
+)
 export const ItOfficePage = lazy(() =>
   import('@/pages/ItOfficePage').then((m) => ({ default: m.ItOfficePage })),
+)
+export const OfficePage = lazy(() =>
+  import('@/pages/OfficePage').then((m) => ({ default: m.OfficePage })),
+)
+export const MealsPage = lazy(() =>
+  import('@/pages/MealsPage').then((m) => ({ default: m.MealsPage })),
+)
+export const ProtocolsPage = lazy(() =>
+  import('@/pages/ProtocolsPage').then((m) => ({ default: m.ProtocolsPage })),
+)
+export const OrgTreePage = lazy(() =>
+  import('@/pages/OrgTreePage').then((m) => ({ default: m.OrgTreePage })),
 )
 
 /** Dev-only: прототипы компактного табеля */
@@ -58,12 +85,17 @@ export const MonthLayoutLabPage = lazy(() =>
 export const FstCloudSync = lazy(() =>
   import('@/components/web/FstCloudSync').then((m) => ({ default: m.FstCloudSync })),
 )
+export const FstSqlConnectSync = lazy(() =>
+  import('@/components/web/FstSqlConnectSync').then((m) => ({ default: m.FstSqlConnectSync })),
+)
 export const LocalDbSync = lazy(() =>
   import('@/components/system/LocalDbSync').then((m) => ({ default: m.LocalDbSync })),
 )
 
 /** Предзагрузка чанка страницы при наведении на пункт меню. */
 const VIEW_IMPORTS: Partial<Record<ViewId, () => Promise<unknown>>> = {
+  my: () => import('@/pages/MyCabinetPage'),
+  timeclock: () => import('@/pages/TimeclockPage'),
   month: () => import('@/pages/MonthPage'),
   summary: () => import('@/pages/SummaryPage'),
   hr: () => import('@/pages/HrPage'),
@@ -75,11 +107,18 @@ const VIEW_IMPORTS: Partial<Record<ViewId, () => Promise<unknown>>> = {
   warehouse: () => import('@/pages/WarehousePage'),
   procurement: () => import('@/pages/ProcurementPage'),
   technologist: () => import('@/pages/TechnologistPage'),
+  otc: () => import('@/pages/OtcPage'),
   mixer: () => import('@/pages/MixerPage'),
   director: () => import('@/pages/DirectorPage'),
   settings: () => import('@/pages/SettingsPage'),
   journals: () => import('@/pages/JournalsPage'),
+  engineer_log: () => import('@/pages/EngineerLogPage'),
+  tasks: () => import('@/pages/TasksPage'),
   it: () => import('@/pages/ItOfficePage'),
+  office: () => import('@/pages/OfficePage'),
+  meals: () => import('@/pages/MealsPage'),
+  protocols: () => import('@/pages/ProtocolsPage'),
+  org_tree: () => import('@/pages/OrgTreePage'),
 }
 
 export function prefetchView(view: ViewId): void {

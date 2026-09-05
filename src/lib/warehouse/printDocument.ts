@@ -1,4 +1,6 @@
 import type { Locale, PrintSignatures } from '@/lib/types'
+import { intlLocale } from '@/i18n/localeFormat'
+import { BRAND } from '@/lib/brand'
 import type { Counterparty } from '@/lib/counterparties/types'
 import { resolveCounterpartyDisplayName } from '@/lib/warehouse/documentValidation'
 import { itemStockValue, toBaseQty } from '@/lib/warehouse/stock'
@@ -16,30 +18,63 @@ export type ReceiptPrintDoc = Pick<
   WarehouseDocument,
   | 'number'
   | 'date'
+  | 'documentDateTime'
   | 'warehouseId'
+  | 'sourceWarehouseId'
+  | 'destinationWarehouseId'
+  | 'targetWarehouseId'
   | 'counterparty'
+  | 'counterpartyId'
   | 'comment'
   | 'lines'
   | 'purpose'
   | 'invoiceKey'
   | 'keeperName'
+  | 'responsibleEmployeeNameSnapshot'
   | 'productionRequestId'
   | 'contractNumber'
+  | 'basisType'
+  | 'basisNumber'
+  | 'docRole'
+  | 'reversesDocumentId'
+  | 'reversalDocumentId'
+  | 'cancellationReason'
+  | 'status'
+  | 'productionOrderId'
+  | 'productionLineId'
+  | 'overReserveReason'
+  | 'returnReason'
 >
 
 export type IssuePrintDoc = Pick<
   WarehouseDocument,
   | 'number'
   | 'date'
+  | 'documentDateTime'
   | 'warehouseId'
+  | 'sourceWarehouseId'
+  | 'destinationWarehouseId'
   | 'counterparty'
+  | 'counterpartyId'
   | 'comment'
   | 'lines'
   | 'purpose'
   | 'brigade'
   | 'keeperName'
+  | 'responsibleEmployeeNameSnapshot'
   | 'productionRequestId'
   | 'targetWarehouseId'
+  | 'basisType'
+  | 'basisNumber'
+  | 'docRole'
+  | 'reversesDocumentId'
+  | 'reversalDocumentId'
+  | 'cancellationReason'
+  | 'status'
+  | 'productionOrderId'
+  | 'productionLineId'
+  | 'overReserveReason'
+  | 'returnReason'
 >
 
 export type ReceiptPrintLine = {
@@ -51,42 +86,69 @@ export type ReceiptPrintLine = {
   qty: number
   price: number
   sum: number
+  batchNo?: string
+  comment?: string
+  lineId?: string
 }
 
 export type ReceiptPrintModel = {
   locale: Locale
   number: string
   dateFormatted: string
+  documentDateTime?: string
   warehouseName: string
+  sourceWarehouseName?: string
+  destinationWarehouseName?: string
   counterparty: string
   contractNumber?: string
+  basisLabel?: string
   comment?: string
   purpose?: WarehouseDocumentPurpose
   invoiceKey?: string
   keeperName?: string
+  responsibleName?: string
   productionRequestLabel?: string
+  productionOrderLabel?: string
+  productionLineId?: string
+  handoffReason?: string
   orgLine: string
   lines: ReceiptPrintLine[]
   lineCount: number
   totalQty: number
   totalSum: number
   receivedBy: string
+  issuedBy?: string
   accountant: string
   generatedAt: string
+  isStorno: boolean
+  stornoLabel?: string
+  originalDocumentNumber?: string
+  reversalDocumentNumber?: string
+  cancellationReason?: string
+  status?: WarehouseDocument['status']
+  brandMarkUrl: string
 }
 
 export type IssuePrintModel = {
   locale: Locale
   number: string
   dateFormatted: string
+  documentDateTime?: string
   warehouseName: string
   targetWarehouseName?: string
+  sourceWarehouseName?: string
+  destinationWarehouseName?: string
   counterparty: string
   brigade?: string
   comment?: string
   purpose?: WarehouseDocumentPurpose
+  basisLabel?: string
   keeperName?: string
+  responsibleName?: string
   productionRequestLabel?: string
+  productionOrderLabel?: string
+  productionLineId?: string
+  handoffReason?: string
   orgLine: string
   lines: ReceiptPrintLine[]
   lineCount: number
@@ -96,6 +158,13 @@ export type IssuePrintModel = {
   receivedBy: string
   accountant: string
   generatedAt: string
+  isStorno: boolean
+  stornoLabel?: string
+  originalDocumentNumber?: string
+  reversalDocumentNumber?: string
+  cancellationReason?: string
+  status?: WarehouseDocument['status']
+  brandMarkUrl: string
 }
 
 function formatPrintDate(iso: string): string {
@@ -142,21 +211,29 @@ function buildPrintLines(
 
   doc.lines.forEach((line, idx) => {
     const item = itemMap.get(line.itemId)
-    if (!item) return
-    const qty = toBaseQty(item, line.quantity, line.inputUnit)
-    const price = item.price ?? 0
-    const sum = itemStockValue(item, qty)
+    // Prefer snapshots so rename of nomenclature cannot rewrite historical print.
+    const name = line.itemNameSnapshot ?? item?.name
+    if (!name && !item) return
+    const unit = line.unitSnapshot ?? line.inputUnit ?? item?.unit ?? ''
+    const qty = item
+      ? toBaseQty(item, line.quantity, line.inputUnit)
+      : line.actualQty ?? line.quantity
+    const price = line.unitPrice ?? item?.price ?? 0
+    const sum = item ? itemStockValue(item, qty) : price * qty
     totalSum += sum
     totalQty += qty
     lines.push({
       idx: idx + 1,
-      name: item.name,
-      sku: item.sku,
-      category: catMap.get(item.categoryId) ?? '',
-      unit: item.unit,
+      name: name ?? line.itemId,
+      sku: line.itemCodeSnapshot ?? item?.sku ?? item?.internalCode,
+      category: item ? catMap.get(item.categoryId) ?? '' : '',
+      unit,
       qty,
       price,
       sum,
+      batchNo: line.batchNo,
+      comment: line.comment,
+      lineId: line.lineId,
     })
   })
 
@@ -181,6 +258,49 @@ function docCounterpartyLabel(
   return resolveCounterpartyDisplayName(doc, list, '—')
 }
 
+function basisLabel(doc: { basisType?: string; basisNumber?: string }): string | undefined {
+  if (!doc.basisType && !doc.basisNumber) return undefined
+  return [doc.basisType, doc.basisNumber].filter(Boolean).join(' · ')
+}
+
+function stornoFlags(
+  store: WarehouseStore,
+  doc: {
+    docRole?: WarehouseDocument['docRole']
+    reversesDocumentId?: string
+    reversalDocumentId?: string
+    status?: WarehouseDocument['status']
+    cancellationReason?: string
+  },
+): Pick<
+  ReceiptPrintModel,
+  | 'isStorno'
+  | 'stornoLabel'
+  | 'originalDocumentNumber'
+  | 'reversalDocumentNumber'
+  | 'cancellationReason'
+  | 'status'
+> {
+  const isStorno =
+    doc.docRole === 'reversal' ||
+    Boolean(doc.reversesDocumentId) ||
+    doc.status === 'cancelled'
+  const original = doc.reversesDocumentId
+    ? store.documents.find((d) => d.id === doc.reversesDocumentId)?.number
+    : undefined
+  const reversal = doc.reversalDocumentId
+    ? store.documents.find((d) => d.id === doc.reversalDocumentId)?.number
+    : undefined
+  return {
+    isStorno,
+    stornoLabel: isStorno ? 'СТОРНО' : undefined,
+    originalDocumentNumber: original,
+    reversalDocumentNumber: reversal,
+    cancellationReason: doc.cancellationReason,
+    status: doc.status,
+  }
+}
+
 export function buildReceiptPrintModel(
   store: WarehouseStore,
   doc: ReceiptPrintDoc,
@@ -192,19 +312,32 @@ export function buildReceiptPrintModel(
   const master = signatureName(meta.signatures, 'master', locale)
   const accountant = signatureName(meta.signatures, 'accountant', locale)
   const director = signatureName(meta.signatures, 'director', locale)
+  const storno = stornoFlags(store, doc)
+  const src = doc.sourceWarehouseId || doc.warehouseId
+  const dst = doc.destinationWarehouseId || doc.targetWarehouseId
 
   return {
     locale,
     number: doc.number,
     dateFormatted: formatPrintDate(doc.date),
+    documentDateTime: doc.documentDateTime,
     warehouseName: locName(store, doc.warehouseId),
+    sourceWarehouseName: locName(store, src),
+    destinationWarehouseName: dst ? locName(store, dst) : undefined,
     counterparty: docCounterpartyLabel(doc, opts),
     contractNumber: doc.contractNumber,
+    basisLabel: basisLabel(doc),
     comment: doc.comment,
     purpose: doc.purpose,
     invoiceKey: doc.invoiceKey,
     keeperName: doc.keeperName,
+    responsibleName: doc.responsibleEmployeeNameSnapshot || doc.keeperName,
     productionRequestLabel: productionRequestLabel(doc.productionRequestId, opts?.productionRequests),
+    productionOrderLabel: doc.productionOrderId
+      ? [doc.basisNumber, doc.productionOrderId].filter(Boolean).join(' · ')
+      : undefined,
+    productionLineId: doc.productionLineId,
+    handoffReason: doc.overReserveReason || doc.returnReason,
     orgLine: [meta.site, meta.responsible].filter(Boolean).join(' · ') || '—',
     lines,
     lineCount: lines.length,
@@ -212,7 +345,9 @@ export function buildReceiptPrintModel(
     totalSum,
     receivedBy: master,
     accountant: accountant || director,
-    generatedAt: new Date().toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU'),
+    generatedAt: new Date().toLocaleString(intlLocale(locale)),
+    brandMarkUrl: BRAND.mark,
+    ...storno,
   }
 }
 
@@ -227,21 +362,34 @@ export function buildIssuePrintModel(
   const master = signatureName(meta.signatures, 'master', locale)
   const accountant = signatureName(meta.signatures, 'accountant', locale)
   const director = signatureName(meta.signatures, 'director', locale)
+  const storno = stornoFlags(store, doc)
+  const src = doc.sourceWarehouseId || doc.warehouseId
+  const dst = doc.destinationWarehouseId || doc.targetWarehouseId
 
   return {
     locale,
     number: doc.number,
     dateFormatted: formatPrintDate(doc.date),
+    documentDateTime: doc.documentDateTime,
     warehouseName: locName(store, doc.warehouseId),
     targetWarehouseName: doc.targetWarehouseId
       ? locName(store, doc.targetWarehouseId)
       : undefined,
+    sourceWarehouseName: locName(store, src),
+    destinationWarehouseName: dst ? locName(store, dst) : undefined,
     counterparty: docCounterpartyLabel(doc, opts),
     brigade: doc.brigade,
     comment: doc.comment,
     purpose: doc.purpose,
+    basisLabel: basisLabel(doc),
     keeperName: doc.keeperName,
+    responsibleName: doc.responsibleEmployeeNameSnapshot || doc.keeperName,
     productionRequestLabel: productionRequestLabel(doc.productionRequestId, opts?.productionRequests),
+    productionOrderLabel: doc.productionOrderId
+      ? [doc.basisNumber, doc.productionOrderId].filter(Boolean).join(' · ')
+      : undefined,
+    productionLineId: doc.productionLineId,
+    handoffReason: doc.overReserveReason || doc.returnReason,
     orgLine: [meta.site, meta.responsible].filter(Boolean).join(' · ') || '—',
     lines,
     lineCount: lines.length,
@@ -250,7 +398,9 @@ export function buildIssuePrintModel(
     issuedBy: doc.keeperName || meta.responsible || '—',
     receivedBy: master,
     accountant: accountant || director,
-    generatedAt: new Date().toLocaleString(locale === 'ka' ? 'ka-GE' : 'ru-RU'),
+    generatedAt: new Date().toLocaleString(intlLocale(locale)),
+    brandMarkUrl: BRAND.mark,
+    ...storno,
   }
 }
 

@@ -51,8 +51,16 @@ const ROLE_CATEGORIES: Record<AccessRoleId, JournalCategory[] | 'all'> = {
     'warehouse_movements',
   ],
   technologist: TECHNOLOGIST,
+  otc: [...TECHNOLOGIST, 'production'],
   mixer: TECHNOLOGIST,
   finance: FINANCE_JOURNALS,
+  employee: [],
+  timeclock: [],
+  it_specialist: ['warehouse_nomenclature'],
+  sales_dispatcher: ['warehouse_loading', 'warehouse_movements', 'warehouse_documents', 'production'],
+  office_manager: ['hr', 'directories', 'timesheet'],
+  cook: ['finance'],
+  secretary: ['hr', 'directories'],
 }
 
 export function resolveJournalCategories(ctx: JournalScopeContext): JournalCategory[] {
@@ -67,4 +75,30 @@ export function resolveJournalCategories(ctx: JournalScopeContext): JournalCateg
   const mapped = ROLE_CATEGORIES[role] ?? 'all'
   if (mapped === 'all') return [...ALL_JOURNAL_CATEGORIES]
   return mapped
+}
+
+/** Категории склада/закупок/финансов/продаж — журнал документов удобнее ленты */
+const DOCUMENTS_DEFAULT_CATEGORIES = new Set<JournalCategory>([
+  ...WAREHOUSE,
+  ...PROCUREMENT,
+  'finance',
+  'sales',
+])
+
+const DOCUMENTS_ONLY_CATEGORIES = new Set<JournalCategory>([
+  'warehouse_documents',
+  'warehouse_loading',
+  'finance',
+  'sales',
+])
+
+/** Склад / финансы / продажи — режим «Документы» по умолчанию */
+export function prefersDocumentsJournalView(categories: JournalCategory[]): boolean {
+  if (categories.length === 0) return false
+  if (categories.length === 1 && DOCUMENTS_ONLY_CATEGORIES.has(categories[0]!)) return true
+  // финансы: finance (+ timesheet) — всё равно документы
+  if (categories.every((c) => c === 'finance' || c === 'timesheet') && categories.includes('finance')) {
+    return true
+  }
+  return categories.every((c) => DOCUMENTS_DEFAULT_CATEGORIES.has(c))
 }

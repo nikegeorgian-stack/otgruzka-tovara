@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/context/I18nContext'
+import { lockBodyScroll } from '@/lib/ui/bodyScrollLock'
+import { onCloseOverlays } from '@/lib/ui/overlayEvents'
 
 type Props = {
   open: boolean
@@ -39,12 +41,13 @@ export function WorkspaceWidgetDrawer({
 
   useEffect(() => {
     if (!open) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prev
-    }
+    return lockBodyScroll()
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    return onCloseOverlays(onClose)
+  }, [open, onClose])
 
   if (!open || typeof document === 'undefined') return null
 

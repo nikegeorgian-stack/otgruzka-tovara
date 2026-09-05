@@ -24,7 +24,10 @@ type Baseline = {
 
 export type InventoryRevisionEditorHandle = {
   isDirty: () => boolean
-  saveDraft: () => PostDocumentResult | { ok: false; error: string }
+  saveDraft: () =>
+    | PostDocumentResult
+    | { ok: false; error: string }
+    | Promise<PostDocumentResult | { ok: false; error: string }>
 }
 
 type Props = {
@@ -35,9 +38,16 @@ type Props = {
   keeperId?: string
   keeperName?: string
   readOnly?: boolean
-  onSaveDraft: (doc: SaveDraftInput) => PostDocumentResult
-  onPostExistingDocument?: (documentId: string) => PostDocumentResult
+  onSaveDraft: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
+  onPostExistingDocument?: (
+    documentId: string,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
+  /** @deprecated W1 — unused; use onCancelDocument */
   onUnpostDocument?: (documentId: string) => { ok: boolean; error?: string }
+  onCancelDocument?: (
+    documentId: string,
+    args?: { reason?: string },
+  ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
   onAcquireLock?: (
     documentId: string,
   ) => { ok: boolean; error?: string; lockedByName?: string }
@@ -63,7 +73,7 @@ export const WarehouseInventoryRevisionEditor = forwardRef<
   readOnly = false,
   onSaveDraft,
   onPostExistingDocument,
-  onUnpostDocument,
+  onCancelDocument,
   onAcquireLock,
   onReleaseLock,
   onQuickEditItem,
@@ -112,6 +122,7 @@ ref,
 
   const isDirty = useCallback(() => {
     if (!editable) return false
+    flushFocusedCountedLine(linesRef)
     const base = baselineRef.current
     if (date !== base.date || number !== base.number || comment !== base.comment) return true
     const lines = linesRef.current
@@ -282,24 +293,27 @@ ref,
     return out
   }
 
-  const saveDraft = useCallback(() => {
+  const saveDraft = useCallback(async () => {
+    flushFocusedCountedLine(linesRef)
     const docLines = buildDocumentLines()
     if (docLines.length === 0) {
       setError(t('warehouse.inventory.revisionEmpty'))
       return { ok: false as const, error: 'empty' }
     }
-    const result = onSaveDraft({
-      id: docId,
-      type: 'inventory',
-      number: number.trim(),
-      date,
-      warehouseId: whId,
-      purpose: 'other',
-      comment: comment.trim() || undefined,
-      lines: docLines,
-      keeperId,
-      keeperName,
-    })
+    const result = await Promise.resolve(
+      onSaveDraft({
+        id: docId,
+        type: 'inventory',
+        number: number.trim(),
+        date,
+        warehouseId: whId,
+        purpose: 'other',
+        comment: comment.trim() || undefined,
+        lines: docLines,
+        keeperId,
+        keeperName,
+      }),
+    )
     if (result.ok) {
       setDocId(result.documentId)
       setError(null)
@@ -337,7 +351,7 @@ ref,
 
   async function handlePost() {
     let id = docId
-    const saved = saveDraft()
+    const saved = await saveDraft()
     if (!saved.ok) return
     id = saved.documentId
     if (!id || !onPostExistingDocument) return
@@ -349,7 +363,7 @@ ref,
     ) {
       return
     }
-    const result = onPostExistingDocument(id)
+    const result = await Promise.resolve(onPostExistingDocument(id))
     if (result.ok) {
       setNotice(t('warehouse.doc.postSuccess'))
       onCancel()
@@ -472,17 +486,28 @@ ref,
             )}
           </>
         )}
-        {isPosted && onUnpostDocument && (
+        {isPosted && onCancelDocument && (
           <button
             type="button"
-            className="rounded-sm border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800"
+            className="rounded-sm border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800"
             onClick={() => {
               if (!docId) return
-              const res = onUnpostDocument(docId)
-              setNotice(res.ok ? t('warehouse.doc.unpostSuccess') : t(res.error ?? 'unknown'))
+              const reason = window.prompt(t('warehouse.doc.cancelReasonLabel'))
+              if (reason == null) return
+              if (!reason.trim()) {
+                setNotice(t('warehouse.doc.errCancelReasonRequired'))
+                return
+              }
+              void Promise.resolve(onCancelDocument(docId, { reason: reason.trim() })).then(
+                (res) => {
+                  setNotice(
+                    res.ok ? t('warehouse.doc.cancelSuccess') : t(res.error ?? 'unknown'),
+                  )
+                },
+              )
             }}
           >
-            {t('warehouse.doc.unpost')}
+            {t('warehouse.doc.cancel')}
           </button>
         )}
         {!hideCloseButton && (
@@ -568,6 +593,23 @@ ref,
     </div>
   )
 })
+
+function flushFocusedCountedLine(linesRef: { current: Record<string, LineDraft> }) {
+  const el = document.activeElement
+  if (!(el instanceof HTMLInputElement) || !el.hasAttribute('data-inventory-counted')) return
+  const itemId = el.getAttribute('data-inventory-item-id')
+  if (!itemId) return
+  const existing = linesRef.current[itemId]
+  linesRef.current = {
+    ...linesRef.current,
+    [itemId]: {
+      itemId,
+      counted: el.value,
+      touched: true,
+      doubtful: existing?.doubtful ?? false,
+    },
+  }
+}
 
 function cloneLines(lines: Record<string, LineDraft>): Record<string, LineDraft> {
   return JSON.parse(JSON.stringify(lines)) as Record<string, LineDraft>

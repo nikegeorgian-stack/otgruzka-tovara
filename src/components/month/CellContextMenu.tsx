@@ -14,6 +14,12 @@ type Props = {
   onSubstitution: () => void
   onToggleBrigadier?: () => void
   onBrigadierMonth?: () => void
+  showPeriod?: boolean
+  periodDay?: number
+  hasPeriodMark?: boolean
+  onInactiveFrom?: () => void
+  onActiveFrom?: () => void
+  onClearPeriod?: () => void
   onClose: () => void
 }
 
@@ -27,9 +33,15 @@ export function CellContextMenu({
   onSubstitution,
   onToggleBrigadier,
   onBrigadierMonth,
+  showPeriod = false,
+  periodDay,
+  hasPeriodMark = false,
+  onInactiveFrom,
+  onActiveFrom,
+  onClearPeriod,
   onClose,
 }: Props) {
-  const { t } = useI18n()
+  const { t, tf } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const popoverZ = usePopoverZIndex()
 
@@ -99,6 +111,44 @@ export function CellContextMenu({
         >
           {t('brigadier.markMonth')}
         </button>
+      )}
+      {showPeriod && periodDay != null && onInactiveFrom && (
+        <>
+          <button
+            type="button"
+            className="block w-full border-t border-grid px-3 py-2 text-left text-sm hover:bg-stone-50"
+            onClick={() => {
+              onInactiveFrom()
+              onClose()
+            }}
+          >
+            {tf('month.rowPeriod.inactiveFrom', { day: periodDay })}
+          </button>
+          {onActiveFrom ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-stone-50"
+              onClick={() => {
+                onActiveFrom()
+                onClose()
+              }}
+            >
+              {tf('month.rowPeriod.activeFrom', { day: periodDay })}
+            </button>
+          ) : null}
+          {hasPeriodMark && onClearPeriod ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm text-stone-500 hover:bg-stone-50"
+              onClick={() => {
+                onClearPeriod()
+                onClose()
+              }}
+            >
+              {t('month.rowPeriod.clear')}
+            </button>
+          ) : null}
+        </>
       )}
     </div>,
     getModalPortalRoot(),

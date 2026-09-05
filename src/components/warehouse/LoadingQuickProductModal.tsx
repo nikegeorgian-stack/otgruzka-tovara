@@ -59,7 +59,6 @@ export function LoadingQuickProductModal({
     <ModalBackdrop
       open
       onClose={onClose}
-      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
       panelClassName="w-full max-w-md rounded-sm border border-grid bg-white p-5 shadow-sm"
     >
         <h3 className="text-lg font-bold text-ink">{t('warehouse.loading.quickItem.title')}</h3>

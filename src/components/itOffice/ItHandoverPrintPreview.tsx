@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ItHandoverPrintSheet,
   type ItHandoverPrintModel,
 } from '@/components/itOffice/ItHandoverPrintSheet'
 import { useI18n } from '@/context/I18nContext'
-import { fitPrintPages, resetPrintFit } from '@/lib/printFit'
+import { usePrintFit } from '@/hooks/usePrintFit'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 
 type Props = {
@@ -17,6 +17,11 @@ export function ItHandoverPrintPreview({ model, onClose }: Props) {
   const { t } = useI18n()
   const printRef = useRef<HTMLDivElement>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const { runFit } = usePrintFit(printRef, {
+    portrait: true,
+    shrinkOnly: true,
+    deps: [model],
+  })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -27,19 +32,11 @@ export function ItHandoverPrintPreview({ model, onClose }: Props) {
     return () => {
       window.removeEventListener('keydown', onKey)
       document.body.classList.remove('print-preview-open')
-      resetPrintFit(printRef.current)
     }
   }, [onClose])
 
-  useLayoutEffect(() => {
-    const id = requestAnimationFrame(() => {
-      fitPrintPages(printRef.current)
-    })
-    return () => cancelAnimationFrame(id)
-  }, [model])
-
   function handlePrint() {
-    fitPrintPages(printRef.current)
+    runFit()
     requestAnimationFrame(() => window.print())
   }
 
@@ -47,7 +44,7 @@ export function ItHandoverPrintPreview({ model, onClose }: Props) {
     if (!printRef.current) return
     setPdfBusy(true)
     try {
-      fitPrintPages(printRef.current)
+      runFit()
       const safeNo = model.act.number.replace(/[^\w.-]+/g, '_')
       await exportPrintAreaToPdf(printRef.current, `it_act_${safeNo}.pdf`)
     } finally {
@@ -56,7 +53,7 @@ export function ItHandoverPrintPreview({ model, onClose }: Props) {
   }
 
   const content = (
-    <div className="print-modal-root fixed inset-0 z-[110] flex flex-col bg-stone-900/60">
+    <div className="print-modal-root fixed inset-0 z-[420] flex flex-col bg-stone-900/60">
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <div>
           <h2 className="text-lg font-bold">{t('print.preview')}</h2>

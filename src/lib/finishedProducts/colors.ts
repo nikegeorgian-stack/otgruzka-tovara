@@ -50,15 +50,18 @@ export function resolveProductColor(
   return guessColorFromText(colorLogo)
 }
 
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
 export function productColorLabel(
   hex: string | undefined,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   if (!hex) return '—'
   const preset = PRODUCT_COLOR_PRESETS.find(
     (p) => p.hex.toLowerCase() === hex.toLowerCase(),
   )
-  if (preset) return locale === 'ka' ? preset.labelKa : preset.labelRu
+  if (preset) return labelRuKa(locale, preset.labelRu, preset.labelKa)
   return hex
 }
 

@@ -194,6 +194,22 @@ export function priceHistoryForItem(
     .sort((a, b) => b.date.localeCompare(a.date))
 }
 
+/** Последняя цена прихода; иначе средняя; иначе цена карточки. */
+export function resolveItemUnitPrice(
+  warehouse: WarehouseStore,
+  itemId: string,
+): number | null {
+  const history = priceHistoryForItem(warehouse.movements, itemId)
+  if (history[0]?.unitCost != null && history[0].unitCost > 0) {
+    return Math.round(history[0].unitCost * 100) / 100
+  }
+  const avg = avgCostForItem(warehouse.movements, itemId)
+  if (avg != null && avg > 0) return Math.round(avg * 100) / 100
+  const item = warehouse.items.find((i) => i.id === itemId)
+  if (item?.price != null && item.price > 0) return Math.round(item.price * 100) / 100
+  return null
+}
+
 export type ExpiringBatchRow = {
   itemId: string
   name: string

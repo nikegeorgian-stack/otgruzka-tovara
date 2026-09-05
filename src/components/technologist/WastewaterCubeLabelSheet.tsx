@@ -1,10 +1,11 @@
 import { BRAND } from '@/lib/brand'
+import type { Locale } from '@/i18n/types'
 import { formatWwDate, type WastewaterCubeLabelModel } from '@/lib/wastewater/cubeLabel'
 import { formatQty } from '@/lib/warehouse/stock'
 
 type Props = {
   labels: WastewaterCubeLabelModel[]
-  locale: 'ru' | 'ka'
+  locale: Locale
 }
 
 export function WastewaterCubeLabelSheet({ labels, locale }: Props) {

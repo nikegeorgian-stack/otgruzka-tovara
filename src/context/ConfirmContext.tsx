@@ -108,6 +108,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <AppDialog
           open
           size="md"
+          ephemeral
           onClose={() => close(false)}
           title={state.opts.title ?? t('common.confirmTitle')}
           footer={
@@ -134,6 +135,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <AppDialog
           open
           size="md"
+          ephemeral
           onClose={() => close(true)}
           title={state.opts.title ?? t('common.notice')}
           footer={
@@ -153,6 +155,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <AppDialog
           open
           size="md"
+          ephemeral
           blockBackdropClose
           disableEnterSubmit
           onClose={() => closeUnsaved('cancel')}

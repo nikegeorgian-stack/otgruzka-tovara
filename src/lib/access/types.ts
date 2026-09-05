@@ -1,5 +1,6 @@
 import type { UserViewDefaults } from '@/lib/viewDefaults/types'
 import type { ViewId } from '@/lib/types'
+import type { TaskAccessLevel } from '@/lib/tasks/types'
 
 /** Роль / должность в системе */
 export type AccessRoleId =
@@ -12,8 +13,24 @@ export type AccessRoleId =
   | 'procurement_manager'
   | 'chief_engineer'
   | 'technologist'
+  /** ОТК / отдел качества */
+  | 'otc'
   | 'mixer'
   | 'finance'
+  /** Только личный кабинет (привязка к карточке сотрудника) */
+  | 'employee'
+  /** IT-офис без полного sysadmin */
+  | 'it_specialist'
+  /** Заказы клиента и погрузка без полного директора */
+  | 'sales_dispatcher'
+  /** Списки сотрудников: фильтр, печать, Excel — без ЗП и полного HR */
+  | 'office_manager'
+  /** Терминал явки на стене / телефоне — только киоск */
+  | 'timeclock'
+  /** Кухня: заказы обедов, принятие дня, отчёты — без HR/цен */
+  | 'cook'
+  /** Секретарь: протоколы совещаний, поручения, ознакомление — без финансов/склада */
+  | 'secretary'
 
 export type AppUser = {
   id: string
@@ -34,6 +51,77 @@ export type AppUser = {
   webAccount?: boolean
   /** Индивидуальные разделы (если заданы — вместо roleViews для роли) */
   webViews?: import('@/lib/types').ViewId[]
+  /**
+   * Индивидуальные вкладки справочников (если заданы — вместо матрицы роли).
+   * Пустой / не задан при сохранении = наследовать с должности.
+   */
+  directorySections?: import('@/lib/directories/types').DirectorySection[]
+  /** Индивидуальный уровень доступа к разделу «Задачи». */
+  taskAccessLevel?: TaskAccessLevel
+  /** Индивидуальный список досок задач (сужение). */
+  taskBoards?: string[]
+  /**
+   * Индивидуальный уровень табеля (приоритет над roleTimesheetAccess).
+   * `none` | `view` | `edit`. Не задан — берётся с должности.
+   */
+  timesheetLevel?: 'none' | 'view' | 'edit'
+  /**
+   * Бригады, которые видит в табеле.
+   * Задан массив (в т.ч. пустой) — жёсткий список; не задан — политика роли / весь завод.
+   */
+  timesheetViewBrigades?: string[]
+  /**
+   * Бригады, которые может править (только при timesheetLevel/роли = edit).
+   * Не задан при edit — как view или весь завод / scoped-роль.
+   */
+  timesheetEditBrigades?: string[]
+  /** После сброса пароля админом — пользователь задаёт свой при входе */
+  mustChangePassword?: boolean
+  /** Двухфазное удаление — доступ отключён, Auth delete в outbox. */
+  pendingDeletion?: boolean
+  /** Связь с externalEffects.outbox operationId. */
+  externalEffectOperationId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Временная подмена мастера цеха — документ с периодом действия. */
+export type WorkshopMasterCoverageStatus = 'draft' | 'posted' | 'ended'
+
+export type WorkshopMasterCoverage = {
+  id: string
+  /** Номер документа, напр. ПМ-2026-001 */
+  number: string
+  /** draft — черновик (ACL нет); posted — действует в периоде; ended — снята */
+  status: WorkshopMasterCoverageStatus
+  /** Кто подменяет */
+  coverUserId: string
+  /** Кого замещают */
+  absentUserId: string
+  /** Снимок бригад на момент выдачи */
+  brigades: string[]
+  /** YYYY-MM-DD включительно */
+  fromDate: string
+  toDate: string
+  note?: string
+  createdBy?: string
+  createdByName?: string
+  createdAt: string
+  postedAt?: string
+  postedBy?: string
+  postedByName?: string
+  /** Досрочное снятие (ISO) */
+  endedAt?: string
+}
+
+/** Произвольная группа учёток (админ-панель). */
+export type AccessUserGroup = {
+  id: string
+  name: string
+  /** Краткая пометка для админа */
+  note?: string
+  /** id учёток (AppUser.id) */
+  userIds: string[]
   createdAt: string
   updatedAt: string
 }
@@ -42,20 +130,71 @@ export type AccessStore = {
   users: AppUser[]
   /** Какие разделы (интерфейсы) доступны каждой роли */
   roleViews: Record<AccessRoleId, ViewId[]>
+  /**
+   * Вкладки справочников по роли (если заданы — вместо DEFAULT_ROLE_DIRECTORY_SECTIONS).
+   * Не задано для роли — дефолт из `lib/directories/access`.
+   */
+  roleDirectorySections?: Partial<
+    Record<AccessRoleId, import('@/lib/directories/types').DirectorySection[]>
+  >
+  /**
+   * Право на табель по роли: none | view | edit.
+   * edit у workshop_master — только бригады учётки; у остальных edit — весь завод.
+   */
+  roleTimesheetAccess?: Partial<Record<AccessRoleId, 'none' | 'view' | 'edit'>>
   /** Разрешить уходить в минус по остатку (замес / расход) */
   roleAllowNegativeStock?: Partial<Record<AccessRoleId, boolean>>
   /** Разрешить сторнирование складских документов */
   roleAllowDocumentCancel?: Partial<Record<AccessRoleId, boolean>>
+  /** Явное право ОТК / директора / технолога на выпуск QC-партии */
+  roleAllowQcRelease?: Partial<Record<AccessRoleId, boolean>>
+  /**
+   * PHASE P1A/P1B — явное право перераспределения резервов (chief_engineer и др.).
+   * Роль сама по себе не даёт право (кроме operations_director).
+   */
+  roleAllowReservationReallocation?: Partial<Record<AccessRoleId, boolean>>
+  /**
+   * PHASE P1B — user ids acting as planner for reservation reallocation
+   * (no dedicated planner AccessRoleId in this project).
+   */
+  userAllowReservationReallocation?: string[]
+  /**
+   * PHASE P1B — явное полномочие «Главный технолог» / утверждение рецептур.
+   * Для роли technologist: false/absent = только draft; true = approve.
+   * Не выдаётся автоматически всем технологам.
+   */
+  roleAllowRecipeApproval?: Partial<Record<AccessRoleId, boolean>>
+  /** Подмены мастеров цеха (админ / HR). */
+  workshopMasterCoverages?: WorkshopMasterCoverage[]
+  /**
+   * PHASE P1B — явные линии производства для учётки мастера (fail-closed если пусто у master).
+   * Ключ = user.id
+   */
+  workshopMasterProductionLines?: Record<string, string[]>
+  /** Пользовательские группы учёток (фильтр / пакетные права в админке). */
+  userGroups?: AccessUserGroup[]
+  /** Доступ к разделу «Задачи» по роли. */
+  roleTaskAccess?: Partial<Record<AccessRoleId, TaskAccessLevel>>
+  /** Доски задач по роли (board id). */
+  roleTaskBoards?: Partial<Record<AccessRoleId, string[]>>
 }
 
 /** Роли, для которых администратор может включить сторно документов */
 export const DOCUMENT_CANCEL_ROLES: AccessRoleId[] = ['warehouse_keeper']
 
+/** Роли, для которых администратор может включить QC release/regrade/reject. */
+export const QC_RELEASE_ROLES: AccessRoleId[] = ['operations_director', 'technologist']
+
 /** Отрицательный остаток отключён глобально. */
 export const NEGATIVE_STOCK_ROLES: AccessRoleId[] = []
 
+/** PHASE P1B — роли, которым можно отдельно назначить утверждение рецептур (главный технолог). */
+export const RECIPE_APPROVAL_ROLES: AccessRoleId[] = ['technologist']
+
 /** Разделы приложения, которыми управляет администратор */
 export const MANAGED_VIEWS: ViewId[] = [
+  'my',
+  'timeclock',
   'month',
   'summary',
   'production',
@@ -67,10 +206,17 @@ export const MANAGED_VIEWS: ViewId[] = [
   'finance',
   'directories',
   'technologist',
+  'otc',
   'mixer',
   'director',
   'journals',
+  'engineer_log',
+  'tasks',
   'it',
+  'office',
+  'meals',
+  'protocols',
+  'org_tree',
   'settings',
 ]
 

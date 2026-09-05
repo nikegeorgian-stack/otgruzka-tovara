@@ -7,6 +7,7 @@ import { WarehouseDailyIssuePrintSheet } from '@/components/warehouse/WarehouseD
 import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { usePrintFit } from '@/hooks/usePrintFit'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
 import { sessionLineCount, sessionTotalQty } from '@/lib/warehouse/dailyIssue'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
@@ -28,12 +29,19 @@ type Props = {
   onPost: (
     sessionId: string,
     options?: { allowNegativeStock?: boolean },
-  ) => {
-    ok: boolean
-    reason?: string
-    detail?: string
-    documentNumber?: string
-  }
+  ) =>
+    | {
+        ok: boolean
+        reason?: string
+        detail?: string
+        documentNumber?: string
+      }
+    | Promise<{
+        ok: boolean
+        reason?: string
+        detail?: string
+        documentNumber?: string
+      }>
   onClose: () => void
 }
 
@@ -113,6 +121,12 @@ export function WarehouseDailyIssueModal({
     }
   }, [previewOpen])
 
+  const { runFit } = usePrintFit(printRef, {
+    shrinkOnly: true,
+    enabled: previewOpen,
+    deps: [session, previewOpen, printMeta],
+  })
+
   useEffect(() => {
     searchRef.current?.focus()
   }, [])
@@ -187,7 +201,7 @@ export function WarehouseDailyIssueModal({
       }
       if (!(await confirm({ message: `${t('warehouse.issue.overdraftConfirm')}\n\n${detail}`, danger: true }))) return
     }
-    const result = onPost(sessionId, { allowNegativeStock })
+    const result = await Promise.resolve(onPost(sessionId, { allowNegativeStock }))
     if (!result.ok) {
       if (result.reason === 'stock') {
         setError(tf('warehouse.dailyIssue.stockError', { items: result.detail ?? '' }))
@@ -216,6 +230,7 @@ export function WarehouseDailyIssueModal({
     if (!printRef.current) return
     setPdfBusy(true)
     try {
+      runFit()
       await exportPrintAreaToPdf(
         printRef.current,
         `daily-issue-${session?.number ?? 'sheet'}.pdf`,
@@ -232,7 +247,7 @@ export function WarehouseDailyIssueModal({
   const totalQty = sessionTotalQty(session)
 
   const modal = (
-    <div className="fixed inset-0 z-[130] flex flex-col bg-stone-100">
+    <div className="fixed inset-0 z-[420] flex flex-col bg-stone-100">
       {/* Header */}
       <header className="shrink-0 border-b border-stone-200 bg-white px-4 py-3 shadow-sm sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -476,7 +491,7 @@ export function WarehouseDailyIssueModal({
       </footer>
 
       {previewOpen && session && (
-        <div className="print-modal-root fixed inset-0 z-[140] flex flex-col bg-stone-900/70">
+        <div className="print-modal-root fixed inset-0 z-[430] flex flex-col bg-stone-900/70">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 print:hidden">
             <p className="text-sm font-semibold text-white">
               {session.number} — {t('warehouse.dailyIssue.printPreview')}
@@ -488,7 +503,14 @@ export function WarehouseDailyIssueModal({
               <Button variant="secondary" size="sm" onClick={handlePdf} disabled={pdfBusy}>
                 {pdfBusy ? '…' : 'PDF'}
               </Button>
-              <Button variant="primary" size="sm" onClick={() => window.print()}>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  runFit()
+                  requestAnimationFrame(() => window.print())
+                }}
+              >
                 {t('warehouse.dailyIssue.print')}
               </Button>
             </div>

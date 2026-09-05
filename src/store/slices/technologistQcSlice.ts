@@ -4,13 +4,17 @@ import {
   computeImpregnationQc,
   computeIncomingControl,
 } from '@/lib/technologist/calc'
+import { normalizeShiftHandoff } from '@/lib/technologist/init'
 import type {
   EadCalculationRecord,
   EadControlRecord,
   ImpregnationQcRecord,
   IncomingControlRecord,
   RoomClimateRecord,
+  ShiftHandoffRecord,
+  ShiftHandoffUrgency,
 } from '@/lib/technologist/types'
+import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { type StoreSliceDeps } from '../storeApi'
 
 export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
@@ -41,6 +45,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeEadCalculation(id: string) {
+      recordSliceExplicitDelete('technologistQc.eadCalculations', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -67,6 +72,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeEadControl(id: string) {
+      recordSliceExplicitDelete('technologistQc.eadControls', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -109,6 +115,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeIncomingControl(id: string) {
+      recordSliceExplicitDelete('technologistQc.incomingControls', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -143,6 +150,7 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeImpregnationQc(id: string) {
+      recordSliceExplicitDelete('technologistQc.impregnationQc', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
@@ -170,11 +178,122 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
     },
 
     removeRoomClimateReading(id: string) {
+      recordSliceExplicitDelete('technologistQc.roomClimateLog', id)
       setStore((s) => ({
         ...s,
         technologistQc: {
           ...s.technologistQc,
           roomClimateLog: s.technologistQc.roomClimateLog.filter((r) => r.id !== id),
+        },
+      }))
+    },
+
+    upsertShiftHandoff(
+      entry: Omit<ShiftHandoffRecord, 'id' | 'createdAt' | 'updatedAt' | 'acknowledgements'> & {
+        id?: string
+        acknowledgements?: ShiftHandoffRecord['acknowledgements']
+      },
+    ) {
+      const now = new Date().toISOString()
+      const row = normalizeShiftHandoff({
+        ...entry,
+        id: entry.id ?? crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        acknowledgements: entry.acknowledgements ?? [],
+      })
+      if (!row) return
+      setStore((s) => {
+        const list = s.technologistQc.shiftHandoffs ?? []
+        const idx = list.findIndex((h) => h.id === row.id)
+        const shiftHandoffs =
+          idx >= 0
+            ? list.map((h, i) =>
+                i === idx
+                  ? {
+                      ...row,
+                      createdAt: h.createdAt,
+                      acknowledgements: h.acknowledgements,
+                      updatedAt: now,
+                    }
+                  : h,
+              )
+            : [row, ...list]
+        return {
+          ...s,
+          technologistQc: { ...s.technologistQc, shiftHandoffs },
+        }
+      })
+    },
+
+    acknowledgeShiftHandoff(
+      id: string,
+      who: { userId?: string; userName: string },
+    ) {
+      const at = new Date().toISOString()
+      setStore((s) => {
+        const list = s.technologistQc.shiftHandoffs ?? []
+        return {
+          ...s,
+          technologistQc: {
+            ...s.technologistQc,
+            shiftHandoffs: list.map((h) => {
+              if (h.id !== id || h.status !== 'open') return h
+              const already = who.userId
+                ? h.acknowledgements.some((a) => a.userId === who.userId)
+                : h.acknowledgements.some((a) => a.userName === who.userName)
+              if (already) return h
+              return {
+                ...h,
+                updatedAt: at,
+                acknowledgements: [
+                  ...h.acknowledgements,
+                  {
+                    userId: who.userId,
+                    userName: who.userName,
+                    at,
+                  },
+                ],
+              }
+            }),
+          },
+        }
+      })
+    },
+
+    setShiftHandoffStatus(id: string, status: ShiftHandoffRecord['status']) {
+      const at = new Date().toISOString()
+      setStore((s) => ({
+        ...s,
+        technologistQc: {
+          ...s.technologistQc,
+          shiftHandoffs: (s.technologistQc.shiftHandoffs ?? []).map((h) =>
+            h.id === id ? { ...h, status, updatedAt: at } : h,
+          ),
+        },
+      }))
+    },
+
+    removeShiftHandoff(id: string) {
+      recordSliceExplicitDelete('technologistQc.shiftHandoffs', id)
+      setStore((s) => ({
+        ...s,
+        technologistQc: {
+          ...s.technologistQc,
+          shiftHandoffs: (s.technologistQc.shiftHandoffs ?? []).filter((h) => h.id !== id),
+        },
+      }))
+    },
+
+    setShiftHandoffUrgency(id: string, urgency: ShiftHandoffUrgency) {
+      const at = new Date().toISOString()
+      setStore((s) => ({
+        ...s,
+        technologistQc: {
+          ...s.technologistQc,
+          shiftHandoffs: (s.technologistQc.shiftHandoffs ?? []).map((h) =>
+            h.id === id ? { ...h, urgency, updatedAt: at } : h,
+          ),
         },
       }))
     },

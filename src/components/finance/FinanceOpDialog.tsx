@@ -5,6 +5,7 @@ import { FormField } from '@/components/ui/FormField'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
 import { formatGel } from '@/lib/payroll'
+import { PRODUCTIVITY_BONUS_REASON } from '@/lib/finance/adjustmentReasons'
 import type { FinanceAdjustmentKind, FinancePaymentMethod } from '@/lib/finance/types'
 
 export type FinanceOpKind = 'advance' | 'adjustment' | 'payout'
@@ -48,6 +49,7 @@ export function FinanceOpDialog({ kind, employeeName, accrued, remaining, onClos
   // adjustment
   const [adjKind, setAdjKind] = useState<FinanceAdjustmentKind>('bonus')
   const [reason, setReason] = useState('')
+  const productivityBonus = adjKind === 'bonus' && reason === PRODUCTIVITY_BONUS_REASON
 
   const title =
     kind === 'advance'
@@ -90,7 +92,13 @@ export function FinanceOpDialog({ kind, employeeName, accrued, remaining, onClos
       setError(t('fin.adj.reasonRequired'))
       return
     }
-    onSubmit({ op: 'adjustment', kind: adjKind, amount: amt, reason: reason.trim(), date })
+    onSubmit({
+      op: 'adjustment',
+      kind: adjKind,
+      amount: amt,
+      reason: productivityBonus ? PRODUCTIVITY_BONUS_REASON : reason.trim(),
+      date,
+    })
   }
 
   return (
@@ -126,18 +134,42 @@ export function FinanceOpDialog({ kind, employeeName, accrued, remaining, onClos
               <button
                 type="button"
                 className={`flex-1 rounded-sm border px-3 py-2 text-sm font-medium ${adjKind === 'bonus' ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-grid'}`}
-                onClick={() => setAdjKind('bonus')}
+                onClick={() => {
+                  setAdjKind('bonus')
+                  if (reason === PRODUCTIVITY_BONUS_REASON) setReason('')
+                }}
               >
                 {t('fin.adj.bonus')}
               </button>
               <button
                 type="button"
                 className={`flex-1 rounded-sm border px-3 py-2 text-sm font-medium ${adjKind === 'penalty' ? 'border-red-400 bg-red-50 text-red-800' : 'border-grid'}`}
-                onClick={() => setAdjKind('penalty')}
+                onClick={() => {
+                  setAdjKind('penalty')
+                  if (reason === PRODUCTIVITY_BONUS_REASON) setReason('')
+                }}
               >
                 {t('fin.adj.penalty')}
               </button>
             </div>
+          </FormField>
+        )}
+
+        {kind === 'adjustment' && adjKind === 'bonus' && (
+          <FormField label={t('fin.adj.productivity')} hint={t('fin.adj.productivityHint')}>
+            <button
+              type="button"
+              className={`w-full rounded-sm border px-3 py-2 text-left text-sm font-medium ${
+                productivityBonus
+                  ? 'border-teal-400 bg-teal-50 text-teal-900'
+                  : 'border-grid text-stone-700 hover:border-stone-300'
+              }`}
+              onClick={() =>
+                setReason(productivityBonus ? '' : PRODUCTIVITY_BONUS_REASON)
+              }
+            >
+              {t('fin.adj.productivity')}
+            </button>
           </FormField>
         )}
 
@@ -183,7 +215,7 @@ export function FinanceOpDialog({ kind, employeeName, accrued, remaining, onClos
           </FormField>
         )}
 
-        {kind === 'adjustment' && (
+        {kind === 'adjustment' && !productivityBonus && (
           <FormField label={t('fin.adj.reason')}>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} />
           </FormField>

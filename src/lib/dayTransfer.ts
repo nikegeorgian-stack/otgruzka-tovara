@@ -85,6 +85,57 @@ export function clearDayTransfer(
   return { ...sheet, dayTransfers }
 }
 
+/**
+ * Снять временный перевод за день: очистить факт гостя, вернуть факт дома к плану.
+ * Нужно при повторном «на этот день» и при отмене перевода в перекличке.
+ */
+export function revokeDayTransfer(
+  sheet: MonthSheet,
+  employeeId: string,
+  dateKey: string,
+): MonthSheet {
+  const tr = getDayTransfer(sheet, employeeId, dateKey)
+  if (!tr) return sheet
+  let next = sheet
+  const guestFact = getFactMark(next, tr.toRowId, dateKey)
+  if (guestFact) {
+    next = setFactWithOverride(next, tr.toRowId, dateKey, '')
+  }
+  const homePlan = (next.plan[tr.fromRowId]?.[dateKey] ?? '') as DayCode
+  next = setFactWithOverride(next, tr.fromRowId, dateKey, homePlan)
+  return clearDayTransfer(next, employeeId, dateKey)
+}
+
+/**
+ * Перед новым переводом: снять старый перевод и убрать рабочие факты с других строк
+ * сотрудника (кроме целевой), чтобы не оставались «хвосты» двойной оплаты.
+ */
+export function prepareDayTransfer(
+  sheet: MonthSheet,
+  employeeId: string,
+  dateKey: string,
+  keepRowId?: string,
+): MonthSheet {
+  const tr = getDayTransfer(sheet, employeeId, dateKey)
+  let next = sheet
+  if (tr) {
+    if (tr.toRowId !== keepRowId) {
+      const guestFact = getFactMark(next, tr.toRowId, dateKey)
+      if (guestFact) next = setFactWithOverride(next, tr.toRowId, dateKey, '')
+    }
+    next = clearDayTransfer(next, employeeId, dateKey)
+  }
+  for (const row of next.rows) {
+    if (row.employeeId !== employeeId) continue
+    if (keepRowId && row.id === keepRowId) continue
+    const mark = getFactMark(next, row.id, dateKey)
+    if (isWorkCode(mark)) {
+      next = setFactWithOverride(next, row.id, dateKey, '')
+    }
+  }
+  return next
+}
+
 export function setFactWithOverride(
   sheet: MonthSheet,
   rowId: string,

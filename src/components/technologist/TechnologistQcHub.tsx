@@ -37,7 +37,7 @@ export function TechnologistQcHub(props: Props) {
 
   return (
     <div>
-      <TabBar tabs={tabs} value={sub} onChange={setSub} className="mb-4" />
+      <TabBar coachPrefix="technologistQc" tabs={tabs} value={sub} onChange={setSub} className="mb-4" />
       {sub === 'eadCalc' && (
         <TechnologistEadCalcPanel
           store={props.qcStore}

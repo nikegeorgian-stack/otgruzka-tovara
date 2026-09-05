@@ -32,6 +32,7 @@ export function searchNomenclature(
 
   for (const item of active) {
     const name = normSearch(item.name)
+    const technicalName = normSearch(item.technicalName ?? '')
     const sku = normSearch(item.sku ?? '')
     const barcode = normSearch(item.barcode ?? '')
     const internalCode = normSearch(item.internalCode ?? '')
@@ -39,10 +40,10 @@ export function searchNomenclature(
 
     let score = 0
     if (internalCode === q || sku === q || barcode === q) score = 100
-    else if (name.startsWith(q)) score = 80
+    else if (technicalName.startsWith(q) || name.startsWith(q)) score = 80
     else if (internalCode.startsWith(q) || sku.startsWith(q) || barcode.startsWith(q))
       score = 75
-    else if (name.includes(q)) score = 60
+    else if (technicalName.includes(q) || name.includes(q)) score = 60
     else if (cat.includes(q)) score = 40
     else if (internalCode.includes(q) || sku.includes(q) || barcode.includes(q)) score = 35
     else continue

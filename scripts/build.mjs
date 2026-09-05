@@ -11,14 +11,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const src = path.join(root, 'fst-web', 'dist')
 const out = path.join(root, 'dist')
 
-/** Public Firebase web config (API key is client-visible). Ensures Vercel build always has VITE_* . */
+/**
+ * Public Firebase web config (API key is client-visible).
+ * process.env (Vercel Preview/Production) wins — firebase.client.json only fills missing keys
+ * so Preview staging VITE_* is never overwritten by the committed production client JSON.
+ */
 function loadFirebaseBuildEnv() {
   const env = { ...process.env }
   const jsonPath = path.join(root, 'fst-web', 'firebase.client.json')
   if (existsSync(jsonPath)) {
     const cfg = JSON.parse(readFileSync(jsonPath, 'utf8'))
     for (const [k, v] of Object.entries(cfg)) {
-      if (v) env[k] = String(v)
+      if (v && !env[k]) env[k] = String(v)
     }
   }
   const dotEnv = path.join(root, 'fst-web', '.env.production')

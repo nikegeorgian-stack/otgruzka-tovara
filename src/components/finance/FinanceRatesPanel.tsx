@@ -6,8 +6,10 @@ import { Input } from '@/components/ui/Input'
 import { SortableTableHeader } from '@/components/ui/SortableTableHeader'
 import { useI18n } from '@/context/I18nContext'
 import { hasIndividualSalary, salaryFieldsFromPosition } from '@/lib/finance/salary'
+import { StaffRateField } from '@/components/hr/StaffRateField'
 import { filterEmployeesForDate, filterEmployeesForMonth } from '@/lib/hr/employeeActive'
 import { sortEmployees, type EmployeeSortKey } from '@/lib/hr/employeeSort'
+import { employeeStaffRate, syncHourlyFromMonthly } from '@/lib/payroll'
 import { toggleTableSort, type TableSortState } from '@/lib/ui/tableSort'
 import type { Employee, HrPosition } from '@/lib/types'
 
@@ -28,9 +30,17 @@ export function FinanceRatesPanel({
   const { t, locale, employeeNameLines } = useI18n()
   const [q, setQ] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Record<string, { hourlyRate: string; monthlySalary: string }>>(
-    {},
-  )
+  const [draft, setDraft] = useState<
+    Record<
+      string,
+      {
+        hourlyRate: string
+        monthlySalary: string
+        monthlyBonus: string
+        monthPremium: string
+      }
+    >
+  >({})
   const [employeeSort, setEmployeeSort] = useState<TableSortState<EmployeeSortKey>>({
     key: 'name',
     dir: 'asc',
@@ -72,15 +82,23 @@ export function FinanceRatesPanel({
   }
 
   function getDraft(emp: Employee) {
+    const premium =
+      month && emp.monthPremiums?.[month] != null ? String(emp.monthPremiums[month]) : ''
     return (
       draft[emp.id] ?? {
         hourlyRate: emp.hourlyRate != null ? String(emp.hourlyRate) : '',
         monthlySalary: emp.monthlySalary != null ? String(emp.monthlySalary) : '',
+        monthlyBonus: emp.monthlyBonus != null ? String(emp.monthlyBonus) : '',
+        monthPremium: premium,
       }
     )
   }
 
-  function setField(id: string, field: 'hourlyRate' | 'monthlySalary', value: string) {
+  function setField(
+    id: string,
+    field: 'hourlyRate' | 'monthlySalary' | 'monthlyBonus' | 'monthPremium',
+    value: string,
+  ) {
     setDraft((prev) => {
       const emp = employees.find((e) => e.id === id)
       if (!emp) return prev
@@ -88,8 +106,15 @@ export function FinanceRatesPanel({
         prev[id] ?? {
           hourlyRate: emp.hourlyRate != null ? String(emp.hourlyRate) : '',
           monthlySalary: emp.monthlySalary != null ? String(emp.monthlySalary) : '',
+          monthlyBonus: emp.monthlyBonus != null ? String(emp.monthlyBonus) : '',
+          monthPremium:
+            month && emp.monthPremiums?.[month] != null
+              ? String(emp.monthPremiums[month])
+              : '',
         }
-      return { ...prev, [id]: { ...cur, [field]: value } }
+      const next = { ...cur, [field]: value }
+      // ₾/ч от оклада считается в расчёте от плана месяца — не подставляем /165.
+      return { ...prev, [id]: next }
     })
   }
 
@@ -99,20 +124,42 @@ export function FinanceRatesPanel({
     const monthlySalary = d.monthlySalary.trim()
       ? Number(d.monthlySalary.replace(',', '.'))
       : undefined
+    const monthlyBonus = d.monthlyBonus.trim()
+      ? Number(d.monthlyBonus.replace(',', '.'))
+      : undefined
+    const monthPremiumRaw = d.monthPremium.trim()
+      ? Number(d.monthPremium.replace(',', '.'))
+      : undefined
     if (
       (d.hourlyRate.trim() && !Number.isFinite(hourlyRate)) ||
-      (d.monthlySalary.trim() && !Number.isFinite(monthlySalary))
+      (d.monthlySalary.trim() && !Number.isFinite(monthlySalary)) ||
+      (d.monthlyBonus.trim() && !Number.isFinite(monthlyBonus)) ||
+      (d.monthPremium.trim() && !Number.isFinite(monthPremiumRaw))
     ) {
       setNotice(t('finance.rates.invalidNumber'))
       return
     }
-    const individualSalary = opts?.individualSalary ?? emp.individualSalary
-    onSaveEmployee({
-      ...emp,
-      hourlyRate,
-      monthlySalary,
-      individualSalary,
-    })
+    const individualSalary = opts?.individualSalary ?? emp.individualSalary ?? Boolean(monthlySalary)
+    let monthPremiums = emp.monthPremiums ? { ...emp.monthPremiums } : undefined
+    if (month) {
+      const nextMap = { ...(monthPremiums ?? {}) }
+      if (monthPremiumRaw != null && monthPremiumRaw > 0) {
+        nextMap[month] = Math.round(monthPremiumRaw)
+      } else {
+        delete nextMap[month]
+      }
+      monthPremiums = Object.keys(nextMap).length ? nextMap : undefined
+    }
+    onSaveEmployee(
+      syncHourlyFromMonthly({
+        ...emp,
+        hourlyRate,
+        monthlySalary,
+        monthlyBonus,
+        individualSalary,
+        monthPremiums,
+      }),
+    )
     setDraft((prev) => {
       const next = { ...prev }
       delete next[emp.id]
@@ -125,6 +172,20 @@ export function FinanceRatesPanel({
     onSaveEmployee({ ...emp, individualSalary: checked })
     setNotice(
       checked ? t('finance.rates.individualOn') : t('finance.rates.individualOff'),
+    )
+  }
+
+  function toggleIndividualBonus(emp: Employee, checked: boolean) {
+    onSaveEmployee({ ...emp, individualBonus: checked })
+    setNotice(
+      checked ? t('finance.rates.individualBonusOn') : t('finance.rates.individualBonusOff'),
+    )
+  }
+
+  function toggleSalaryPercentBonus(emp: Employee, checked: boolean) {
+    onSaveEmployee({ ...emp, bonusPercentFromSalary: checked })
+    setNotice(
+      checked ? t('finance.rates.salaryPercentOn') : t('finance.rates.salaryPercentOff'),
     )
   }
 
@@ -204,8 +265,23 @@ export function FinanceRatesPanel({
                 onSort={handleEmployeeSort}
               />
               <th>{t('finance.rates.positionSalary')}</th>
+              <th title={t('finance.rates.staffRateHint')}>{t('finance.rates.staffRate')}</th>
               <th>{t('finance.rates.hourly')}</th>
               <th>{t('finance.rates.monthly')}</th>
+              <th title={t('finance.rates.individualBonus')}>
+                {t('finance.rates.individualBonusShort')}
+              </th>
+              <th title={t('finance.rates.monthlyBonusHint')}>{t('finance.rates.monthlyBonus')}</th>
+              <th title={t('finance.rates.monthPremiumHint')}>
+                {t('finance.rates.monthPremium')}
+                {month ? (
+                  <span className="ml-1 font-normal text-stone-400">{month.slice(5)}</span>
+                ) : null}
+              </th>
+              <th title={t('finance.rates.salaryPercent')}>
+                {t('finance.rates.salaryPercentShort')}
+              </th>
+              <th title={t('finance.rates.advanceRule')}>{t('finance.rates.advanceRuleShort')}</th>
               <th />
             </tr>
           </thead>
@@ -218,7 +294,12 @@ export function FinanceRatesPanel({
                 draft[emp.id] !== undefined ||
                 d.hourlyRate !== (emp.hourlyRate != null ? String(emp.hourlyRate) : '') ||
                 d.monthlySalary !==
-                  (emp.monthlySalary != null ? String(emp.monthlySalary) : '')
+                  (emp.monthlySalary != null ? String(emp.monthlySalary) : '') ||
+                d.monthlyBonus !== (emp.monthlyBonus != null ? String(emp.monthlyBonus) : '') ||
+                d.monthPremium !==
+                  (month && emp.monthPremiums?.[month] != null
+                    ? String(emp.monthPremiums[month])
+                    : '')
               return (
                 <tr
                   key={emp.id}
@@ -262,6 +343,26 @@ export function FinanceRatesPanel({
                       </button>
                     ) : null}
                   </td>
+                  <td className="px-2 py-2">
+                    <StaffRateField
+                      compact
+                      value={emp.staffRate}
+                      customOptionLabel={t('finance.rates.staffRateCustom')}
+                      onChange={(staffRate) => {
+                        onSaveEmployee({ ...emp, staffRate })
+                        setNotice(t('finance.rates.saved'))
+                      }}
+                    />
+                    {employeeStaffRate(emp) !== 1 && emp.monthlySalary != null ? (
+                      <div className="mt-0.5 text-[10px] tabular-nums text-teal-800">
+                        →{' '}
+                        {Math.round(emp.monthlySalary * employeeStaffRate(emp)).toLocaleString(
+                          'ru-RU',
+                        )}{' '}
+                        ₾
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2">
                     <input
                       type="text"
@@ -279,6 +380,107 @@ export function FinanceRatesPanel({
                       value={d.monthlySalary}
                       onChange={(e) => setField(emp.id, 'monthlySalary', e.target.value)}
                     />
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      className="rounded border-amber-400"
+                      checked={emp.individualBonus ?? false}
+                      title={t('finance.rates.individualBonus')}
+                      onChange={(e) => toggleIndividualBonus(emp, e.target.checked)}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-24 rounded border border-grid px-2 py-1 font-mono text-sm disabled:opacity-40"
+                      value={d.monthlyBonus}
+                      disabled={!emp.individualBonus}
+                      title={t('finance.rates.monthlyBonusHint')}
+                      onChange={(e) => setField(emp.id, 'monthlyBonus', e.target.value)}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-24 rounded border border-grid px-2 py-1 font-mono text-sm disabled:opacity-40"
+                      value={d.monthPremium}
+                      disabled={!month}
+                      title={
+                        month
+                          ? t('finance.rates.monthPremiumHint')
+                          : t('finance.rates.monthPremiumNeedMonth')
+                      }
+                      placeholder={month ? '' : '—'}
+                      onChange={(e) => setField(emp.id, 'monthPremium', e.target.value)}
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      className="rounded border-amber-400"
+                      checked={emp.bonusPercentFromSalary ?? false}
+                      title={t('finance.rates.salaryPercent')}
+                      onChange={(e) => toggleSalaryPercentBonus(emp, e.target.checked)}
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="flex min-w-[8.5rem] flex-col gap-1">
+                      <select
+                        className="rounded border border-grid px-1 py-1 text-xs"
+                        value={emp.advanceRule ?? 'default'}
+                        title={t('finance.rates.advanceRule')}
+                        onChange={(e) => {
+                          const advanceRule = e.target.value as
+                            | 'default'
+                            | 'percent'
+                            | 'fixed'
+                            | 'none'
+                          onSaveEmployee({ ...emp, advanceRule })
+                          setNotice(t('finance.rates.saved'))
+                        }}
+                      >
+                        <option value="default">{t('finance.rates.advanceDefault')}</option>
+                        <option value="percent">{t('finance.rates.advancePercent')}</option>
+                        <option value="fixed">{t('finance.rates.advanceFixed')}</option>
+                        <option value="none">{t('finance.rates.advanceNone')}</option>
+                      </select>
+                      {(emp.advanceRule === 'percent' || emp.advanceRule === 'fixed') && (
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="w-full rounded border border-grid px-1 py-0.5 font-mono text-xs"
+                          placeholder={
+                            emp.advanceRule === 'percent' ? '%' : '₾'
+                          }
+                          defaultValue={
+                            emp.advanceRule === 'percent'
+                              ? emp.advancePercent != null
+                                ? String(emp.advancePercent)
+                                : ''
+                              : emp.advanceFixedAmount != null
+                                ? String(emp.advanceFixedAmount)
+                                : ''
+                          }
+                          key={`${emp.id}-${emp.advanceRule}`}
+                          onBlur={(e) => {
+                            const n = Number(e.target.value.replace(',', '.'))
+                            if (!Number.isFinite(n) || n < 0) return
+                            if (emp.advanceRule === 'percent') {
+                              onSaveEmployee({
+                                ...emp,
+                                advancePercent: Math.min(100, n),
+                              })
+                            } else {
+                              onSaveEmployee({ ...emp, advanceFixedAmount: n })
+                            }
+                            setNotice(t('finance.rates.saved'))
+                          }}
+                        />
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <Button

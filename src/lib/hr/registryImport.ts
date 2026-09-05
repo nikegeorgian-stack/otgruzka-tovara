@@ -1,16 +1,18 @@
-import type { WorkSheet } from 'xlsx'
+import type { SheetView, WorkbookView } from '@/lib/excel/workbookAdapter'
 import { detectBankFromIban, normalizeIban } from './banks'
 import { createNewEmployee } from './newEmployee'
 import { applyHrStatus } from './sync'
 import { suggestNextTabNumber } from './tabNumber'
 import type {
   EmployeeGender,
-  EmploymentAgreementKind,
   HrBankAccount,
   HrContractType,
   HrDocument,
+  HrEmploymentContract,
+  HrEmploymentContractStatus,
 } from './types'
 import type { Employee } from '@/lib/types'
+import { inferContractAgreementKind, isPendingContractTerm } from './contracts'
 
 export type RegistryContract = {
   idNumber: string
@@ -56,6 +58,7 @@ export type RegistryImportStats = {
   updated: number
   notInRegistry: number
   totalInRegistry: number
+  skipped?: number
 }
 
 export type RegistryImportResult = {
@@ -66,6 +69,16 @@ export type RegistryImportResult = {
 export type RegistryImportOptions = {
   /** Не сливать с текущей базой — только строки реестра */
   replaceExisting?: boolean
+  /** Сопоставление только по ФИО (RU/KA), без табельного № */
+  matchByName?: boolean
+  /** Кого создавать из «нет в базе» — ключ registryPersonKey. Если задан Set — только выбранные */
+  createMissingKeys?: Set<string>
+}
+
+export type RegistryImportAnalysis = {
+  matched: Array<{ person: RegistryPerson; employee: Employee }>
+  missingInDb: RegistryPerson[]
+  notInRegistry: Employee[]
 }
 
 const MONTHS_RU: Record<string, string> = {
@@ -93,6 +106,10 @@ function normalizeName(name: string): string {
 
 function excelDate(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return undefined
+    return v.toISOString().slice(0, 10)
+  }
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10)
   if (typeof v !== 'number') return undefined
   const epoch = Math.round((v - 25569) * 86400 * 1000)
@@ -210,13 +227,58 @@ export function extractIbans(raw: string): string[] {
   return [...found]
 }
 
-function inferAgreementKind(term: string): EmploymentAgreementKind | undefined {
+function buildHrContractsFromRegistry(
+  person: RegistryPerson,
+  primary: RegistryContract | undefined,
+): HrEmploymentContract[] {
+  return person.contracts.map((c) => {
+    const isPrimary = c === primary
+    let status: HrEmploymentContractStatus = isPrimary ? 'active' : 'superseded'
+    if (isPrimary && isPendingContractTerm(c.term)) status = 'pending'
+    return {
+      id: crypto.randomUUID(),
+      isPrimary,
+      status,
+      position: c.position || c.positionKa || '',
+      positionKa: c.positionKa || undefined,
+      contractNumber: c.contractNumber || undefined,
+      effectiveDate: c.hireDate,
+      endDate: resolveContractEndDate(c),
+      term: c.term || undefined,
+      agreementKind: inferContractAgreementKind(c, isPrimary),
+      contractType: inferContractType(c.position, c.term),
+      salary: c.salary,
+      laborRegistry: c.laborRegistry || undefined,
+      documentUrl: c.contractLink,
+      bonusThirteenth: c.bonusThirteenth || undefined,
+    }
+  })
+}
+
+function resolveContractEndDate(contract: RegistryContract | undefined): string | undefined {
+  if (!contract) return undefined
+  if (contract.endDate) return contract.endDate
+  return parseTextDate(contract.term ?? '') ?? undefined
+}
+
+function parseProbationMonths(term: string): number | undefined {
   const t = term.trim().toLowerCase()
-  if (!t) return undefined
-  if (/ხელ|бесср|основн|ძირითად|permanent|без\s*срок/i.test(t)) return 'permanent'
-  if (/წელი|год|month|мес|времен|сроч|term|\d+\s*(г|м|წ)/i.test(t)) return 'fixed_term'
-  if (t === '3') return 'permanent'
+  const m = t.match(/(\d+)\s*(?:мес|month|თვ|tve)/i)
+  if (m) return Number.parseInt(m[1], 10)
+  if (t === '3' || /\b3\b/.test(t)) return 3
   return undefined
+}
+
+function inferScheduleFromPosition(position: string, positionKa: string): Employee['schedule'] {
+  const p = `${position ?? ''} ${positionKa ?? ''}`.toLowerCase()
+  if (
+    /менеджер|бухгал|офис|админ|директор|эконом|consult|консульт|инженер|it |систем|hr|кадр|юрист|lawyer|market|маркет|бух|account|офис|secr|секрет|service.?manager|сервис/i.test(
+      p,
+    )
+  ) {
+    return '5/2 8ч'
+  }
+  return '2/2 11ч'
 }
 
 function inferContractType(position: string, term: string): HrContractType {
@@ -228,36 +290,100 @@ function inferContractType(position: string, term: string): HrContractType {
   return 'full_time'
 }
 
-function cellVal(ws: WorkSheet, r: number, c: number, XLSX: typeof import('xlsx')) {
-  const cell = ws[XLSX.utils.encode_cell({ r, c })]
-  if (!cell) return { v: '', link: undefined as string | undefined }
-  const link = (cell as { l?: { Target?: string } }).l?.Target
-  return { v: cell.v, link }
+function hasTabNumber(tab: unknown): boolean {
+  return tab !== '' && tab !== null && tab !== undefined && String(tab).trim() !== ''
+}
+
+function isTraineeContract(c: RegistryContract): boolean {
+  const p = `${c.position ?? ''} ${c.positionKa ?? ''}`.toLowerCase()
+  return /ученик|мосწ|стаж|intern|trainee|მოსწავ/.test(p)
+}
+
+function parseContinuationContract(
+  ws: SheetView,
+  r: number,
+  positionKa: string,
+  positionRu: string,
+): RegistryContract {
+  const contractCell = cellVal(ws, r, 5)
+  return {
+    idNumber: '',
+    address: '',
+    positionKa,
+    position: positionRu.replace(/\n/g, ' ').trim(),
+    bankAccount: '',
+    phone: '',
+    salary: parseSalary(cellVal(ws, r, 4).v),
+    contractNumber: String(contractCell.v || '').trim(),
+    contractLink: contractCell.link,
+    hireDate: excelDate(cellVal(ws, r, 6).v),
+    term: String(cellVal(ws, r, 7).v || '').trim(),
+    endDate: excelDate(cellVal(ws, r, 8).v),
+    bonusThirteenth: String(cellVal(ws, r, 9).v || '').trim(),
+    laborRegistry: String(cellVal(ws, r, 10).v || '').trim(),
+  }
+}
+
+function contractHasPayload(contract: RegistryContract): boolean {
+  return !!(
+    contract.position ||
+    contract.positionKa ||
+    contract.contractNumber ||
+    contract.idNumber ||
+    contract.salary ||
+    contract.address ||
+    contract.bankAccount ||
+    contract.phone ||
+    contract.term
+  )
+}
+
+/** Лист с реестром: «Лист1» / Sheet1 или самый большой по строкам. */
+export function pickRegistryWorksheet(wb: WorkbookView): SheetView | null {
+  const preferred = wb.sheetNames.find((n) => /^лист1$/i.test(n) || /^sheet1$/i.test(n))
+  if (preferred) {
+    const sheet = wb.sheet(preferred)
+    if (sheet) return sheet
+  }
+
+  let best: SheetView | null = null
+  let bestRows = 0
+  for (const sheet of wb.sheets()) {
+    if (sheet.rowCount > bestRows) {
+      bestRows = sheet.rowCount
+      best = sheet
+    }
+  }
+  return best
+}
+
+function cellVal(ws: SheetView, r: number, c: number) {
+  const cell = ws.cell(r, c)
+  return { v: cell.v ?? '', link: cell.link }
 }
 
 /** Разбор листа реестра (строка 0 — заголовки). */
-export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): RegistryPerson[] {
-  const ref = ws['!ref']
-  if (!ref) return []
-  const range = XLSX.utils.decode_range(ref)
+export function parseRegistrySheet(ws: SheetView): RegistryPerson[] {
+  if (ws.rowCount <= 1) return []
   const people: RegistryPerson[] = []
   let current: RegistryPerson | null = null
 
-  for (let r = 1; r <= range.e.r; r++) {
-    const tab = cellVal(ws, r, 0, XLSX).v
-    const rawName = String(cellVal(ws, r, 1, XLSX).v || '').trim()
-    const nameKa = String(cellVal(ws, r, 2, XLSX).v || '').trim()
+  for (let r = 1; r < ws.rowCount; r++) {
+    const tab = cellVal(ws, r, 0).v
+    const rawName = String(cellVal(ws, r, 1).v || '').trim()
+    const nameKa = String(cellVal(ws, r, 2).v || '').trim()
+    const hasTab = hasTabNumber(tab)
 
-    if (rawName) {
+    if (hasTab && rawName) {
       if (current) people.push(current)
       const parsedName = parseRegistryPersonName(rawName)
       current = {
-        tabNumber: tab !== '' && tab !== null && tab !== undefined ? String(tab).trim() : '',
+        tabNumber: String(tab).trim(),
         fullName: parsedName.fullName,
         nameKa,
-        gender: String(cellVal(ws, r, 3, XLSX).v || '').trim(),
-        citizenship: String(cellVal(ws, r, 4, XLSX).v || '').trim(),
-        birthDate: excelDate(cellVal(ws, r, 5, XLSX).v),
+        gender: String(cellVal(ws, r, 3).v || '').trim(),
+        citizenship: String(cellVal(ws, r, 4).v || '').trim(),
+        birthDate: excelDate(cellVal(ws, r, 5).v),
         terminated: parsedName.terminated,
         terminationDate: parsedName.terminationDate,
         ibans: [],
@@ -266,42 +392,39 @@ export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): 
     }
     if (!current) continue
 
-    const bankRaw = String(cellVal(ws, r, 10, XLSX).v || '')
+    const bankRaw = String(cellVal(ws, r, 10).v || '')
     for (const iban of extractIbans(bankRaw)) {
       if (!current.ibans.includes(iban)) current.ibans.push(iban)
     }
 
-    const idCell = cellVal(ws, r, 6, XLSX)
-    const contractCell = cellVal(ws, r, 13, XLSX)
-    const phoneRaw = String(cellVal(ws, r, 11, XLSX).v || '').trim()
+    const idCell = cellVal(ws, r, 6)
+    const contractCell = cellVal(ws, r, 13)
+    const phoneRaw = String(cellVal(ws, r, 11).v || '').trim()
 
-    const contract: RegistryContract = {
-      idNumber: String(idCell.v || '').trim(),
-      idLink: idCell.link,
-      address: String(cellVal(ws, r, 7, XLSX).v || '').trim(),
-      positionKa: String(cellVal(ws, r, 8, XLSX).v || '').trim(),
-      position: String(cellVal(ws, r, 9, XLSX).v || '').replace(/\n/g, ' ').trim(),
-      bankAccount: String(cellVal(ws, r, 10, XLSX).v || '').trim(),
-      phone: phoneRaw,
-      salary: parseSalary(cellVal(ws, r, 12, XLSX).v),
-      contractNumber: String(contractCell.v || '').trim(),
-      contractLink: contractCell.link,
-      hireDate: excelDate(cellVal(ws, r, 14, XLSX).v),
-      term: String(cellVal(ws, r, 15, XLSX).v || '').trim(),
-      endDate: excelDate(cellVal(ws, r, 16, XLSX).v),
-      bonusThirteenth: String(cellVal(ws, r, 17, XLSX).v || '').trim(),
-      laborRegistry: String(cellVal(ws, r, 18, XLSX).v || '').trim(),
+    let contract: RegistryContract
+    if (!hasTab && rawName) {
+      contract = parseContinuationContract(ws, r, rawName, nameKa)
+    } else {
+      contract = {
+        idNumber: String(idCell.v || '').trim(),
+        idLink: idCell.link,
+        address: String(cellVal(ws, r, 7).v || '').trim(),
+        positionKa: String(cellVal(ws, r, 8).v || '').trim(),
+        position: String(cellVal(ws, r, 9).v || '').replace(/\n/g, ' ').trim(),
+        bankAccount: String(cellVal(ws, r, 10).v || '').trim(),
+        phone: phoneRaw,
+        salary: parseSalary(cellVal(ws, r, 12).v),
+        contractNumber: String(contractCell.v || '').trim(),
+        contractLink: contractCell.link,
+        hireDate: excelDate(cellVal(ws, r, 14).v),
+        term: String(cellVal(ws, r, 15).v || '').trim(),
+        endDate: excelDate(cellVal(ws, r, 16).v),
+        bonusThirteenth: String(cellVal(ws, r, 17).v || '').trim(),
+        laborRegistry: String(cellVal(ws, r, 18).v || '').trim(),
+      }
     }
 
-    if (
-      contract.position ||
-      contract.contractNumber ||
-      contract.idNumber ||
-      contract.salary ||
-      contract.address ||
-      contract.bankAccount ||
-      contract.phone
-    ) {
+    if (contractHasPayload(contract)) {
       current.contracts.push(contract)
     }
 
@@ -318,8 +441,41 @@ export function parseRegistrySheet(ws: WorkSheet, XLSX: typeof import('xlsx')): 
 
 function primaryContract(contracts: RegistryContract[]): RegistryContract | undefined {
   if (!contracts.length) return undefined
-  const sorted = [...contracts].sort((a, b) => (b.hireDate ?? '').localeCompare(a.hireDate ?? ''))
-  return sorted[0]
+  if (contracts.length === 1) return contracts[0]
+
+  const score = (c: RegistryContract) => {
+    let s = 0
+    if (isTraineeContract(c)) s -= 100_000
+    if (/3\s*мес|3\s*თვ|3\s*month/i.test(c.term ?? '')) s -= 50_000
+    if (c.salary) s += c.salary * 100
+    if (c.hireDate) s += Date.parse(c.hireDate) || 0
+    if (c.contractNumber) s += 500
+    if (`${c.position ?? ''} ${c.positionKa ?? ''}`.trim()) s += 1_000
+    return s
+  }
+
+  return [...contracts].sort((a, b) => score(b) - score(a))[0]
+}
+
+/** Фантомы из старого парсера: «сотрудник» с ФИО = должность из доп. строки реестра. */
+export function isMisparseGhostEmployee(
+  employee: { fullName: string; nameKa?: string },
+  registry: RegistryPerson[],
+): boolean {
+  const key = normalizeName(employee.fullName)
+  if (!key) return false
+  if (registry.some((p) => normalizeName(p.fullName) === key || normalizeName(p.nameKa) === key)) {
+    return false
+  }
+  return registry.some((p) =>
+    p.contracts.some(
+      (c) =>
+        normalizeName(c.position) === key ||
+        normalizeName(c.positionKa) === key ||
+        c.position === employee.fullName ||
+        c.positionKa === employee.fullName,
+    ),
+  )
 }
 
 function buildBankAccountsFromRegistry(person: RegistryPerson): HrBankAccount[] {
@@ -345,20 +501,23 @@ function buildBankAccountsFromRegistry(person: RegistryPerson): HrBankAccount[] 
 
 function buildRegistryDocuments(person: RegistryPerson, existing: HrDocument[] = []): HrDocument[] {
   const now = new Date().toISOString()
-  const byUrl = new Map<string, HrDocument>()
-  for (const d of existing) {
-    if (d.fileUrl) byUrl.set(d.fileUrl, d)
+  const kept = existing.filter((d) => d.uploadedBy !== 'registry-import')
+  const byKey = new Map<string, HrDocument>()
+  for (const d of kept) {
+    const k = d.fileUrl ? `${d.fileUrl}|${d.title}` : d.id
+    byKey.set(k, d)
   }
 
   const add = (
     title: string,
     docType: string,
     url: string | undefined,
-    fileName?: string,
-    expiresAt?: string,
+    fileName: string | undefined,
+    expiresAt: string | undefined,
+    dedupeKey: string,
   ) => {
-    if (!url || url === 'about:blank' || byUrl.has(url)) return
-    byUrl.set(url, {
+    if (!url || url === 'about:blank' || byKey.has(dedupeKey)) return
+    byKey.set(dedupeKey, {
       id: crypto.randomUUID(),
       title,
       docType,
@@ -371,26 +530,43 @@ function buildRegistryDocuments(person: RegistryPerson, existing: HrDocument[] =
   }
 
   if (person.idLink) {
-    add('Удостоверение личности / ID', 'id', person.idLink, person.personalId || 'ID')
+    add(
+      'Удостоверение личности / ID',
+      'id',
+      person.idLink,
+      person.personalId || 'ID',
+      undefined,
+      `id:${person.idLink}`,
+    )
   }
 
   for (const c of person.contracts) {
+    const end = resolveContractEndDate(c)
     if (c.idLink && c.idLink !== person.idLink) {
-      add(`ID ${c.idNumber || person.fullName}`, 'id', c.idLink, c.idNumber)
+      add(
+        `ID ${c.idNumber || person.fullName}`,
+        'id',
+        c.idLink,
+        c.idNumber,
+        undefined,
+        `id:${c.idLink}|${c.idNumber}`,
+      )
     }
     if (c.contractLink) {
-      const title = c.contractNumber
-        ? `Трудовой договор № ${c.contractNumber}`
-        : 'Трудовой договор'
-      add(title, 'contract', c.contractLink, c.contractNumber || 'contract', c.endDate)
+      const bits = [c.position, c.contractNumber && `№ ${c.contractNumber}`].filter(Boolean)
+      const title = bits.length ? `Трудовой договор — ${bits.join(' · ')}` : 'Трудовой договор'
+      add(
+        title,
+        'contract',
+        c.contractLink,
+        c.contractNumber || c.position || 'contract',
+        end,
+        `contract:${c.contractLink}|${c.contractNumber}|${c.position}|${c.hireDate ?? ''}`,
+      )
     }
   }
 
-  for (const d of existing) {
-    if (!d.fileUrl && !byUrl.has(d.id)) byUrl.set(d.id, d)
-  }
-
-  return [...byUrl.values()]
+  return [...byKey.values()]
 }
 
 function buildHrNotes(person: RegistryPerson, primary: RegistryContract | undefined): string {
@@ -404,18 +580,6 @@ function buildHrNotes(person: RegistryPerson, primary: RegistryContract | undefi
     lines.push(`13-я зарплата (даты): ${primary.bonusThirteenth}`)
   }
 
-  const others = person.contracts.filter((c) => c !== primary)
-  for (const c of others) {
-    const bits = [
-      c.position,
-      c.contractNumber && `№ ${c.contractNumber}`,
-      c.hireDate && `с ${c.hireDate}`,
-      c.endDate && `до ${c.endDate}`,
-      c.term && `срок: ${c.term}`,
-      c.laborRegistry && `реестр: ${c.laborRegistry}`,
-    ].filter(Boolean)
-    if (bits.length) lines.push(`Доп. договор: ${bits.join(' · ')}`)
-  }
   return lines.join('\n')
 }
 
@@ -424,8 +588,64 @@ function findExistingEmployee(employees: Employee[], person: RegistryPerson): Em
     const byTab = employees.find((e) => e.tabNumber.trim() === person.tabNumber.trim())
     if (byTab) return byTab
   }
+  return findExistingEmployeeByName(employees, person)
+}
+
+/** Ключ человека в реестре для выбора «создавать / нет». */
+export function registryPersonKey(person: RegistryPerson): string {
+  const ru = normalizeName(person.fullName)
+  if (ru) return ru
+  const ka = normalizeName(person.nameKa)
+  return ka || `row:${person.tabNumber || person.fullName}`
+}
+
+export function findExistingEmployeeByName(
+  employees: Employee[],
+  person: RegistryPerson,
+): Employee | undefined {
   const norm = normalizeName(person.fullName)
-  return employees.find((e) => normalizeName(e.fullName) === norm)
+  if (norm) {
+    const byName = employees.find((e) => normalizeName(e.fullName) === norm)
+    if (byName) return byName
+  }
+  if (person.nameKa?.trim()) {
+    const normKa = normalizeName(person.nameKa)
+    const byKa = employees.find((e) => e.nameKa && normalizeName(e.nameKa) === normKa)
+    if (byKa) return byKa
+  }
+  return undefined
+}
+
+/** Кого обновить, кого нет в базе, кого в базе нет в реестре. */
+export function analyzeRegistryImport(
+  existing: Employee[],
+  registry: RegistryPerson[],
+): RegistryImportAnalysis {
+  const matched: RegistryImportAnalysis['matched'] = []
+  const missingInDb: RegistryPerson[] = []
+  const matchedEmployeeIds = new Set<string>()
+
+  for (const person of registry) {
+    const employee = findExistingEmployeeByName(existing, person)
+    if (employee) {
+      matched.push({ person, employee })
+      matchedEmployeeIds.add(employee.id)
+    } else {
+      missingInDb.push(person)
+    }
+  }
+
+  const notInRegistry = existing.filter((e) => !matchedEmployeeIds.has(e.id))
+  return { matched, missingInDb, notInRegistry }
+}
+
+function resolveExistingEmployee(
+  employees: Employee[],
+  person: RegistryPerson,
+  matchByName?: boolean,
+): Employee | undefined {
+  if (matchByName) return findExistingEmployeeByName(employees, person)
+  return findExistingEmployee(employees, person)
 }
 
 function applyRegistryToEmployee(base: Employee, person: RegistryPerson): Employee {
@@ -437,8 +657,12 @@ function applyRegistryToEmployee(base: Employee, person: RegistryPerson): Employ
   const salary = primary?.salary
   const address = person.address || primary?.address || base.address
   const term = primary?.term ?? ''
-  const agreementKind = inferAgreementKind(term)
+  const hrContracts = buildHrContractsFromRegistry(person, primary)
+  const primaryAgreement =
+    hrContracts.find((c) => c.isPrimary)?.agreementKind ?? 'permanent'
   const contractType = inferContractType(position, term)
+  const contractEndDate = resolveContractEndDate(primary)
+  const schedule = inferScheduleFromPosition(position, positionKa ?? '')
   const gender = mapGender(person.gender) ?? base.gender
   const bankAccounts = buildBankAccountsFromRegistry(person)
   const hrNotes = buildHrNotes(person, primary)
@@ -452,6 +676,8 @@ function applyRegistryToEmployee(base: Employee, person: RegistryPerson): Employ
     tabNumber: person.tabNumber || base.tabNumber,
     position,
     positionKa,
+    schedule: schedule || base.schedule || '2/2 11ч',
+    cycleStart: primary?.hireDate || base.cycleStart,
     phone: phoneParsed.phone || base.phone,
     email,
     address,
@@ -465,8 +691,14 @@ function applyRegistryToEmployee(base: Employee, person: RegistryPerson): Employ
     currency: 'GEL',
     gender,
     contractType: contractType || base.contractType,
-    employmentAgreementKind: agreementKind ?? base.employmentAgreementKind,
+    employmentAgreementKind: primaryAgreement ?? base.employmentAgreementKind,
+    probationMonths:
+      contractType === 'internship'
+        ? (parseProbationMonths(term) ?? base.probationMonths ?? 3)
+        : base.probationMonths,
+    statusUntil: contractEndDate || base.statusUntil,
     bankAccounts,
+    hrContracts,
     hrDocuments: buildRegistryDocuments(person, base.hrDocuments),
     hrAbsences: base.hrAbsences ?? [],
     hrTrainings: base.hrTrainings ?? [],
@@ -498,9 +730,10 @@ export function mergeEmployeesFromRegistry(
   let matched = 0
   let created = 0
   let updated = 0
+  let skipped = 0
 
   for (const person of registry) {
-    const found = findExistingEmployee(result, person)
+    const found = resolveExistingEmployee(result, person, options?.matchByName)
     if (found) {
       matchedIds.add(found.id)
       const next = applyRegistryToEmployee(found, person)
@@ -509,6 +742,13 @@ export function mergeEmployeesFromRegistry(
       matched++
       updated++
     } else {
+      if (options?.createMissingKeys !== undefined) {
+        const key = registryPersonKey(person)
+        if (!options.createMissingKeys.has(key)) {
+          skipped++
+          continue
+        }
+      }
       const blank = createNewEmployee(brigades, result)
       const next = applyRegistryToEmployee(
         {
@@ -533,6 +773,7 @@ export function mergeEmployeesFromRegistry(
       updated,
       notInRegistry,
       totalInRegistry: registry.length,
+      skipped,
     },
   }
 }

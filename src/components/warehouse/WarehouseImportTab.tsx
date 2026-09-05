@@ -19,7 +19,7 @@ type Notice = { type: 'error' | 'success' | 'info'; message: string; warnings?: 
 
 function isExcelFile(file: File): boolean {
   const name = file.name.toLowerCase()
-  return name.endsWith('.xlsx') || name.endsWith('.xls')
+  return name.endsWith('.xlsx')
 }
 
 export function WarehouseImportTab({
@@ -62,7 +62,9 @@ export function WarehouseImportTab({
             ? 'warehouse.import.emptyWorkbook'
             : err.code === 'noData'
               ? 'warehouse.import.noData'
-              : 'warehouse.import.parseError'
+              : err.code === 'unsupportedFile'
+                ? 'warehouse.import.invalidFile'
+                : 'warehouse.import.parseError'
         setNotice({ type: 'error', message: t(key) })
       } else {
         setNotice({ type: 'error', message: t('warehouse.import.parseError') })
@@ -73,19 +75,27 @@ export function WarehouseImportTab({
   }
 
   function showResult(result: ImportResult) {
-    const message = tf('warehouse.import.success', {
-      ops: result.movementsAdded,
-      items: result.itemsMatched,
-      sheets: result.sheetsProcessed,
-    })
+    const message =
+      result.draftsCreated > 0
+        ? tf('warehouse.import.draftSuccess', {
+            drafts: String(result.draftsCreated),
+            items: String(result.itemsMatched),
+            sheets: String(result.sheetsProcessed),
+            duplicates: String(result.duplicates),
+          })
+        : tf('warehouse.import.success', {
+            ops: String(result.movementsAdded),
+            items: String(result.itemsMatched),
+            sheets: String(result.sheetsProcessed),
+          })
     if (result.warnings.length > 0) {
       setNotice({
-        type: result.movementsAdded > 0 ? 'info' : 'error',
+        type: result.draftsCreated > 0 ? 'info' : 'error',
         message,
         warnings: result.warnings,
       })
     } else {
-      setNotice({ type: 'success', message })
+      setNotice({ type: result.draftsCreated > 0 ? 'success' : 'info', message })
     }
   }
 
@@ -121,7 +131,7 @@ export function WarehouseImportTab({
         <input
           ref={ref}
           type="file"
-          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0]

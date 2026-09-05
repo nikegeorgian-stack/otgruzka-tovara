@@ -22,6 +22,8 @@ type WarehouseActions = Pick<
   | 'onRunInventory'
   | 'onPostInventoryRevision'
   | 'onPostOpeningBalances'
+  | 'onSaveOpeningInventoryDraft'
+  | 'onPostOpeningInventory'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
   | 'onQuickEditItem'
@@ -43,6 +45,7 @@ type WarehouseActions = Pick<
   | 'onUpsertLoadingShipment'
   | 'onPostLoadingShipment'
   | 'onRemoveLoadingShipment'
+  | 'onMarkWarehouseDocsExported'
   | 'onUpsertCounterparty'
   | 'onOpenCounterparties'
   | 'onUpsertWorkwearCatalogItem'
@@ -77,6 +80,7 @@ export function buildWarehousePageProps({
     onSaveProductionRequest,
     onPostProductionRequest,
     embedded,
+    exportStore: store,
     printMeta: {
       site: store.settings.site,
       responsible: store.settings.responsible,
@@ -85,6 +89,7 @@ export function buildWarehousePageProps({
     },
     counterparties: store.counterparties.items.filter((c) => c.active),
     salesOrders: store.sales.orders,
+    finishedGoodsLots: store.production.finishedGoodsLots ?? [],
     ...actions,
   }
 }

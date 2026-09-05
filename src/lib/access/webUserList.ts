@@ -5,7 +5,7 @@ import {
   LEGACY_WEB_USER_DIRECTORY,
 } from '@/lib/cloud/fstWebUsers'
 import type { FirebaseWebUserRecord } from '@/lib/cloud/webUserAdmin'
-import { isFstAdminEmail } from '@/lib/cloud/fstAdmin'
+import { FST_ADMIN_DISPLAY_NAMES, isFstAdminEmail } from '@/lib/cloud/fstAdmin'
 import type { ViewId } from '@/lib/types'
 import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
 
@@ -16,7 +16,10 @@ export type WebUserListRow = {
   roleId: AccessRoleId
   active: boolean
   employeeId?: string
+  /** Бригады табеля (мастер цеха и др. scoped-роли). */
+  defaultBrigades?: string[]
   webViews?: ViewId[]
+  directorySections?: import('@/lib/directories/types').DirectorySection[]
   webAccount?: boolean
   /** Подтверждено через Firebase Admin API */
   inFirebase: boolean
@@ -27,6 +30,8 @@ export type WebUserListRow = {
   needsImport: boolean
   /** Запись из store.access */
   inStore: boolean
+  pendingDeletion?: boolean
+  externalEffectOperationId?: string
 }
 
 function defaultWebViews(roleId: AccessRoleId): ViewId[] {
@@ -74,16 +79,34 @@ export function buildWebUserListRows(
         roleId: stored.roleId,
         active: stored.active,
         employeeId: stored.employeeId,
+        defaultBrigades: stored.defaultBrigades,
         webViews: stored.webViews,
+        directorySections: stored.directorySections,
         webAccount: stored.webAccount,
         ...firebase,
         needsImport: false,
         inStore: true,
+        pendingDeletion: stored.pendingDeletion,
+        externalEffectOperationId: stored.externalEffectOperationId,
       })
       continue
     }
 
-    if (isFstAdminEmail(email)) continue
+    if (isFstAdminEmail(email)) {
+      rows.push({
+        id: `import-${email}`,
+        login: email,
+        displayName: FST_ADMIN_DISPLAY_NAMES[email] ?? fb?.displayName ?? email,
+        roleId: 'sysadmin',
+        active: fb ? !fb.disabled : true,
+        webViews: defaultWebViews('sysadmin'),
+        webAccount: true,
+        ...firebase,
+        needsImport: true,
+        inStore: false,
+      })
+      continue
+    }
 
     const roleId = legacy?.roleId ?? 'warehouse_keeper'
     rows.push({
@@ -114,8 +137,10 @@ export function storeUserFromRow(row: WebUserListRow): AppUser | null {
     passwordSalt: '',
     active: row.active,
     employeeId: row.employeeId,
+    defaultBrigades: row.defaultBrigades,
     webAccount: row.webAccount,
     webViews: row.webViews,
+    directorySections: row.directorySections,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -128,6 +153,12 @@ export function importRowToUpsertInput(row: WebUserListRow): UpsertAppUserInput 
     roleId: row.roleId,
     active: row.active,
     employeeId: null,
-    skipFirebaseCreate: row.inFirebase || row.assumedFirebase,
+    defaultBrigades: row.defaultBrigades ? [...row.defaultBrigades] : [],
+    webViews: row.webViews?.length ? [...row.webViews] : undefined,
+    directorySections: row.directorySections?.length
+      ? [...row.directorySections]
+      : undefined,
+    /** Только если уже подтверждён в Firebase — иначе пароль создаст учётку */
+    skipFirebaseCreate: row.inFirebase,
   }
 }

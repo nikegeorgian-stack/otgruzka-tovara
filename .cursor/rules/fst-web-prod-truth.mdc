@@ -1,0 +1,20 @@
+---
+description: Production truth = Vercel prod URL (bugs, UX verification)
+alwaysApply: false
+---
+
+# Otgruzka — только веб-прод
+
+| | |
+|--|--|
+| **Прод (канон)** | https://otgruzka-tovara.vercel.app |
+| Hosting | https://otgruzka-tovara.web.app |
+| Данные | SQL Connect |
+
+Локальный `dev`/JSON — **не** доказательство «починено».
+
+1. Баги/UX — воспроизводить на Vercel
+2. Не утверждать «в проде» без проверки бандла/экрана
+3. После деплоя: Ctrl+F5 на Vercel
+
+Скил: **`otgruzka-browser-verify`**

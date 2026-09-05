@@ -1,0 +1,16 @@
+---
+description: Otgruzka deploy = UI only (explicit user request)
+alwaysApply: false
+---
+
+# Деплой Otgruzka
+
+Только когда пользователь просит **деплой / deploy / выложи / на прод**:
+
+1. `npm exec -- tsc --noEmit`
+2. `npm run deploy:otgruzka:quick` (UI only)
+3. Сверить `index-*.js` на https://otgruzka-tovara.vercel.app
+
+**Не делать:** clear/import/migrate, push без просьбы.
+
+Скил: **`otgruzka-deploy-auditor`**. Hook: `.cursor/hooks/otgruzka-deploy-guard.mjs`

@@ -1,8 +1,21 @@
-/** A4 альбом: высота и ширина печатной области (мм) */
-const PAGE_H_MM = 210
-const PAGE_W_MM = 297
+/** Геометрия листа для автоподгонки бланков (96dpi CSS). */
+const PAPER_MM = {
+  a4: { landscape: { w: 297, h: 210 }, portrait: { w: 210, h: 297 } },
+  a3: { landscape: { w: 420, h: 297 }, portrait: { w: 297, h: 420 } },
+} as const
+
+/** Внутренние поля листа (согласовано с padding .print-sheet-page). */
 const MARGIN_MM = 16
 const MM_TO_PX = 96 / 25.4
+
+export type PrintFitOpts = {
+  /** Только уменьшать (документы/накладные). false — можно слегка увеличить до ~92% fill. */
+  shrinkOnly?: boolean
+  /** Книжная ориентация. По умолчанию альбом. */
+  portrait?: boolean
+  /** Размер бумаги. По умолчанию A4. */
+  paper?: 'a4' | 'a3'
+}
 
 function pageScale(
   page: HTMLElement,
@@ -10,11 +23,11 @@ function pageScale(
   maxWPx: number,
   shrinkOnly: boolean,
 ): number {
-  const content = page.querySelector<HTMLElement>('.print-sheet-content')
-  if (!content) return 1
+  const content =
+    page.querySelector<HTMLElement>('.print-sheet-content') ?? page
 
-  const h = page.scrollHeight
-  const w = content.scrollWidth
+  const h = Math.max(page.scrollHeight, content.scrollHeight)
+  const w = Math.max(content.scrollWidth, page.clientWidth)
 
   let scale = 1
 
@@ -40,20 +53,26 @@ function pageScale(
   return scale
 }
 
+/**
+ * Подгоняет все `.print-sheet-page` в контейнере под один лист A4
+ * (единый zoom на все страницы превью, чтобы комплекты не «плясали»).
+ */
 export function fitPrintPages(
   container: HTMLElement | null,
-  opts?: { shrinkOnly?: boolean; portrait?: boolean },
+  opts?: PrintFitOpts,
 ): void {
   if (!container) return
 
   const shrinkOnly = opts?.shrinkOnly ?? false
-  // Портрет: высота/ширина страницы меняются местами.
-  const pageHmm = opts?.portrait ? PAGE_W_MM : PAGE_H_MM
-  const pageWmm = opts?.portrait ? PAGE_H_MM : PAGE_W_MM
+  const paper = opts?.paper ?? 'a4'
+  const orient = opts?.portrait ? 'portrait' : 'landscape'
+  const { w: pageWmm, h: pageHmm } = PAPER_MM[paper][orient]
   const maxHPx = (pageHmm - MARGIN_MM) * MM_TO_PX
   const maxWPx = (pageWmm - MARGIN_MM) * MM_TO_PX
 
-  const pages = [...container.querySelectorAll<HTMLElement>('.print-sheet-page')]
+  const pages = [...container.querySelectorAll<HTMLElement>('.print-sheet-page')].filter(
+    (page) => !page.classList.contains('print-sheet-page--work-schedule'),
+  )
   if (!pages.length) return
 
   pages.forEach((page) => {

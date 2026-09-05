@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { CecPortalModal } from '@/components/hr/CecPortalModal'
+import { RsTaxpayerCheckButton } from '@/components/hr/RsTaxpayerCheckButton'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
 import { lookupCecVoter } from '@/lib/hr/cecClient'
@@ -96,7 +98,7 @@ export function CecIdentityPanel({ emp, onPatch }: Props) {
           >
             {CITIZENSHIP_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
-                {locale === 'ka' ? o.labelKa : o.labelRu}
+                {labelRuKa(locale, o.labelRu, o.labelKa)}
               </option>
             ))}
           </select>
@@ -179,6 +181,8 @@ export function CecIdentityPanel({ emp, onPatch }: Props) {
           />
         </div>
       )}
+
+      {showCec ? <RsTaxpayerCheckButton emp={emp} /> : null}
 
       <CecPortalModal
         open={portalOpen}

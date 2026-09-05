@@ -1,4 +1,7 @@
 /** ISO 3166-1 alpha-2 + названия (полный список государств) */
+import { collatorLocale } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
+
 export type CountryEntry = { code: string; ru: string; ka: string }
 
 export const COUNTRIES: CountryEntry[] = [
@@ -196,13 +199,13 @@ export const COUNTRIES: CountryEntry[] = [
   { code: 'JP', ru: 'Япония', ka: 'იაპონია' },
 ]
 
-export function countryLabel(entry: CountryEntry, locale: 'ru' | 'ka'): string {
+export function countryLabel(entry: CountryEntry, locale: Locale): string {
   return locale === 'ka' ? entry.ka : entry.ru
 }
 
-export function countriesSorted(locale: 'ru' | 'ka'): CountryEntry[] {
+export function countriesSorted(locale: Locale): CountryEntry[] {
   return [...COUNTRIES].sort((a, b) =>
-    countryLabel(a, locale).localeCompare(countryLabel(b, locale), locale === 'ka' ? 'ka' : 'ru'),
+    countryLabel(a, locale).localeCompare(countryLabel(b, locale), collatorLocale(locale)),
   )
 }
 
@@ -216,7 +219,7 @@ export function resolveCountryCode(stored: string | undefined): string {
 
 export function countryLabelByCode(
   code: string | undefined,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   if (!code?.trim()) return ''
   const entry = COUNTRIES.find((c) => c.code === code)
@@ -224,7 +227,7 @@ export function countryLabelByCode(
 }
 
 /** @deprecated — для миграции со старых текстовых названий */
-export function countryLabelByStored(stored: string | undefined, locale: 'ru' | 'ka'): string {
+export function countryLabelByStored(stored: string | undefined, locale: Locale): string {
   if (!stored?.trim()) return ''
   const code = resolveCountryCode(stored)
   return code ? countryLabelByCode(code, locale) : stored

@@ -3,6 +3,8 @@ import { FstAuthProvider } from '@/context/FstAuthContext'
 import { I18nProvider } from '@/context/I18nContext'
 import { FstWebSessionProvider } from '@/context/FstWebSessionContext'
 import { FstWebAuthGate } from '@/components/web/FstWebAuthGate'
+import { FstPushBootstrap } from '@/components/web/FstPushBootstrap'
+import { AppUpdateChecker } from '@/components/web/AppUpdateChecker'
 import App from '@/App'
 import type { Locale } from '@/i18n'
 
@@ -22,6 +24,8 @@ export function FstWebRoot() {
       <FstAuthProvider>
         <FstWebAuthGate>
           <FstWebSessionProvider>
+            <FstPushBootstrap />
+            <AppUpdateChecker />
             <App />
           </FstWebSessionProvider>
         </FstWebAuthGate>

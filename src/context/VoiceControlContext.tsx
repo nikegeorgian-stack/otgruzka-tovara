@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { intlLocale } from '@/i18n/localeFormat'
 import { VoiceHelpModal } from '@/components/voice/VoiceHelpModal'
 import { VoiceControlBar } from '@/components/voice/VoiceControlBar'
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition'
@@ -330,7 +331,7 @@ export function VoiceControlProvider({ locale, vocabulary = [], onNavigate, chil
   )
 
   const { listening, interim, toggle, stop, supported } = useVoiceRecognition({
-    lang: locale === 'ka' ? 'ka-GE' : 'ru-RU',
+    lang: intlLocale(locale),
     enabled: voiceEnabled,
     vocabulary,
     onResult,

@@ -166,18 +166,24 @@ export type TimesheetVirtualItem =
       rowIndex: number
     }
 
+export type BrigadeHeaderMode = 'full' | 'label' | 'hidden'
+
 /** Плоский список строк таблицы (заголовки + данные) для виртуализации */
 export function flattenTimesheetLayout(
   blocks: TimesheetLayoutBlock[],
+  opts?: { brigadeHeaderMode?: BrigadeHeaderMode },
 ): TimesheetVirtualItem[] {
+  const headerMode = opts?.brigadeHeaderMode ?? 'full'
   const out: TimesheetVirtualItem[] = []
   for (const block of blocks) {
     if (block.kind === 'unit') {
       out.push({ kind: 'unit', key: `unit-${block.unitId}`, block })
       continue
     }
-    const headerKey = `${block.kind}-${block.unitId ?? 'x'}-${block.brigade}`
-    out.push({ kind: 'brigade-header', key: headerKey, block })
+    if (headerMode !== 'hidden') {
+      const headerKey = `${block.kind}-${block.unitId ?? 'x'}-${block.brigade}`
+      out.push({ kind: 'brigade-header', key: headerKey, block })
+    }
     block.rows.forEach((row, rowIndex) => {
       out.push({ kind: 'data', key: row.id, block, row, rowIndex })
     })

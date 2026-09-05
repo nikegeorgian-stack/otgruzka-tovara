@@ -14,6 +14,7 @@ type Props = {
   onItemChange: (id: string | undefined) => void
   onMetersPerRollChange: (value: number | undefined) => void
   onOpenNomenclature?: () => void
+  compact?: boolean
 }
 
 export function RawMaterialPlanField({
@@ -26,6 +27,7 @@ export function RawMaterialPlanField({
   onItemChange,
   onMetersPerRollChange,
   onOpenNomenclature,
+  compact,
 }: Props) {
   const { t, locale } = useI18n()
   const [picking, setPicking] = useState(false)
@@ -51,19 +53,27 @@ export function RawMaterialPlanField({
   }
 
   return (
-    <div className="sm:col-span-2 rounded-sm border border-emerald-200 bg-emerald-50/40 p-4">
+    <div
+      className={
+        compact
+          ? 'rounded-sm border border-emerald-200/80 bg-emerald-50/30 p-2.5'
+          : 'sm:col-span-2 rounded-sm border border-emerald-200 bg-emerald-50/40 p-4'
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">
             {t('planner.rawPlanTitle')}
           </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-emerald-900/80">
-            {t('planner.rawPlanHint')}
-          </p>
+          {!compact && (
+            <p className="mt-1 text-[11px] leading-relaxed text-emerald-900/80">
+              {t('planner.rawPlanHint')}
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className={`mt-2 grid gap-2 ${compact ? 'sm:grid-cols-3' : 'mt-3 gap-3 sm:grid-cols-2'}`}>
         <label className="text-xs font-medium text-stone-600">
           {t('planner.rawKind')}
           <select

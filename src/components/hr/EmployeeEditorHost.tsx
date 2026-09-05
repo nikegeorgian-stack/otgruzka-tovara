@@ -1,42 +1,66 @@
 import { HrEmployeeModal } from '@/components/hr/HrEmployeeModal'
-import type { EmployeeEditorContext } from '@/hooks/useEmployeeEditor'
+import type { EmployeeEditorSession } from '@/hooks/useEmployeeEditor'
 import type { HrPosition, HrStructuralUnit } from '@/lib/hr/types'
-import type { Employee } from '@/lib/types'
+import type { AppStore, Employee } from '@/lib/types'
 
 type Props = {
-  ctx: EmployeeEditorContext | null
+  sessions: EmployeeEditorSession[]
   employees: Employee[]
   brigades: string[]
   hrStructuralUnits: HrStructuralUnit[]
   hrPositions: HrPosition[]
-  onSave: (e: Employee) => void
-  onClose: () => void
+  onUpsertPosition?: (p: HrPosition) => void
+  store?: AppStore
+  lockHolderUid?: string
+  lockHolderName?: string
+  canForceTakeOver?: boolean
+  canEditSalary?: boolean
+  onSave: (sessionId: string, e: Employee) => void
+  onClose: (sessionId: string) => void
 }
 
 export function EmployeeEditorHost({
-  ctx,
+  sessions,
   employees,
   brigades,
   hrStructuralUnits,
   hrPositions,
+  onUpsertPosition,
+  store,
+  lockHolderUid,
+  lockHolderName,
+  canForceTakeOver,
+  canEditSalary = false,
   onSave,
   onClose,
 }: Props) {
-  if (!ctx) return null
+  if (sessions.length === 0) return null
 
   return (
-    <HrEmployeeModal
-      employee={ctx.employee}
-      employees={employees}
-      brigades={brigades}
-      hrStructuralUnits={hrStructuralUnits}
-      hrPositions={hrPositions}
-      isNew={ctx.isNew}
-      onSave={(emp) => {
-        onSave(emp)
-        ctx.onSavedExtra?.(emp)
-      }}
-      onClose={onClose}
-    />
+    <>
+      {sessions.map((session) => (
+        <HrEmployeeModal
+          key={session.id}
+          windowId={session.id}
+          employee={session.employee}
+          employees={employees}
+          brigades={brigades}
+          hrStructuralUnits={hrStructuralUnits}
+          hrPositions={hrPositions}
+          onUpsertPosition={onUpsertPosition}
+          store={store}
+          isNew={session.isNew}
+          lockHolderUid={lockHolderUid}
+          lockHolderName={lockHolderName}
+          canForceTakeOver={canForceTakeOver}
+          canEditSalary={canEditSalary}
+          onSave={(emp) => {
+            onSave(session.id, emp)
+            session.onSavedExtra?.(emp)
+          }}
+          onClose={() => onClose(session.id)}
+        />
+      ))}
+    </>
   )
 }

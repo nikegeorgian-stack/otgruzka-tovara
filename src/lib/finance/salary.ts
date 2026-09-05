@@ -1,4 +1,5 @@
 import type { Employee, HrPosition } from '@/lib/types'
+import { is52Schedule } from '@/lib/schedules'
 
 /** Индивидуальный оклад/ставка — приоритет над штатным расписанием. */
 export function hasIndividualSalary(emp: Employee): boolean {
@@ -11,7 +12,7 @@ export function salaryFieldsFromPosition(
   position: HrPosition,
 ): Pick<Employee, 'monthlySalary' | 'hourlyRate' | 'currency'> | null {
   if (hasIndividualSalary(emp)) return null
-  const isMonthly = emp.schedule === '5/2 8ч' || (position.schedule?.includes('5/2') ?? false)
+  const isMonthly = is52Schedule(emp.schedule) || (position.schedule?.includes('5/2') ?? false)
   if (isMonthly) {
     return { monthlySalary: position.salary, currency: position.currency }
   }

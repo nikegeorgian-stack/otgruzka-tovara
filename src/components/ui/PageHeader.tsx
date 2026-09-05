@@ -8,7 +8,7 @@ type Props = {
   title: string
   subtitle?: string
   showBrand?: boolean
-  /** compact — без логотипа, меньше отступы; для рабочих разделов */
+  /** compact — без логотипа, одна строка; default только для редких витринных экранов */
   density?: Density
   actions?: ReactNode
   meta?: ReactNode
@@ -18,8 +18,8 @@ export function PageHeader({
   badge,
   title,
   subtitle,
-  showBrand = true,
-  density = 'default',
+  showBrand = false,
+  density = 'compact',
   actions,
   meta,
 }: Props) {

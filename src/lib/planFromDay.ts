@@ -1,11 +1,18 @@
 import { dayDateKey, parseMonthKey } from './dates'
-import { isCyclicSchedule } from './schedules'
-import { autoCodeForDay, isEmployeeAvailableOnDay } from './schedule'
+import { isCyclicSchedule, effectiveShiftHours } from './schedules'
+import {
+  autoCodeForDay,
+  cycleStartForGroup,
+  isEmployeeAvailableOnDay,
+  resolveCycleStart,
+} from './schedule'
+import { absenceCodeForDate } from './hr/absencePlan'
+import { isRowActiveOnDay } from './rowPeriod'
 import type { DayCode, Employee, Group2x2, MonthSheet, ScheduleType, ShiftMode } from './types'
 
 function unavailableCode(emp: Employee): DayCode {
   const st = emp.employmentStatus ?? 'active'
-  if (st === 'vacation' || st === 'maternity') return 'ОТ'
+  if (st === 'maternity') return 'ОТ'
   return ''
 }
 
@@ -23,21 +30,31 @@ export function rebuildPlanFromDay(
   const nextPlan = { ...existingPlan }
   const nextFact = { ...sheet.fact }
   const factRow = { ...(nextFact[rowId] ?? {}) }
+  const cycleStart = resolveCycleStart(employee, year, month)
+  const bounds = sheet.rowBounds?.[rowId]
 
   for (let d = startDay; d <= daysInMonth; d++) {
     const key = dayDateKey(year, month, d)
     let code: DayCode
-    if (!isEmployeeAvailableOnDay(employee, key)) {
-      code = unavailableCode(employee)
+    if (!isRowActiveOnDay(employee, key, bounds)) {
+      code = ''
     } else {
-      code = autoCodeForDay(
-        employee.schedule,
-        employee.cycleStart,
-        year,
-        month,
-        d,
-        employee.shiftMode ?? 'day',
-      )
+      const absenceCode = absenceCodeForDate(employee, key)
+      if (absenceCode) {
+        code = absenceCode
+      } else if (!isEmployeeAvailableOnDay(employee, key)) {
+        code = unavailableCode(employee)
+      } else {
+        code = autoCodeForDay(
+          employee.schedule,
+          cycleStart,
+          year,
+          month,
+          d,
+          employee.shiftMode ?? 'day',
+          effectiveShiftHours(employee),
+        )
+      }
     }
     nextPlan[key] = code
     const oKey = `${rowId}|${key}`
@@ -59,21 +76,7 @@ export function employeeWithScheduleFromDay(
   return employeeWithAttributesFromDay(emp, { schedule }, fromDay, monthKeyStr)
 }
 
-/** Старт цикла: группа Б смещена относительно А (2/2 — 2 дня, 1/1 — 1 день). */
-export function cycleStartForGroup(
-  schedule: ScheduleType,
-  group: 'А' | 'Б',
-  year: number,
-  month: number,
-  anchorDay: number,
-): string {
-  const base = new Date(year, month - 1, anchorDay)
-  if (group === 'Б') {
-    const offset = schedule === '1/1 11ч' ? 1 : 2
-    base.setDate(base.getDate() - offset)
-  }
-  return dayDateKey(base.getFullYear(), base.getMonth() + 1, base.getDate())
-}
+export { cycleStartForGroup } from './schedule'
 
 /**
  * Старт цикла относительно конкретного дня:

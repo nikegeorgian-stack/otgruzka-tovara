@@ -51,7 +51,7 @@ export function HrTrashPanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-coach="hr:trashPanel">
       <div className="rounded-sm border border-grid bg-white p-4 shadow-sm">
         <h3 className="text-sm font-bold text-ink">{t('hr.trash.title')}</h3>
         <p className="mt-1 text-xs text-stone-500">

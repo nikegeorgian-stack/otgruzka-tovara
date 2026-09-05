@@ -1,9 +1,10 @@
 import { BRAND } from '@/lib/brand'
+import type { Locale } from '@/i18n/types'
 import { formatMixDate, type CubeLabelModel } from '@/lib/formulations/cubeLabel'
 
 type Props = {
   labels: CubeLabelModel[]
-  locale: 'ru' | 'ka'
+  locale: Locale
 }
 
 export function FormulationCubeLabelSheet({ labels, locale }: Props) {

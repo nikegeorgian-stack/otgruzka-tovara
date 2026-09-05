@@ -1,6 +1,10 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { AppUser } from '@/lib/access/types'
-import { buildWebAppUser, resolveFstWebProfile, type FstWebUserProfile } from '@/lib/cloud/fstWebUsers'
+import {
+  buildWebAppUser,
+  resolveFstWebProfile,
+  type FstWebUserProfile,
+} from '@/lib/cloud/fstWebUsers'
 import { useFstAuth } from './FstAuthContext'
 
 type FstWebSessionValue = {
@@ -16,11 +20,19 @@ const FstWebSessionContext = createContext<FstWebSessionValue>({
 })
 
 export function FstWebSessionProvider({ children }: { children: ReactNode }) {
-  const { user, logout } = useFstAuth()
-  const profile = useMemo(
-    () => resolveFstWebProfile(user?.email ?? null, user?.uid ?? null),
-    [user?.email, user?.uid],
-  )
+  const { user, logout, profile: authProfile } = useFstAuth()
+  const profile = useMemo((): FstWebUserProfile | null => {
+    if (authProfile) return authProfile
+    if (!user?.email) return null
+    return (
+      resolveFstWebProfile(user.email, user.uid) ?? {
+        email: user.email.trim().toLowerCase(),
+        roleId: 'employee',
+        displayName: user.displayName || user.email,
+        uid: user.uid,
+      }
+    )
+  }, [authProfile, user?.email, user?.uid, user?.displayName])
   const appUser = useMemo(() => (profile ? buildWebAppUser(profile) : null), [profile])
 
   const value = useMemo(

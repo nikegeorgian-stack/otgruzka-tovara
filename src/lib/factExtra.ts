@@ -1,18 +1,21 @@
-import { hoursForCode } from './codes'
+import { hoursForCode, isWorkDayCode } from './codes'
 import type { DayCode, MonthSheet } from './types'
 
 export const FACT_EXTRA_HOURS_OPTIONS = [1, 2, 3, 4, 5, 6] as const
 export type FactExtraHours = 0 | 1 | 2 | 3 | 4 | 5 | 6
 
-/** Множитель оплаты доп. часов сверх нормы смены */
-export const OVERTIME_EXTRA_MULTIPLIER = 1.5
+/**
+ * @deprecated Используйте ступени в payrollRates (110/115/120%).
+ * Оставлено для обратной совместимости импортов.
+ */
+export const OVERTIME_EXTRA_MULTIPLIER = 1.2
 
 export function cellLookupKey(rowId: string, dateKey: string): string {
   return `${rowId}|${dateKey}`
 }
 
 export function isWorkCode(code: DayCode): boolean {
-  return code === '8' || code === '11' || code === 'Н' || code === '22'
+  return isWorkDayCode(code)
 }
 
 export function getFactExtraHours(

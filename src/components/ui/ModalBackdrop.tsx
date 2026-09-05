@@ -1,6 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalScope, type ModalInitialFocus } from '@/hooks/useModalScope'
+import { useWindowChrome } from '@/hooks/useWindowChrome'
+import { CHROME_BACKDROP_CLASS } from '@/lib/ui/chromeLayout'
 import { getModalPortalRoot } from '@/lib/ui/modalScope'
 
 type Props = {
@@ -12,34 +14,57 @@ type Props = {
   onPrimaryAction?: () => void
   disableEnterSubmit?: boolean
   initialFocus?: ModalInitialFocus
-  /** id заголовка для aria-labelledby */
   labelledBy?: string
   className?: string
   panelClassName?: string
+  /** Заголовок для панели свёрнутых окон */
+  title?: string
+  minimizable?: boolean
+  ephemeral?: boolean
+  dirty?: boolean
+  onSaveDirty?: () => void | Promise<void>
 }
 
 /**
  * Оболочка для кастомных модалок (без шапки AppDialog).
- * Даёт изоляцию клавиатуры, клик по фону и Tab-ловушку.
+ * Та же политика окон: фон → свернуть, закрытие → спросить если dirty.
  */
 export function ModalBackdrop({
   open,
   onClose,
   children,
-  zIndex: zIndexProp = 130,
+  zIndex: zIndexProp = 420,
   blockBackdropClose = false,
   onPrimaryAction,
   disableEnterSubmit,
   initialFocus = 'first',
   labelledBy,
-  className = 'app-dialog-backdrop fixed inset-0 flex items-end justify-center p-0 sm:items-center sm:p-4',
-  panelClassName = 'app-dialog-panel flex max-h-[min(92vh,900px)] w-full flex-col overflow-hidden rounded-t-sm border border-grid bg-white shadow-sm sm:rounded-sm',
+  className = CHROME_BACKDROP_CLASS,
+  panelClassName =
+    'app-dialog-panel flex w-full flex-col overflow-hidden rounded-t-sm border border-grid bg-white shadow-sm sm:rounded-sm',
+  title = 'Окно',
+  minimizable,
+  ephemeral = false,
+  dirty = false,
+  onSaveDirty,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
-  const { zIndex: stackZIndex } = useModalScope({
+  const { visible, requestClose, onBackdropInteract } = useWindowChrome({
     open,
+    title,
     onClose,
+    dirty,
+    onSaveDirty,
+    minimizable,
+    ephemeral,
+  })
+
+  const { zIndex: stackZIndex } = useModalScope({
+    open: visible,
+    onClose: () => {
+      void requestClose()
+    },
     containerRef: panelRef,
     onPrimaryAction,
     disableEnterSubmit,
@@ -48,25 +73,31 @@ export function ModalBackdrop({
   const zIndex = Math.max(zIndexProp, stackZIndex)
 
   useEffect(() => {
-    if (!open) return
+    if (!visible) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = prev
     }
-  }, [open])
+  }, [visible])
 
-  if (!open) return null
+  const onBackdropMouseDown = useCallback(
+    (e: MouseEvent) => {
+      if (blockBackdropClose) return
+      if (e.target !== e.currentTarget) return
+      onBackdropInteract()
+    },
+    [blockBackdropClose, onBackdropInteract],
+  )
+
+  if (!visible) return null
 
   return createPortal(
     <div
       className={className}
       style={{ zIndex }}
       role="presentation"
-      onMouseDown={(e) => {
-        if (blockBackdropClose) return
-        if (e.target === e.currentTarget) onClose()
-      }}
+      onMouseDown={onBackdropMouseDown}
     >
       <div
         ref={panelRef}

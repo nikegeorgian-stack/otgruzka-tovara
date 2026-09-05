@@ -8,15 +8,19 @@ export type PageOverflowItem = {
   disabled?: boolean
   title?: string
   hidden?: boolean
+  /** data-coach на пункте меню */
+  coach?: string
 }
 
 type Props = {
   items: PageOverflowItem[]
   /** Дополнительные кнопки рядом с «Ещё» */
   children?: ReactNode
+  /** data-coach на кнопке «Ещё» */
+  moreCoach?: string
 }
 
-export function PageActionOverflow({ items, children }: Props) {
+export function PageActionOverflow({ items, children, moreCoach }: Props) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -45,6 +49,7 @@ export function PageActionOverflow({ items, children }: Props) {
             aria-expanded={open}
             aria-haspopup="menu"
             title={t('workspace.moreActions')}
+            {...(moreCoach ? { 'data-coach': moreCoach } : {})}
           >
             ⋯ {t('workspace.more')}
           </button>
@@ -67,6 +72,7 @@ export function PageActionOverflow({ items, children }: Props) {
                   }}
                   disabled={item.disabled}
                   title={item.title}
+                  {...(item.coach ? { 'data-coach': item.coach } : {})}
                 >
                   {item.label}
                 </button>

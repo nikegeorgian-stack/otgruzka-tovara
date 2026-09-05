@@ -1,0 +1,16 @@
+---
+description: Coach sync after UI changes (scoped)
+globs: src/components/**/*,src/pages/**/*,src/lib/coach/**/*,src/i18n/**/*
+alwaysApply: false
+---
+
+# Коуч синхронизируется с UI
+
+После изменения экранов/кнопок/меню:
+
+1. `data-coach="…"` на контролах
+2. `src/lib/coach/guides/catalog.ts` (+ `extraGuides.ts`)
+3. i18n RU/KA/EN `coach.guide.*`
+4. Битые шаги — переписать, не оставлять
+
+Проверка: `node scripts/audit-coach-coverage.mjs`

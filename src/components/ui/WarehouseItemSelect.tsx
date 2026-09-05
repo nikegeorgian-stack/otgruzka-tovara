@@ -1,4 +1,5 @@
 import { useI18n } from '@/context/I18nContext'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import type { WarehouseItem } from '@/lib/warehouse/types'
 
 type Props = {
@@ -33,7 +34,7 @@ export function WarehouseItemSelect({
           <option value="">{placeholder ?? '—'}</option>
           {options.map((o) => (
             <option key={o.id} value={o.id}>
-              {o.name}
+              {warehouseItemDisplayName(o)}
             </option>
           ))}
         </select>

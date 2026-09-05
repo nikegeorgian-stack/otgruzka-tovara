@@ -108,6 +108,8 @@ export function buildA2LinePortugalSalesOrder(opts: BuildA2LineSalesOrderOpts = 
     counterpartyId: cp?.id,
     customer: cp?.name ?? A2LINE_ORDER_META.counterpartyName,
     status: 'confirmed',
+    commercialStatus: 'confirmed',
+    fulfillmentStatus: 'unplanned',
     orderDate,
     dueDate,
     region: A2LINE_ORDER_META.region,

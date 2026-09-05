@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { ProductionKeeperModal } from '@/components/production/ProductionKeeperModal'
 import { Button } from '@/components/ui/Button'
 import { useI18n } from '@/context/I18nContext'
@@ -53,7 +54,7 @@ export function ProductionRequestsPanel({
 
   const lineTitle = (id: ProductionRequest['lineId']) => {
     const line = PRODUCTION_LINES.find((l) => l.id === id)
-    return line ? (locale === 'ka' ? line.labelKa : line.labelRu) : id
+    return line ? (labelRuKa(locale, line.labelRu, line.labelKa)) : id
   }
 
   function handlePost(req: ProductionRequest) {

@@ -1,3 +1,4 @@
+import type { Locale } from '@/i18n/types'
 import { newId } from '@/lib/production/files'
 import { allocateInternalCode } from '@/lib/warehouse/itemHistory'
 import { suggestInternalBarcode } from '@/lib/warehouse/labelCodes'
@@ -51,7 +52,7 @@ export function filterFormulationComponentItems(
 export function buildOutputWarehouseItem(
   recipe: FormulationRecipe,
   warehouse: WarehouseStore,
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
 ): WarehouseItem {
   const existing = recipe.outputWarehouseItemId
     ? warehouse.items.find((i) => i.id === recipe.outputWarehouseItemId)
@@ -104,7 +105,7 @@ export function buildOutputWarehouseItem(
 export function syncFormulationRecipeWarehouse(
   recipe: FormulationRecipe,
   warehouse: WarehouseStore,
-  locale: 'ru' | 'ka' = 'ru',
+  locale: Locale = 'ru',
 ): { recipe: FormulationRecipe; outputItem: WarehouseItem } {
   const outputItem = buildOutputWarehouseItem(recipe, warehouse, locale)
   return {

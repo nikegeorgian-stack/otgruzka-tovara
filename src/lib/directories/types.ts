@@ -1,5 +1,6 @@
 export type DirectorySection =
   | 'codes'
+  | 'payAccrual'
   | 'employees'
   | 'brigades'
   | 'positions'
@@ -16,6 +17,7 @@ export const DIRECTORY_SECTIONS: { id: DirectorySection; labelKey: string }[] = 
   { id: 'packagingRecipes', labelKey: 'directories.tab.packagingRecipes' },
   { id: 'formulations', labelKey: 'directories.tab.formulations' },
   { id: 'codes', labelKey: 'directories.tab.codes' },
+  { id: 'payAccrual', labelKey: 'directories.tab.payAccrual' },
   { id: 'employees', labelKey: 'directories.tab.employees' },
   { id: 'brigades', labelKey: 'directories.tab.brigades' },
   { id: 'positions', labelKey: 'directories.tab.positions' },

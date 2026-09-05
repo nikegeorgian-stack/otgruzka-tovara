@@ -1,23 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
+import { usePrintFit } from '@/hooks/usePrintFit'
 import { CloseIcon } from '@/components/ui/icons'
 import { exportPrintAreaToPdf } from '@/lib/pdfExport'
-import { fitPrintPages, resetPrintFit } from '@/lib/printFit'
 import type { Counterparty } from '@/lib/counterparties/types'
 import { DirectoryFieldPicker } from '@/components/ui/DirectoryFieldPicker'
 import { LoadingPickCounterpartyModal } from '@/components/warehouse/LoadingPickCounterpartyModal'
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import type { FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
 import type { PackagingRecipe } from '@/lib/packaging/types'
 import { LoadingPickProductModal } from '@/components/warehouse/LoadingPickProductModal'
 import { LoadingQuickProductModal } from '@/components/warehouse/LoadingQuickProductModal'
 import { LoadingWeightPromptModal } from '@/components/warehouse/LoadingWeightPromptModal'
 import { listLoadingShipments, buildCombinedLoadingShipmentInput, sumLoadingShipments } from '@/lib/warehouse/loadingShipments'
-import { buildA2LinePortugalMay2026Documents } from '@/lib/warehouse/loadingPresets'
-import { buildA2LineCounterparty, findA2LineCounterparty } from '@/lib/counterparties/presets'
 import {
   findFinishedProductForItem,
   resolveLoadingLineProfile,
@@ -45,6 +44,7 @@ import {
 import { resolveSalesOrderLink, type SalesOrderLinkInfo } from '@/lib/sales/loadingLink'
 import type { SalesOrder } from '@/lib/sales/types'
 import type { LoadingShipment, LoadingShipmentLine, WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
+import { isLotAvailableForShipment, lotQcBadgeKey } from '@/lib/production/finishedGoodsLots'
 import {
   WarehouseLoadingPrintSheet,
   type LoadingPrintMeta,
@@ -55,6 +55,8 @@ type UiLine = {
   productKey: string
   itemId?: string
   finishedProductId?: string
+  lotId?: string
+  batchNo?: string
   name: string
   note: string
   rollLengthM: string
@@ -115,6 +117,7 @@ type Props = {
   warehouseId: string
   counterparties: Counterparty[]
   finishedProducts: FinishedProduct[]
+  finishedGoodsLots?: FinishedGoodsLot[]
   packagingRecipes: PackagingRecipe[]
   keeperId?: string
   keeperName?: string
@@ -128,12 +131,16 @@ type Props = {
   onPostLoadingShipment: (
     shipmentId: string,
     args?: { keeperId?: string; keeperName?: string },
-  ) => import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+  ) =>
+    | import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult
+    | Promise<import('@/lib/warehouse/loadingShipments').PostLoadingShipmentResult>
   onRemoveLoadingShipment: (shipmentId: string) => void
   salesOrders?: SalesOrder[]
   onOpenSalesOrder?: (orderId: string) => void
   pendingOpenShipmentId?: string | null
   onPendingOpenConsumed?: () => void
+  /** Из журнала: только форма, без переключателя «журнал/форма» */
+  dialogMode?: boolean
 }
 
 function emptyUiLine(): UiLine {
@@ -157,6 +164,7 @@ function emptyUiLine(): UiLine {
     boxes: '',
     boxTareKg: '',
     palletPlaces: '',
+    lotId: undefined,
     weightManual: false,
     color: '',
     labelNote: '',
@@ -175,6 +183,8 @@ function shipmentLineToUiLine(l: LoadingShipmentLine): UiLine {
         : '',
     itemId: l.itemId,
     finishedProductId: l.finishedProductId,
+    lotId: l.lotId,
+    batchNo: l.batchNo,
     name: l.name,
     note: l.note,
     rollLengthM: l.rollLengthM ? String(l.rollLengthM) : '',
@@ -340,6 +350,7 @@ export function WarehouseLoadingTab({
   warehouseId,
   counterparties,
   finishedProducts,
+  finishedGoodsLots,
   packagingRecipes,
   keeperId,
   keeperName,
@@ -354,10 +365,11 @@ export function WarehouseLoadingTab({
   onOpenSalesOrder,
   pendingOpenShipmentId,
   onPendingOpenConsumed,
+  dialogMode = false,
 }: Props) {
   const { t, tf, locale } = useI18n()
   const { confirm } = useConfirm()
-  const [view, setView] = useState<'form' | 'journal'>('form')
+  const [view, setView] = useState<'form' | 'journal'>(dialogMode ? 'form' : 'form')
   const [state, setState] = useState<LoadingState>(() => defaultState())
   const salesOrderLink = useMemo(
     () =>
@@ -407,6 +419,15 @@ export function WarehouseLoadingTab({
     () => buildProductOptions(finishedProducts, warehouse),
     [finishedProducts, warehouse],
   )
+  const fgLots = finishedGoodsLots ?? []
+  const releasedLots = useMemo(
+    () => fgLots.filter((lot) => isLotAvailableForShipment(lot)),
+    [fgLots],
+  )
+  const regradePendingLots = useMemo(
+    () => fgLots.filter((lot) => lot.qcStatus === 'regrade_pending'),
+    [fgLots],
+  )
   const shipments = useMemo(() => listLoadingShipments(warehouse), [warehouse])
 
   const lines = useMemo(() => state.lines.map(toLine), [state.lines])
@@ -436,6 +457,35 @@ export function WarehouseLoadingTab({
     return findFinishedProductForItem(finishedProducts, opt.itemId)
   }
 
+  function lotsForLine(line: UiLine) {
+    return releasedLots.filter((lot) => {
+      if (line.finishedProductId && lot.finishedProductId !== line.finishedProductId) {
+        return false
+      }
+      if (line.itemId && lot.warehouseItemId !== line.itemId) {
+        return false
+      }
+      return true
+    })
+  }
+
+  function pickLot(lineId: string, lotId: string) {
+    const lot = releasedLots.find((row) => row.id === lotId)
+    if (!lot) {
+      patchLine(lineId, { lotId: undefined, batchNo: undefined })
+      return
+    }
+    const fp = finishedProducts.find((p) => p.id === lot.finishedProductId)
+    patchLine(lineId, {
+      lotId: lot.id,
+      batchNo: lot.batchNo,
+      finishedProductId: lot.finishedProductId,
+      itemId: lot.warehouseItemId,
+      productKey: fp ? `fp:${fp.id}` : `wi:${lot.warehouseItemId}`,
+      name: fp?.name ?? lot.batchNo,
+    })
+  }
+
   function profileOptsFromLine(line: UiLine, opt: ProductOption, packagingRecipeId?: string) {
     const fp = resolveFp(opt)
     return {
@@ -443,7 +493,7 @@ export function WarehouseLoadingTab({
       warehouseItemId: opt.itemId,
       packagingRecipes,
       packagingRecipeId: packagingRecipeId ?? line.packagingRecipeId,
-      locale: (locale === 'ka' ? 'ka' : 'ru') as 'ru' | 'ka',
+      locale,
       rollLengthM: parseNum(line.rollLengthM) || undefined,
       grammageGsm: parseNum(line.grammageGsm) || undefined,
       rollWidthM: parseNum(line.rollWidthM) || undefined,
@@ -464,7 +514,7 @@ export function WarehouseLoadingTab({
         palletLayers: parseNum(line.palletLayers) || undefined,
         boxLayers: parseNum(line.boxLayers) || undefined,
       },
-      locale === 'ka' ? 'ka' : 'ru',
+      locale,
     )
     return {
       rollsPerBox: counts.rollsPerBox > 0 ? String(counts.rollsPerBox) : line.rollsPerBox,
@@ -598,6 +648,15 @@ export function WarehouseLoadingTab({
       return
     }
     const profile = applyProfileToLine(lineId, opt)
+    const line = state.lines.find((l) => l.id === lineId)
+    const lotMatches = lotsForLine({
+      ...(line ?? emptyUiLine()),
+      itemId: opt.itemId ?? profile.productItemId,
+      finishedProductId: opt.finishedProductId ?? profile.finishedProductId,
+    })
+    if (lotMatches.length === 1) {
+      pickLot(lineId, lotMatches[0]!.id)
+    }
     const needWeight = profile.missingWeights.filter((m) => m.itemId)
     if (needWeight.length > 0) {
       setWeightPrompt({ lineId, missing: needWeight, opt })
@@ -649,6 +708,7 @@ export function WarehouseLoadingTab({
     if (!state.counterpartyId) return
     const cp = counterparties.find((c) => c.id === state.counterpartyId)
     if (!cp) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync customer name from counterparty id
     setState((s) => (s.customer === cp.name ? s : { ...s, customer: cp.name }))
   }, [counterparties, state.counterpartyId])
 
@@ -684,10 +744,14 @@ export function WarehouseLoadingTab({
       keeperName,
       lines: state.lines.map((u) => {
         const l = toLine(u)
+        const lot = releasedLots.find((row) => row.id === u.lotId)
+        const fallbackLot = lot ?? lotsForLine(u)[0]
         return {
           id: u.id,
           itemId: u.itemId,
           finishedProductId: u.finishedProductId,
+          lotId: fallbackLot?.id,
+          batchNo: fallbackLot?.batchNo,
           name: l.name,
           note: l.note,
           rollLengthM: l.rollLengthM,
@@ -714,35 +778,6 @@ export function WarehouseLoadingTab({
     }
   }
 
-  function createFromPreset(_presetId: 'a2line-portugal-2026-05') {
-    setError(null)
-    let cp = findA2LineCounterparty(counterparties)
-    if (!cp) {
-      cp = buildA2LineCounterparty(counterparties)
-      onUpsertCounterparty(cp)
-    }
-
-    const docs = buildA2LinePortugalMay2026Documents(whId).map((input) => ({
-      ...input,
-      counterpartyId: cp!.id,
-      counterpartyName: cp!.name,
-    }))
-
-    let firstId = ''
-    for (const input of docs) {
-      const id = onUpsertLoadingShipment(input)
-      if (!firstId) firstId = id
-    }
-
-    const first = docs[0]
-    if (first) {
-      setState(inputToState({ ...first, counterpartyId: cp.id, counterpartyName: cp.name }, firstId))
-    }
-    setReadOnly(false)
-    setView('journal')
-    setNotice(tf('warehouse.loading.presetCreatedMany', { count: String(docs.length) }))
-  }
-
   function saveDraft() {
     setError(null)
     const id = onUpsertLoadingShipment(buildInput())
@@ -754,9 +789,10 @@ export function WarehouseLoadingTab({
     setError(null)
     const id = onUpsertLoadingShipment(buildInput())
     setState((s) => ({ ...s, draftId: id }))
-    const res = onPostLoadingShipment(id, { keeperId, keeperName })
+    const res = await onPostLoadingShipment(id, { keeperId, keeperName })
     if (!res.ok) {
-      setError(t(res.error ?? 'warehouse.loading.errGeneric'))
+      const base = t(res.error ?? 'warehouse.loading.errGeneric')
+      setError(res.detail ? `${base}: ${res.detail}` : base)
       return
     }
     setNotice(tf('warehouse.loading.postedOk', { number: res.number }))
@@ -782,8 +818,12 @@ export function WarehouseLoadingTab({
     if (!pendingOpenShipmentId) return
     const shipments = listLoadingShipments(warehouse)
     const shipment = shipments.find((s) => s.id === pendingOpenShipmentId)
-    if (shipment) openDraft(shipment)
+    if (shipment) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot open from journal
+      openDraft(shipment)
+    }
     onPendingOpenConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot pending open
   }, [pendingOpenShipmentId])
 
   function newForm() {
@@ -852,32 +892,34 @@ export function WarehouseLoadingTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-ink">{t('warehouse.loading.heading')}</h2>
-          <p className="mt-0.5 text-sm text-stone-500">{t('warehouse.loading.subtitle')}</p>
+      {!dialogMode && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-ink">{t('warehouse.loading.heading')}</h2>
+            <p className="mt-0.5 text-sm text-stone-500">{t('warehouse.loading.subtitle')}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${
+                view === 'form' ? 'bg-accent text-white' : 'bg-stone-100 text-stone-600'
+              }`}
+              onClick={() => setView('form')}
+            >
+              {t('warehouse.loading.tabForm')}
+            </button>
+            <button
+              type="button"
+              className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${
+                view === 'journal' ? 'bg-accent text-white' : 'bg-stone-100 text-stone-600'
+              }`}
+              onClick={() => setView('journal')}
+            >
+              {t('warehouse.loading.tabJournal')} ({shipments.length})
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${
-              view === 'form' ? 'bg-accent text-white' : 'bg-stone-100 text-stone-600'
-            }`}
-            onClick={() => setView('form')}
-          >
-            {t('warehouse.loading.tabForm')}
-          </button>
-          <button
-            type="button"
-            className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${
-              view === 'journal' ? 'bg-accent text-white' : 'bg-stone-100 text-stone-600'
-            }`}
-            onClick={() => setView('journal')}
-          >
-            {t('warehouse.loading.tabJournal')} ({shipments.length})
-          </button>
-        </div>
-      </div>
+      )}
 
       {notice && <FormNotice type="info" message={notice} onDismiss={() => setNotice(null)} />}
       {error && <FormNotice type="error" message={error} onDismiss={() => setError(null)} />}
@@ -888,7 +930,7 @@ export function WarehouseLoadingTab({
         />
       )}
 
-      {view === 'journal' ? (
+      {view === 'journal' && !dialogMode ? (
         <LoadingJournal
           shipments={shipments}
           salesOrders={salesOrders}
@@ -903,9 +945,6 @@ export function WarehouseLoadingTab({
           <div className="flex flex-wrap items-center justify-end gap-2">
             {!readOnly && (
               <>
-                <Button variant="secondary" size="sm" onClick={() => createFromPreset('a2line-portugal-2026-05')}>
-                  {t('warehouse.loading.presetA2line')}
-                </Button>
                 <Button variant="secondary" size="sm" onClick={() => void clearAll()}>
                   {t('warehouse.loading.clear')}
                 </Button>
@@ -1092,11 +1131,39 @@ export function WarehouseLoadingTab({
                 </button>
               </div>
             )}
+            {fgLots.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-b border-grid bg-stone-50 px-4 py-2 text-xs">
+                {fgLots.slice(0, 6).map((lot) => (
+                  <span
+                    key={lot.id}
+                    className="rounded-full border border-grid bg-white px-2 py-1 text-stone-600"
+                  >
+                    {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                  </span>
+                ))}
+              </div>
+            )}
+            {regradePendingLots.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950">
+                <span className="font-semibold uppercase tracking-wide">
+                  {t('warehouse.loading.regradePending')}
+                </span>
+                {regradePendingLots.slice(0, 5).map((lot) => (
+                  <span
+                    key={lot.id}
+                    className="rounded-full border border-amber-300 bg-white px-2 py-1 text-[11px] font-medium text-amber-900"
+                  >
+                    {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                  </span>
+                ))}
+              </div>
+            )}
             <table className="min-w-[1400px] w-full text-sm">
               <thead>
                 <tr className="bg-stone-50 text-xs uppercase text-stone-500">
                   <th className="w-8 px-2 py-2">#</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.name')}</th>
+                  <th className="px-2 py-2 text-left">{t('warehouse.loading.lot')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.note')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.color')}</th>
                   <th className="px-2 py-2 text-left">{t('warehouse.loading.col.label')}</th>
@@ -1156,6 +1223,31 @@ export function WarehouseLoadingTab({
                         )}
                         {u.name && !u.productKey && (
                           <span className="mt-1 block truncate text-xs text-stone-500">{u.name}</span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1">
+                        <select
+                          className="w-44 max-w-full rounded border border-grid px-2 py-1.5 text-xs"
+                          value={u.lotId ?? ''}
+                          disabled={readOnly || !u.finishedProductId}
+                          onChange={(e) => pickLot(u.id, e.target.value)}
+                        >
+                          <option value="">{t('warehouse.loading.pickLot')}</option>
+                          {lotsForLine(u).map((lot) => (
+                            <option key={lot.id} value={lot.id}>
+                              {lot.batchNo} · {t(lotQcBadgeKey(lot.qcStatus))}
+                            </option>
+                          ))}
+                        </select>
+                        {!u.finishedProductId && (
+                          <p className="mt-1 text-[10px] text-stone-400">
+                            {t('warehouse.loading.pickProductFirst')}
+                          </p>
+                        )}
+                        {u.lotId && (
+                          <p className="mt-1 text-[10px] text-emerald-700">
+                            {t('warehouse.loading.lotSelected')}
+                          </p>
                         )}
                       </td>
                       <td className="px-1 py-1">
@@ -1765,6 +1857,11 @@ function LoadingPrintPreview({
   const { t } = useI18n()
   const printRef = useRef<HTMLDivElement>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const { runFit } = usePrintFit(printRef, {
+    shrinkOnly: true,
+    portrait: true,
+    deps: [lines, meta, payloadKg, palletPlaces],
+  })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1775,19 +1872,11 @@ function LoadingPrintPreview({
     return () => {
       window.removeEventListener('keydown', onKey)
       document.body.classList.remove('print-preview-open')
-      resetPrintFit(printRef.current)
     }
   }, [onClose])
 
-  useLayoutEffect(() => {
-    const id = requestAnimationFrame(() => {
-      fitPrintPages(printRef.current, { shrinkOnly: true, portrait: true })
-    })
-    return () => cancelAnimationFrame(id)
-  }, [lines, meta, payloadKg, palletPlaces])
-
   function handlePrint() {
-    fitPrintPages(printRef.current, { shrinkOnly: true, portrait: true })
+    runFit()
     requestAnimationFrame(() => window.print())
   }
 
@@ -1795,7 +1884,7 @@ function LoadingPrintPreview({
     if (!printRef.current) return
     setPdfBusy(true)
     try {
-      fitPrintPages(printRef.current, { shrinkOnly: true, portrait: true })
+      runFit()
       await exportPrintAreaToPdf(printRef.current, `pogruzka_${meta.date || 'gp'}.pdf`, {
         orientation: 'portrait',
       })
@@ -1805,7 +1894,7 @@ function LoadingPrintPreview({
   }
 
   return createPortal(
-    <div className="print-modal-root fixed inset-0 z-[100] flex flex-col bg-stone-900/60">
+    <div className="print-modal-root fixed inset-0 z-[420] flex flex-col bg-stone-900/60">
       <div className="print-modal-toolbar no-print flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-700 bg-stone-900 px-4 py-3 text-white">
         <h2 className="text-lg font-bold">{t('print.preview')}</h2>
         <div className="flex flex-wrap items-center gap-2">

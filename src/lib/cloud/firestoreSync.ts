@@ -1,12 +1,14 @@
 import { doc, getDoc, onSnapshot, runTransaction, setDoc, serverTimestamp } from 'firebase/firestore'
 import type { User } from 'firebase/auth'
-import { applyAppStoreSeeds, createDefaultStore, parseStorePayload } from '@/lib/storage'
+import { applyAppStoreSeeds, createDefaultStore, parseStorePayload, sanitizeStoreForExport } from '@/lib/storage'
 import { countA2LineSeedDocuments } from '@/lib/warehouse/loadingSeeds'
 import type { AppStore } from '@/lib/types'
 import { getFirebaseAuth, getFirestoreDb, isFirebaseConfigured } from './firebase'
 import { stripUndefinedDeep } from './firestoreSanitize'
 import { prepareCloudPayload, type PreparedCloudPayload } from './cloudPayload'
+import { clampClientPrivilegeFields } from './privilegeClamp'
 import { mergeCloudStores } from './cloudMerge'
+import { assertNoMassStoreWipe, cloudRefuseWipeUserMessage } from './refuseStoreWipe'
 import { syncStorePhotosForCloud } from './employeePhotoStorage'
 import {
   assembleFromTransaction,
@@ -14,7 +16,12 @@ import {
   writeShardedStoreToTransaction,
 } from './cloudStoreIO'
 
-import { FST_STORES_COLLECTION, resolveCloudStoreDocId, fstSyncMetaDocPath } from './firestoreSchema'
+import {
+  FST_SHARED_STORE_DOC_ID,
+  FST_STORES_COLLECTION,
+  resolveCloudStoreDocId,
+  fstSyncMetaDocPath,
+} from './firestoreSchema'
 
 const COLLECTION = FST_STORES_COLLECTION
 /** Firestore document limit is 1 MiB — warn in console if close. */
@@ -133,7 +140,11 @@ export async function loadCloudStore(authUid: string): Promise<AppStore | null> 
 export type CloudSnapshotMeta = {
   revision: number
   fingerprint: string
+  bytes: number
 }
+
+/** Лимит Firestore 1 MiB — предупреждение в UI и консоли. */
+export const FIRESTORE_STORE_WARN_BYTES = FIRESTORE_DOC_WARN_BYTES
 
 /**
  * Лёгкая подписка (~200 байт на событие вместо полного payload).
@@ -152,9 +163,11 @@ export function subscribeCloudStoreMeta(
     (snap) => {
       if (!snap.exists()) return
       const data = snap.data() as Record<string, unknown>
+      const bytesRaw = data.bytes
       onMeta({
         revision: readRevision(data),
         fingerprint: readMetaFingerprint(data),
+        bytes: typeof bytesRaw === 'number' && Number.isFinite(bytesRaw) ? bytesRaw : 0,
       })
     },
     (err) => onError?.(err),
@@ -182,6 +195,7 @@ export function subscribeCloudStore(
           onRemote(parsed, {
             revision: readRevision(data),
             fingerprint: readMetaFingerprint(data),
+            bytes: 0,
           })
         }
       } catch (err) {
@@ -241,7 +255,11 @@ export async function saveCloudStoreMerged(
         await assembleFromTransaction(transaction, docId)
 
       const { store: merged } = mergeCloudStores(base, remote ?? base, withPhotos)
-      const prepared = prepareCloudPayload(merged)
+      const actorEmail = getFirebaseAuth().currentUser?.email ?? null
+      const privilegeSafe = clampClientPrivilegeFields(merged, remote ?? base, actorEmail)
+      assertNoMassStoreWipe(remote, privilegeSafe)
+      const cloudSafe = sanitizeStoreForExport(privilegeSafe)
+      const prepared = prepareCloudPayload(cloudSafe)
       if (prepared.bytes > FIRESTORE_DOC_WARN_BYTES) {
         console.warn(
           `FST cloud: assembled store ${Math.round(prepared.bytes / 1024)} KB — шардирование снизит размер документов`,
@@ -252,7 +270,7 @@ export async function saveCloudStoreMerged(
       const { totalBytes } = writeShardedStoreToTransaction(
         transaction,
         docId,
-        merged,
+        cloudSafe,
         nextRevision,
         existingArchiveKeys,
       )
@@ -269,7 +287,7 @@ export async function saveCloudStoreMerged(
         { merge: true },
       )
 
-      return { merged, revision: nextRevision }
+      return { merged: privilegeSafe, revision: nextRevision }
     })
   })
 }
@@ -341,10 +359,12 @@ export async function ensureCloudStore(authUid: string): Promise<AppStore> {
       const before = countA2LineSeedDocuments(existing.warehouse)
       const seeded = applyAppStoreSeeds(existing)
       const after = countA2LineSeedDocuments(seeded.warehouse)
-      if (after > before || seeded.warehouse !== existing.warehouse) {
+      // Пишем в облако только аддитивные демо-документы погрузки.
+      // Нельзя сохранять из‑за любого отличия warehouse (раньше так уезжало обнуление остатков).
+      if (after > before) {
         await saveCloudStore(authUid, seeded)
       } else {
-        await ensureSyncMetaDoc(authUid, seeded)
+        await ensureSyncMetaDoc(authUid, existing)
       }
       return seeded
     }
@@ -355,6 +375,10 @@ export async function ensureCloudStore(authUid: string): Promise<AppStore> {
         await saveCloudStore(authUid, seeded)
         return seeded
       }
+    }
+    // Общая prod-база: никогда не создавать из createDefaultStore (seed-сотрудники / пустые месяцы).
+    if (docId === FST_SHARED_STORE_DOC_ID) {
+      throw new Error('cloud_shared_store_missing')
     }
     const fresh = applyAppStoreSeeds(createDefaultStore())
     await saveCloudStore(authUid, fresh)
@@ -402,6 +426,11 @@ export function cloudErrorMessage(err: unknown, fallback: string): string {
     const kb = parts[2] ? Math.round(Number(parts[2]) / 1024) : '?'
     return `Часть базы «${label}» слишком большая (${kb} KB). Уберите фото сотрудников или обратитесь к администратору.`
   }
+  if (String(err).includes('cloud_shared_store_missing')) {
+    return 'Общая облачная база не найдена. Нельзя подставить локальный seed — обратитесь к администратору (восстановление из бэкапа).'
+  }
+  const wipeHint = cloudRefuseWipeUserMessage(err, 'firestore')
+  if (wipeHint) return wipeHint
   if (hint.includes('storage') && (hint.includes('not found') || hint.includes('bucket'))) {
     return 'Firebase Storage не настроен. Данные сохранятся без фото — повторите сохранение.'
   }

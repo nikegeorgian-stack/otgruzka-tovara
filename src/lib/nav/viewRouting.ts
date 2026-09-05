@@ -10,12 +10,23 @@ export const ROUTABLE_VIEWS: ViewId[] = [
   'warehouse',
   'procurement',
   'technologist',
+  'otc',
   'hr',
   'hr_inspector',
   'finance',
   'directories',
   'journals',
+  'engineer_log',
+  'tasks',
+  'mixer',
+  'director',
+  'it',
+  'office',
+  'meals',
+  'protocols',
+  'org_tree',
   'settings',
+  'my',
 ]
 
 /** Устаревшие алиасы → канонический раздел. */

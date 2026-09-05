@@ -12,8 +12,18 @@ export const OFFICE_STRUCTURAL_UNIT_NAMES = [
 
 /** Бригады по учёткам мастеров (можно расширить в настройках). */
 export const WORKSHOP_MASTER_BRIGADES: Record<string, string[]> = {
-  'master-karlo@fibercell.net': ['Бригада пропитки №1.1', 'Бригада пропитки №1.2'],
-  'master-valera@fibercell.net': ['Бригада пропитки №2.1', 'Бригада пропитки №2.2'],
+  'master-karlo@fibercell.net': [
+    'Пропитки №1.1',
+    'Пропитки №1.2',
+    'Бригада пропитки №1.1',
+    'Бригада пропитки №1.2',
+  ],
+  'master-valera@fibercell.net': [
+    'Пропитки №2.1',
+    'Пропитки №2.2',
+    'Бригада пропитки №2.1',
+    'Бригада пропитки №2.2',
+  ],
 }
 
 export function isOfficeStructuralUnit(
@@ -36,7 +46,10 @@ export function resolveWorkshopMasterBrigades(
   userLogin: string | undefined,
   linkedEmployeeId?: string | null,
   configuredBrigades?: string[] | null,
+  opts?: { fallbackToAll?: boolean },
 ): string[] {
+  const fallbackToAll = opts?.fallbackToAll !== false
+
   if (configuredBrigades?.length) {
     const mapped = configuredBrigades.filter((b) => store.brigades.includes(b))
     if (mapped.length > 0) return mapped
@@ -72,7 +85,7 @@ export function resolveWorkshopMasterBrigades(
   })
   if (byBrigadier.length > 0) return byBrigadier
 
-  return [...store.brigades]
+  return fallbackToAll ? [...store.brigades] : []
 }
 
 /** Сотрудники выбранных бригад (для журнала явки мастера). */

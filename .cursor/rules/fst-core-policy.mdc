@@ -1,0 +1,40 @@
+---
+description: Otgruzka core policy — sources of truth, scope discipline, prohibitions (always-on, short)
+alwaysApply: true
+---
+
+# Otgruzka — core policy
+
+Прод UI: **https://otgruzka-tovara.vercel.app** · Firebase `otgruzka-tovara` · данные **SQL Connect** `otgruzka-tovara-service`.
+
+## Sources of truth (не смешивать)
+
+| Вопрос | Источник |
+|--------|----------|
+| Поведение работающего приложения | Vercel URL (Ctrl+F5), не `npm run dev` |
+| Исходный код | текущая Git-ветка в репо |
+| Операционные данные (табель, HR, склад…) | SQL Connect |
+| Схема / миграции | `dataconnect/`, `docs/SQL_CONNECT_MIGRATION.md` |
+| Факт деплоя UI | Vercel bundle `index-*.js` + `docs/DEPLOY.md` |
+| Память задачи между чатами | `.cursor/context/CURRENT_STATE.md` |
+| Карта модулей | `docs/ARCHITECTURE.md`, graphify |
+
+Подробности данных: **`OTGRUZKA.md`**, **`fst-data-integrity.mdc`**.
+
+## Scope discipline
+
+- Делай **только** то, что просит пользователь; не расширяй задачу «заодно».
+- Не rewrite стека, не массовый рефакторинг без явной просьбы.
+- Конфликт локал ↔ облако → **побеждает SQL**; не «чинить» прод seed/JSON.
+
+## Жёстко без явной просьбы
+
+Деплой, push, `clear:*`, `import:cloud*`, `migrate:*store*`, заливка локального JSON, смена `.env` на другой Firebase.
+
+Деплой UI: **`fst-deploy-otgruzka.mdc`** (только по слову «деплой»).
+
+## Перед межмодульными правками
+
+1. Прочитай `.cursor/context/CURRENT_STATE.md`
+2. Запусти **`project-guardian`** (read-only) или `npm run agent:chain-brief -- "тема"`
+3. Роутер скилов: **`fst-skill-router.mdc`** · гид: **`docs/OTGRUZKA-SKILLS-GUIDE.md`**

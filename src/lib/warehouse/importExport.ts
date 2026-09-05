@@ -1,16 +1,35 @@
-import type { WorkSheet } from 'xlsx'
-import { loadXlsx } from '@/lib/lazy/xlsx'
-import { appendWarehouseAudit } from './audit'
-import type { StockMovement, WarehouseItem, WarehouseStore } from './types'
+import {
+  downloadXlsxBuffer,
+  isExcelAdapterError,
+  loadWorkbookFromFile,
+  writeAoAWorkbook,
+  type SheetView,
+} from '@/lib/excel/workbookAdapter'
+import { saveWarehouseDocumentDraft } from './documents'
+import { nextDocumentNumber } from './docNumbering'
+import { warehouseIdempotencyKey } from './stockSafety'
+import type { StockMovement, WarehouseDocumentLine, WarehouseItem, WarehouseStore } from './types'
 
 export type ImportResult = {
+  /** Always 0 after W1/W2 — bare movements are never written. */
   movementsAdded: number
+  /** Draft WarehouseDocument receipts created (not posted). */
+  draftsCreated: number
   itemsMatched: number
   sheetsProcessed: number
+  rejected: number
+  duplicates: number
   warnings: string[]
+  draftDocumentIds?: string[]
 }
 
-export type WarehouseImportErrorCode = 'emptyWorkbook' | 'noData' | 'readFailed'
+export type WarehouseImportErrorCode =
+  | 'emptyWorkbook'
+  | 'noData'
+  | 'readFailed'
+  | 'unsupportedFile'
+  | 'fileTooLarge'
+  | 'limitsExceeded'
 
 export function warehouseImportError(code: WarehouseImportErrorCode): Error {
   const err = new Error(code)
@@ -20,6 +39,24 @@ export function warehouseImportError(code: WarehouseImportErrorCode): Error {
 
 export function isWarehouseImportError(err: unknown): err is Error & { code: WarehouseImportErrorCode } {
   return err instanceof Error && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+}
+
+function mapAdapterError(err: unknown): Error {
+  if (!isExcelAdapterError(err)) {
+    return warehouseImportError('readFailed')
+  }
+  switch (err.code) {
+    case 'unsupported_extension':
+      return warehouseImportError('unsupportedFile')
+    case 'file_too_large':
+      return warehouseImportError('fileTooLarge')
+    case 'empty_workbook':
+      return warehouseImportError('emptyWorkbook')
+    case 'limits_exceeded':
+      return warehouseImportError('limitsExceeded')
+    default:
+      return warehouseImportError('readFailed')
+  }
 }
 
 function normName(s: string): string {
@@ -45,17 +82,13 @@ function isCategoryHeader(name: string, row: unknown[]): boolean {
 }
 
 function parseSheetMovements(
-  xlsx: Awaited<ReturnType<typeof loadXlsx>>,
-  ws: WorkSheet,
+  sheet: SheetView,
   sheetName: string,
   items: WarehouseItem[],
   warehouseId: string,
   warnings: string[],
 ): Omit<StockMovement, 'id' | 'createdAt'>[] {
-  const data = xlsx.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    defval: null,
-  })
+  const data = sheet.toAoA()
   if (data.length < 5) return []
 
   const headerRow = data[1] ?? data[2]
@@ -63,10 +96,10 @@ function parseSheetMovements(
   if (headerRow) {
     for (let c = 3; c < headerRow.length; c++) {
       const v = headerRow[c]
-      if (v != null && typeof v === 'object' && (v as unknown) instanceof Date) {
+      if (v != null && v instanceof Date) {
         dateCols.push({
           col: c,
-          date: (v as Date).toISOString().slice(0, 10),
+          date: v.toISOString().slice(0, 10),
         })
       }
     }
@@ -132,15 +165,13 @@ export async function importWarehouseFromExcel(
   store: WarehouseStore,
   warehouseId?: string,
 ): Promise<{ store: WarehouseStore; result: ImportResult }> {
-  const XLSX = await loadXlsx()
-  let wb: import('xlsx').WorkBook
+  let wb
   try {
-    const buf = await file.arrayBuffer()
-    wb = XLSX.read(buf, { type: 'array', cellDates: true })
-  } catch {
-    throw warehouseImportError('readFailed')
+    wb = await loadWorkbookFromFile(file)
+  } catch (err) {
+    throw mapAdapterError(err)
   }
-  if (!wb.SheetNames.length) {
+  if (!wb.sheetNames.length) {
     throw warehouseImportError('emptyWorkbook')
   }
   const whId = warehouseId ?? store.locations[0]?.id ?? ''
@@ -148,59 +179,139 @@ export async function importWarehouseFromExcel(
   const pending: Omit<StockMovement, 'id' | 'createdAt'>[] = []
   let sheetsProcessed = 0
 
-  for (const name of wb.SheetNames) {
+  for (const name of wb.sheetNames) {
     if (/лист5|расход/i.test(name) && !/приход/i.test(name)) continue
-    const ws = wb.Sheets[name]
-    if (!ws) continue
-    const chunk = parseSheetMovements(XLSX, ws, name, store.items, whId, warnings)
+    const sheet = wb.sheet(name)
+    if (!sheet) continue
+    const chunk = parseSheetMovements(sheet, name, store.items, whId, warnings)
     if (chunk.length) {
       pending.push(...chunk)
       sheetsProcessed++
     }
   }
 
-  const createdAt = new Date().toISOString()
-  const movements: StockMovement[] = pending.map((m) => ({
-    ...m,
-    id: crypto.randomUUID(),
-    createdAt,
-  }))
-
-  const matchedItems = new Set(movements.map((m) => m.itemId))
-
-  let next: WarehouseStore = {
-    ...store,
-    movements: [...store.movements, ...movements],
-  }
-  next = appendWarehouseAudit(next, {
-    action: 'import',
-    detail: `Excel: +${movements.length} операций, листов ${sheetsProcessed}`,
-  })
-
-  if (movements.length === 0) {
-    if (warnings.length === 0) {
-      throw warehouseImportError('noData')
-    }
+  const matchedItems = new Set(pending.map((m) => m.itemId))
+  if (pending.length === 0) {
+    if (warnings.length === 0) throw warehouseImportError('noData')
     return {
       store,
       result: {
         movementsAdded: 0,
+        draftsCreated: 0,
         itemsMatched: 0,
         sheetsProcessed,
+        rejected: warnings.length,
+        duplicates: 0,
         warnings: warnings.slice(0, 30),
       },
     }
   }
 
+  const applied = applyImportPendingAsDraftReceipts(store, {
+    warehouseId: whId,
+    pending,
+    warnings,
+    sheetsProcessed,
+  })
+  return {
+    store: applied.store,
+    result: {
+      ...applied.result,
+      itemsMatched: matchedItems.size,
+      sheetsProcessed,
+    },
+  }
+}
+
+/**
+ * PHASE W2 — group parsed receipt lines into draft documents (no stock change).
+ * Idempotent via document.idempotencyKey per warehouse+date bucket.
+ */
+export function applyImportPendingAsDraftReceipts(
+  store: WarehouseStore,
+  args: {
+    warehouseId: string
+    pending: Omit<StockMovement, 'id' | 'createdAt'>[]
+    warnings?: string[]
+    sheetsProcessed?: number
+  },
+): { store: WarehouseStore; result: ImportResult } {
+  const byDate = new Map<string, Omit<StockMovement, 'id' | 'createdAt'>[]>()
+  for (const m of args.pending) {
+    if (m.type !== 'receipt') continue
+    const list = byDate.get(m.date) ?? []
+    list.push(m)
+    byDate.set(m.date, list)
+  }
+
+  let next = store
+  let draftsCreated = 0
+  let duplicates = 0
+  const draftDocumentIds: string[] = []
+  const warnings = [...(args.warnings ?? [])]
+
+  for (const [date, rows] of [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const key = warehouseIdempotencyKey({
+      source: 'excel_import',
+      sourceId: `${args.warehouseId}:${date}`,
+      role: 'receipt',
+      warehouseId: args.warehouseId,
+    })
+    const existing = next.documents.find(
+      (d) => d.idempotencyKey === key && d.status !== 'cancelled',
+    )
+    if (existing) {
+      duplicates += 1
+      draftDocumentIds.push(existing.id)
+      continue
+    }
+
+    const lines: WarehouseDocumentLine[] = rows.map((r) => ({
+      lineId: crypto.randomUUID(),
+      itemId: r.itemId,
+      quantity: r.quantity,
+      comment: r.comment,
+    }))
+    const out = saveWarehouseDocumentDraft(next, {
+      type: 'receipt',
+      number: nextDocumentNumber(next.documents, 'receipt', date),
+      date,
+      warehouseId: args.warehouseId,
+      purpose: 'purchase',
+      comment: `Импорт Excel · черновик (проведите вручную)`,
+      lines,
+      idempotencyKey: key,
+    })
+    if (!out.result.ok) {
+      warnings.push(out.result.error)
+      continue
+    }
+    next = out.store
+    draftsCreated += 1
+    draftDocumentIds.push(out.result.documentId)
+  }
+
   return {
     store: next,
     result: {
-      movementsAdded: movements.length,
-      itemsMatched: matchedItems.size,
-      sheetsProcessed,
+      movementsAdded: 0,
+      draftsCreated,
+      itemsMatched: new Set(args.pending.map((p) => p.itemId)).size,
+      sheetsProcessed: args.sheetsProcessed ?? 0,
+      rejected: (args.warnings ?? []).length,
+      duplicates,
       warnings: warnings.slice(0, 30),
+      draftDocumentIds,
     },
   }
+}
+
+async function downloadAoA(
+  sheets: { name: string; rows: (string | number | boolean | null | undefined | Date)[][] }[],
+  filename: string,
+): Promise<void> {
+  const buffer = await writeAoAWorkbook(sheets)
+  downloadXlsxBuffer(buffer, filename)
 }
 
 export async function exportWarehouseBalancesExcel(
@@ -208,7 +319,6 @@ export async function exportWarehouseBalancesExcel(
   balances: Map<string, import('./types').ItemBalance>,
   warehouseId?: string,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const loc = warehouseId
     ? store.locations.find((l) => l.id === warehouseId)?.name
     : 'Все склады'
@@ -235,10 +345,10 @@ export async function exportWarehouseBalancesExcel(
     ])
   }
 
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, (loc ?? 'Остатки').slice(0, 31))
-  XLSX.writeFile(wb, `fibercell-sklad-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  await downloadAoA(
+    [{ name: (loc ?? 'Остатки').slice(0, 31), rows }],
+    `fibercell-sklad-${new Date().toISOString().slice(0, 10)}.xlsx`,
+  )
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -247,7 +357,6 @@ export async function exportWarehouseReorderExcel(
   store: WarehouseStore,
   rows: { item: WarehouseItem; available: number; minStock: number; suggested: number }[],
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
   const locMap = new Map(store.locations.map((l) => [l.id, l.name]))
   const aoa: (string | number)[][] = [
@@ -264,9 +373,7 @@ export async function exportWarehouseReorderExcel(
       r.suggested,
     ])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'К пополнению')
-  XLSX.writeFile(wb, `fibercell-popolnenie-${today()}.xlsx`)
+  await downloadAoA([{ name: 'К пополнению', rows: aoa }], `fibercell-popolnenie-${today()}.xlsx`)
 }
 
 export async function exportWarehouseTurnoverExcel(
@@ -274,7 +381,6 @@ export async function exportWarehouseTurnoverExcel(
   rows: { itemId: string; receipt: number; issue: number; net: number }[],
   period: { from: string; to: string },
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const itemMap = new Map(store.items.map((i) => [i.id, i]))
   const catMap = new Map(store.categories.map((c) => [c.id, c.name]))
   const aoa: (string | number)[][] = [
@@ -292,21 +398,16 @@ export async function exportWarehouseTurnoverExcel(
       r.net,
     ])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Обороты')
-  XLSX.writeFile(wb, `fibercell-oboroty-${today()}.xlsx`)
+  await downloadAoA([{ name: 'Обороты', rows: aoa }], `fibercell-oboroty-${today()}.xlsx`)
 }
 
 export async function exportWarehouseAuditExcel(
   entries: { at: string; action: string; detail: string }[],
   labelFor: (action: string) => string,
 ): Promise<void> {
-  const XLSX = await loadXlsx()
   const aoa: (string | number)[][] = [['Когда', 'Действие', 'Детали']]
   for (const e of entries) {
     aoa.push([e.at.slice(0, 16).replace('T', ' '), labelFor(e.action), e.detail])
   }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Журнал')
-  XLSX.writeFile(wb, `fibercell-audit-${today()}.xlsx`)
+  await downloadAoA([{ name: 'Журнал', rows: aoa }], `fibercell-audit-${today()}.xlsx`)
 }

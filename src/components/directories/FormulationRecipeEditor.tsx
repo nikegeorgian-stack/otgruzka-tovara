@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { labelRuKa } from '@/i18n/localeFormat'
 import { AppDialog } from '@/components/ui/AppDialog'
 import { ProductColorBadge } from '@/components/ui/ProductColorBadge'
 import { useI18n } from '@/context/I18nContext'
@@ -195,7 +196,7 @@ export function FormulationRecipeEditor({
             >
               {FORMULATION_CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {locale === 'ka' ? c.labelKa : c.labelRu}
+                  {labelRuKa(locale, c.labelRu, c.labelKa)}
                 </option>
               ))}
             </select>
@@ -235,7 +236,7 @@ export function FormulationRecipeEditor({
               <option value="">—</option>
               {FORMULATION_COLOR_VARIANTS.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {locale === 'ka' ? c.labelKa : c.labelRu}
+                  {labelRuKa(locale, c.labelRu, c.labelKa)}
                 </option>
               ))}
             </select>

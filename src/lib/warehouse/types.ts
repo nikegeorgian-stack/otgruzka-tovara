@@ -21,15 +21,42 @@ export type WarehouseLocation = {
   sortOrder: number
   /** Зона учёта: сырьё, химия, выработка… */
   kind?: WarehouseLocationKind
+  /**
+   * Стабильный номер склада для фильтров/отчётов (не зависит от названия).
+   * Пример: 01, 02, WH-03.
+   */
+  code?: string
 }
 
 export type WarehouseDocumentPurpose =
   | 'purchase'
   | 'production_issue'
+  | 'production_receipt'
   | 'return'
   | 'writeoff'
   | 'transfer'
   | 'other'
+  | 'loading'
+  /** PHASE W0.5 — начальная инвентаризация для активации учёта */
+  | 'opening_inventory'
+  /** PHASE W3 — документный резерв материалов под производственный заказ */
+  | 'production_reservation'
+  | 'production_reservation_increase'
+  | 'production_reservation_release'
+  | 'production_reservation_reallocation'
+  /** PHASE P1A — передача сырья на линию / возврат */
+  | 'production_material_transfer'
+  | 'production_material_return'
+  /** PHASE P1B — фактический расход / ПФ / отходы */
+  | 'production_consumption'
+  | 'production_wip_receipt'
+  | 'production_waste_transfer'
+  /** PHASE P1C — упаковка / выпуск / regrade / reject */
+  | 'production_wip_pack_consumption'
+  | 'production_packaging_consumption'
+  | 'production_fg_receipt'
+  | 'production_fg_regrade_transfer'
+  | 'production_fg_reject_transfer'
 
 export type WarehouseDocumentStatus = 'draft' | 'posted' | 'cancelled'
 
@@ -45,6 +72,8 @@ export type WarehouseCategory = {
   id: string
   name: string
   sortOrder: number
+  /** Код группы номенклатуры для фильтров (01, 01.01…). */
+  code?: string
 }
 
 export type UnitConversion = {
@@ -69,6 +98,15 @@ export type WarehouseItem = {
   /** Внутренний код (выдаётся автоматически, менять нельзя) */
   internalCode: string
   name: string
+  /**
+   * Техническое название (задаёт только технолог).
+   * В списках приоритетнее `name`; название в накладной (`name`) не перезаписывается.
+   */
+  technicalName?: string
+  /** Наименование на грузинском (черновик из русского). Аддитивно. */
+  nameKa?: string
+  /** Наименование на английском (черновик из русского). Аддитивно. */
+  nameEn?: string
   categoryId: string
   warehouseId: string
   unit: string
@@ -95,11 +133,23 @@ export type StockMovement = {
   quantity: number
   date: string
   documentId?: string
+  /** PHASE W1 — link to WarehouseDocumentLine.lineId */
+  documentLineId?: string
   documentNo?: string
+  /** PHASE W0.6/W1 — cloud atomic group when part of warehouse transaction */
+  transactionGroupId?: string
   brigade?: string
   comment?: string
   /** Резерв под заказ планировщика */
   productionOrderId?: string
+  /** PHASE P1B — сменный отчёт */
+  shiftReportId?: string
+  /** PHASE P1C — отчёт упаковки */
+  packagingReportId?: string
+  /** PHASE P1C — лот готовой продукции */
+  finishedGoodsLotId?: string
+  /** Резерв под задание миксеру (ЗД-…) */
+  mixTaskId?: string
   /** if entered in alternate unit */
   inputUnit?: string
   /** Себестоимость за базовую единицу (для прихода) — для средневзвешенной оценки */
@@ -109,11 +159,24 @@ export type StockMovement = {
   /** Срок годности партии (YYYY-MM-DD) */
   expiryDate?: string
   createdAt: string
+  /** PHASE W1 — immutable actor snapshot */
+  createdBy?: string
+  createdByName?: string
 }
 
 export type WarehouseDocumentLine = {
+  /** PHASE W1 — stable line id (optional on legacy rows) */
+  lineId?: string
   itemId: string
   quantity: number
+  /** Snapshot at post time — rename of item must not rewrite history */
+  itemCodeSnapshot?: string
+  itemNameSnapshot?: string
+  unitSnapshot?: string
+  plannedQty?: number
+  actualQty?: number
+  sourceLocationId?: string
+  destinationLocationId?: string
   /** Снимок учётного остатка на момент ревизии (документ inventory) */
   bookQty?: number
   /** Сомнительные данные при пересчёте */
@@ -125,16 +188,55 @@ export type WarehouseDocumentLine = {
   batchNo?: string
   /** Срок годности (YYYY-MM-DD, для прихода) */
   expiryDate?: string
+  /** Комментарий к строке (opening inventory / ревизия) */
+  comment?: string
+  /** PHASE W3 — snapshot потребности / резерва / дефицита */
+  requiredQty?: number
+  reservedQty?: number
+  shortageQty?: number
+  /** PHASE P1A — выдано / сверх резерва */
+  issuedQty?: number
+  overReserveQty?: number
+  /** Ручная замена партии (причина на документе) */
+  batchOverrideReason?: string
 }
 
-export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory'
+export type WarehouseDocumentType = 'receipt' | 'issue' | 'inventory' | 'reservation'
+
+/** PHASE W3 — устойчивый дефицит материалов (не hard-delete) */
+export type MaterialShortageStatus = 'open' | 'partial' | 'resolved'
+
+export type MaterialShortageRecord = {
+  id: string
+  productionOrderId: string
+  /** Стабильный ключ строки потребности (role или line id) */
+  materialLineKey: string
+  itemId: string
+  warehouseId: string
+  requiredDate: string
+  requiredQty: number
+  reservedQty: number
+  shortageQty: number
+  orderPriority: 'normal' | 'urgent' | number
+  status: MaterialShortageStatus
+  createdAt: string
+  updatedAt: string
+  resolvedAt?: string
+  sourceReservationDocumentId?: string
+  /** Детерминированный ключ идемпотентности: order+item+warehouse+line */
+  idempotencyKey: string
+}
 
 export type WarehouseDocument = {
   id: string
   type: WarehouseDocumentType
   number: string
   date: string
+  /** PHASE W1 — optional datetime (legacy uses `date` only) */
+  documentDateTime?: string
   warehouseId: string
+  sourceWarehouseId?: string
+  destinationWarehouseId?: string
   /** Вид операции / основание */
   purpose?: WarehouseDocumentPurpose
   counterparty?: string
@@ -142,6 +244,11 @@ export type WarehouseDocument = {
   contractId?: string
   /** Снимок номера договора на момент проводки */
   contractNumber?: string
+  basisType?: string
+  basisId?: string
+  basisNumber?: string
+  responsibleEmployeeId?: string
+  responsibleEmployeeNameSnapshot?: string
   brigade?: string
   comment?: string
   writeoffReason?: WriteoffReasonId
@@ -153,6 +260,7 @@ export type WarehouseDocument = {
   cancelledAt?: string
   cancelledBy?: string
   cancelledByName?: string
+  cancellationReason?: string
   reversalDocumentId?: string
   reversesDocumentId?: string
   /** Кладовщик, проводивший документ */
@@ -160,6 +268,10 @@ export type WarehouseDocument = {
   keeperName?: string
   /** Связь с заявкой производства */
   productionRequestId?: string
+  /** Связь с заказом планировщика (резерв материалов) */
+  productionOrderId?: string
+  /** Связь с заданием миксеру (резерв) */
+  mixTaskId?: string
   /** Склад-получатель при перемещении */
   targetWarehouseId?: string
   /** Связанная пара приход/расход при перемещении */
@@ -167,17 +279,82 @@ export type WarehouseDocument = {
   /** Ключ инвойса RS.ge (серия/номер) */
   invoiceKey?: string
   sellerTin?: string
+  /** Заказ закупки (ЗЗ), из которого создан приход */
+  purchaseOrderId?: string
   lines: WarehouseDocumentLine[]
   /** Связь с замесом пропитки */
   batchRunId?: string
   /** Связь с заявкой кладовщика на пополнение (ЗКл) */
   keeperRequestId?: string
-  docRole?: 'batch_issue' | 'batch_receipt' | 'transfer_issue' | 'transfer_receipt' | 'reversal'
+  /**
+   * Детерминированный ключ идемпотентности (auto-docs).
+   * Старые записи без поля читаются как раньше.
+   */
+  idempotencyKey?: string
+  /** PHASE W0.5 — документ начальной инвентаризации (активация учёта) */
+  isOpeningInventory?: boolean
+  /** PHASE W3 — корректирует предыдущий документ резерва / связанный документ */
+  correctsDocumentId?: string
+  relatedDocumentIds?: string[]
+  /** Причина ручной корректировки / перераспределения */
+  reservationReason?: string
+  /** PHASE W0.6/W3 — cloud atomic group */
+  transactionGroupId?: string
+  docRole?:
+    | 'batch_issue'
+    | 'batch_receipt'
+    | 'transfer_issue'
+    | 'transfer_receipt'
+    | 'reversal'
+    | 'production_receipt'
+    | 'production_issue'
+    | 'loading_issue'
+    | 'production_reservation'
+    | 'production_reservation_release'
+    | 'production_transfer_issue'
+    | 'production_transfer_receipt'
+    | 'production_return_issue'
+    | 'production_return_receipt'
+    | 'production_consumption'
+    | 'production_wip_receipt'
+    | 'production_waste_issue'
+    | 'production_waste_receipt'
+    | 'production_wip_pack_consumption'
+    | 'production_packaging_consumption'
+    | 'production_fg_receipt'
+    | 'production_fg_regrade_transfer'
+    | 'production_fg_reject_transfer'
+  /** PHASE P1A — линия производства */
+  productionLineId?: string
+  /** PHASE P1B — сменный отчёт */
+  shiftReportId?: string
+  /** PHASE P1C — отчёт упаковки */
+  packagingReportId?: string
+  /** PHASE P1C — лот готовой продукции */
+  finishedGoodsLotId?: string
+  /** PHASE P1A — ссылка на документ резерва */
+  reservationDocumentId?: string
+  /** Причина превышения резерва / возврата */
+  overReserveReason?: string
+  returnReason?: string
+  /** Связь с погрузкой ГП */
+  loadingShipmentId?: string
+  /** Когда документ выгружен бухгалтеру / в Balance */
+  exportedAt?: string
+  exportedBy?: string
+  exportedByName?: string
   /** Блокировка редактирования черновика другим пользователем */
   lockedBy?: string
   lockedByName?: string
   lockedAt?: string
   createdAt: string
+  createdBy?: string
+  createdByName?: string
+  updatedAt?: string
+  updatedBy?: string
+  updatedByName?: string
+  /** Optimistic revision for concurrent draft edits */
+  revision?: number
 }
 
 /** Строка инвойса RS.ge / eAPI */
@@ -326,6 +503,8 @@ export type LoadingShipmentLine = {
   id: string
   itemId?: string
   finishedProductId?: string
+  lotId?: string
+  batchNo?: string
   name: string
   note: string
   rollLengthM: number
@@ -393,6 +572,8 @@ export type LoadingShipment = {
   createdAt: string
   updatedAt: string
   postedAt?: string
+  /** Авто-расход ГП при проведении погрузки */
+  postedDocumentId?: string
 }
 
 /** Черновик выдачи за день — проводится одним расходом в конце смены */
@@ -438,6 +619,58 @@ export type WarehouseStore = {
   loadingShipments?: LoadingShipment[]
   /** Закрытые учётные периоды склада (YYYY-MM) — проводки запрещены */
   closedMonths?: string[]
+  /** PHASE G2 — история закрытия/открытия периодов */
+  periodHistory?: Array<{
+    id: string
+    month: string
+    action: 'close' | 'reopen'
+    at: string
+    actorUid: string
+    actorEmail?: string
+    reason?: string
+  }>
+  /**
+   * PHASE W0.5 — статус достоверности учёта по каждому складу.
+   * Отсутствие записи = uninitialized (legacy).
+   */
+  accountingByWarehouse?: WarehouseAccountingState[]
+  /** PHASE W3 — дефициты материалов (soft-resolve, без hard delete) */
+  materialShortages?: MaterialShortageRecord[]
+  /**
+   * PHASE P1A — привязка lineId → production warehouse/location (стабильные ID).
+   * Не заполняется автоматически из пользовательских данных.
+   */
+  productionLineBindings?: ProductionLineLocationBinding[]
+  /**
+   * PHASE P1B — стабильный ID зоны брака/отходов (без name matching).
+   */
+  scrapLocationId?: string
+}
+
+/** PHASE P1A — конфиг линии → склад/location производства */
+export type ProductionLineLocationBinding = {
+  /** Stable row id (= lineId for cloud merge) */
+  id: string
+  lineId: string
+  productionWarehouseId: string
+  productionLocationId: string
+  note?: string
+}
+
+/** PHASE W0.5 — состояние подтверждения остатков по складу */
+export type WarehouseAccountingStatus = 'uninitialized' | 'reconciling' | 'active'
+
+export type WarehouseAccountingState = {
+  /** Stable row id for cloud merge (= warehouseId) */
+  id: string
+  warehouseId: string
+  status: WarehouseAccountingStatus
+  openingInventoryDocumentId?: string
+  activatedAt?: string
+  activatedBy?: string
+  activatedByName?: string
+  note?: string
+  revision?: number
 }
 
 export type ItemBalance = {

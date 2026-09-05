@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { CreateLinkedTaskButton } from '@/components/tasks/CreateLinkedTaskButton'
 import { useI18n } from '@/context/I18nContext'
+import type { AccessStore, AppUser } from '@/lib/access/types'
+import { draftFromProductionMaterialShortage } from '@/lib/tasks/linkRefs'
+import type { WorkTaskDraft } from '@/lib/tasks/types'
 import {
   materialRoleLabelKey,
   orderNeedsMaterialPlanning,
@@ -14,15 +18,30 @@ import {
 } from '@/lib/planner/materialStock'
 import type { ProductionOrder } from '@/lib/planner/types'
 import { formatQty } from '@/lib/warehouse/stock'
-import type { StockMovement, WarehouseItem } from '@/lib/warehouse/types'
+import type { StockMovement, WarehouseAccountingState, WarehouseDocument, WarehouseItem } from '@/lib/warehouse/types'
+import {
+  computeOrderProvisioningStatus,
+  isLegacyBareReserveMovement,
+  listReservationDocumentsForOrder,
+} from '@/lib/warehouse/productionReservations'
+import { computeLineMaterialBalances } from '@/lib/warehouse/productionMaterialHandoff'
+import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 
 type Props = {
   orders: ProductionOrder[]
   warehouseItems: WarehouseItem[]
   warehouseMovements: StockMovement[]
+  warehouseDocuments?: WarehouseDocument[]
+  warehouseLocations?: import('@/lib/warehouse/types').WarehouseLocation[]
+  productionLineBindings?: import('@/lib/warehouse/types').ProductionLineLocationBinding[]
+  warehouseAccounting?: WarehouseAccountingState[]
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
   onSelectOrder?: (orderId: string) => void
+  onOpenWarehouseDocument?: (documentId: string) => void
+  access?: AccessStore
+  currentUser?: AppUser | null
+  onCreateWorkTask?: (draft: WorkTaskDraft) => string
 }
 
 function StatusBadge({
@@ -74,17 +93,39 @@ export function PlannerMaterialsPanel({
   orders,
   warehouseItems,
   warehouseMovements,
+  warehouseDocuments = [],
+  warehouseLocations = [],
+  productionLineBindings = [],
+  warehouseAccounting,
   onReserveOrder,
   onUnreserveOrder,
   onSelectOrder,
+  onOpenWarehouseDocument,
+  access,
+  currentUser,
+  onCreateWorkTask,
 }: Props) {
   const { t, tf } = useI18n()
   const [filter, setFilter] = useState<'all' | 'shortage' | 'unreserved'>('all')
   const [notice, setNotice] = useState<string | null>(null)
 
   const warehouse = useMemo(
-    () => ({ items: warehouseItems, movements: warehouseMovements }),
-    [warehouseItems, warehouseMovements],
+    () => ({
+      items: warehouseItems,
+      movements: warehouseMovements,
+      documents: warehouseDocuments,
+      locations: warehouseLocations,
+      accountingByWarehouse: warehouseAccounting,
+      productionLineBindings,
+    }),
+    [
+      warehouseItems,
+      warehouseMovements,
+      warehouseDocuments,
+      warehouseLocations,
+      warehouseAccounting,
+      productionLineBindings,
+    ],
   )
 
   const relevantOrders = useMemo(
@@ -185,7 +226,7 @@ export function PlannerMaterialsPanel({
                     {formatQty(row.totalReserved)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono text-xs">
-                    {formatQty(row.available)}
+                    {row.available == null ? '—' : formatQty(row.available)}
                   </td>
                   <td
                     className={`px-3 py-2 text-right font-mono text-xs font-semibold ${
@@ -248,7 +289,10 @@ export function PlannerMaterialsPanel({
                     {order.orderNumber} · {order.productName}
                   </button>
                   <p className="text-xs text-stone-500">
-                    {t(`planner.status.${order.status}`)} · {formatQty(order.totalQtyMp)} п.м
+                    {t(`planner.status.${order.status}`)} · {formatQty(order.totalQtyMp)} п.м ·{' '}
+                    {t(
+                      `planner.material.provisioning.${computeOrderProvisioningStatus(order, warehouse)}`,
+                    )}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -269,8 +313,98 @@ export function PlannerMaterialsPanel({
                   >
                     {t('planner.material.unreserveBtn')}
                   </Button>
+                  {status.shortage > 0 && access && currentUser && onCreateWorkTask ? (
+                    <CreateLinkedTaskButton
+                      draft={draftFromProductionMaterialShortage({
+                        orderId: order.id,
+                        orderNumber: order.orderNumber,
+                        productName: order.productName,
+                        createdBy: currentUser.id,
+                        createdByName: currentUser.displayName,
+                      })}
+                      access={access}
+                      currentUser={currentUser}
+                      onCreate={onCreateWorkTask}
+                      labelKey="tasks.link.materialShortage"
+                    />
+                  ) : null}
                 </div>
               </div>
+              {(() => {
+                const loc = resolveProductionLineLocation(
+                  warehouse as import('@/lib/warehouse/types').WarehouseStore,
+                  order.lineId,
+                )
+                if (!loc.ok) {
+                  return (
+                    <div className="border-b border-grid bg-stone-50 px-4 py-2 text-xs text-amber-800">
+                      {t('warehouse.handoff.setupHint')}
+                    </div>
+                  )
+                }
+                const atLine = computeLineMaterialBalances(
+                  warehouse as import('@/lib/warehouse/types').WarehouseStore,
+                  {
+                    productionOrderId: order.id,
+                    productionLocationId: loc.productionLocationId,
+                    lineId: order.lineId,
+                  },
+                )
+                if (!atLine.length) return null
+                return (
+                  <div className="border-b border-grid bg-sky-50/50 px-4 py-2 text-xs text-stone-700">
+                    {atLine.map((row) => {
+                      const name =
+                        warehouseItems.find((i) => i.id === row.itemId)?.name ?? row.itemId
+                      return (
+                        <div key={`${row.itemId}-${row.batchNo ?? ''}`} className="flex flex-wrap gap-3">
+                          <span className="font-medium">{name}</span>
+                          <span>
+                            {t('planner.material.issuedToLine')}: {formatQty(row.transferredQty)}
+                          </span>
+                          <span>
+                            {t('planner.material.atLine')}: {formatQty(row.remainingQty)}
+                          </span>
+                          <span>
+                            {t('planner.material.returned')}: {formatQty(row.returnedQty)}
+                          </span>
+                          {row.batchNo ? <span>партия {row.batchNo}</span> : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+              {(() => {
+                const docs = listReservationDocumentsForOrder(
+                  { documents: warehouseDocuments },
+                  order.id,
+                )
+                const legacy = warehouseMovements.some(
+                  (m) =>
+                    m.productionOrderId === order.id && isLegacyBareReserveMovement(m),
+                )
+                if (!docs.length && !legacy) return null
+                return (
+                  <div className="border-b border-grid bg-amber-50/40 px-4 py-2 text-xs text-stone-700">
+                    <span className="font-semibold">{t('planner.material.docsTitle')}: </span>
+                    {docs.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className="mr-2 underline hover:text-accent"
+                        onClick={() => onOpenWarehouseDocument?.(d.id)}
+                      >
+                        {d.number}
+                        {d.reservationReason ? ` (${d.reservationReason})` : ''}
+                      </button>
+                    ))}
+                    {legacy ? (
+                      <span className="text-amber-800">{t('planner.material.legacyBare')}</span>
+                    ) : null}
+                  </div>
+                )
+              })()}
               <table className="min-w-full text-sm">
                 <thead className="text-left text-xs uppercase text-stone-400">
                   <tr>
@@ -299,7 +433,7 @@ export function PlannerMaterialsPanel({
                         {formatQty(line.reservedForOrder)}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-xs">
-                        {formatQty(line.available)}
+                        {line.available == null ? '—' : formatQty(line.available)}
                       </td>
                       <td
                         className={`px-3 py-1.5 text-right font-mono text-xs ${

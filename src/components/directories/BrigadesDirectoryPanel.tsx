@@ -1,9 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { brigadeEmployeeCount } from '@/lib/brigadeManage'
-import { activeStructuralUnits } from '@/lib/monthViewOptions'
+import { brigadeAllowsBrigadier } from '@/lib/brigadeHasBrigadier'
+import {
+  activeStructuralUnits,
+  BRIGADE_UNIT_FILTER_ALL,
+  filterAndSortBrigadeList,
+  NO_STRUCTURAL_UNIT_ID,
+} from '@/lib/monthViewOptions'
 import type { AppStore } from '@/lib/types'
 
 type Props = {
@@ -13,7 +19,9 @@ type Props = {
   onRenameBrigade: (oldName: string, newName: string) => void
   onRemoveBrigade: (name: string) => void
   onSetBrigadeNameKa: (nameRu: string, nameKa: string) => void
+  onSetBrigadeNameEn?: (nameRu: string, nameEn: string) => void
   onSetBrigadeUnit?: (brigade: string, unitId: string | null) => void
+  onSetBrigadeHasBrigadier?: (brigade: string, hasBrigadier: boolean) => void
 }
 
 export function BrigadesDirectoryPanel({
@@ -23,17 +31,37 @@ export function BrigadesDirectoryPanel({
   onRenameBrigade,
   onRemoveBrigade,
   onSetBrigadeNameKa,
+  onSetBrigadeNameEn,
   onSetBrigadeUnit,
+  onSetBrigadeHasBrigadier,
 }: Props) {
-  const { t, tf } = useI18n()
+  const { t, tf, locale } = useI18n()
   const units = activeStructuralUnits(store.hrStructuralUnits)
   const { confirm } = useConfirm()
   const [newBrigade, setNewBrigade] = useState('')
   const [editingBrigade, setEditingBrigade] = useState<string | null>(null)
   const [editBrigadeName, setEditBrigadeName] = useState('')
   const [editBrigadeKa, setEditBrigadeKa] = useState('')
+  const [editBrigadeEn, setEditBrigadeEn] = useState('')
+  const [brigadeSearch, setBrigadeSearch] = useState('')
+  const [unitFilter, setUnitFilter] = useState(BRIGADE_UNIT_FILTER_ALL)
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(
     null,
+  )
+
+  const hasUnassigned = store.brigades.some((b) => !store.brigadeUnits?.[b]?.trim())
+
+  const visibleBrigades = useMemo(
+    () =>
+      filterAndSortBrigadeList({
+        brigades: store.brigades,
+        namesKa: store.brigadeNamesKa,
+        locale,
+        search: brigadeSearch,
+        brigadeUnits: store.brigadeUnits,
+        unitFilter,
+      }),
+    [brigadeSearch, locale, store.brigadeNamesKa, store.brigadeUnits, store.brigades, unitFilter],
   )
 
   function brigadeErrorMessage(err: unknown): string {
@@ -86,6 +114,9 @@ export function BrigadesDirectoryPanel({
       if (editBrigadeKa.trim()) {
         onSetBrigadeNameKa(trimmed, editBrigadeKa.trim())
       }
+      if (onSetBrigadeNameEn && editBrigadeEn.trim()) {
+        onSetBrigadeNameEn(trimmed, editBrigadeEn.trim())
+      }
       setEditingBrigade(null)
       setNotice({ type: 'success', message: t('settings.brigadeSaved') })
     } catch (err) {
@@ -119,8 +150,42 @@ export function BrigadesDirectoryPanel({
       )}
       {!compact && <p className="text-sm text-stone-500">{t('settings.brigadesHint')}</p>}
       <div className="rounded-sm border border-grid bg-white p-5 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            className="min-w-[10rem] flex-1 rounded-sm border border-grid px-2 py-1.5 text-sm sm:max-w-xs"
+            placeholder={t('month.searchBrigade')}
+            value={brigadeSearch}
+            onChange={(e) => setBrigadeSearch(e.target.value)}
+          />
+          {units.length > 0 || hasUnassigned ? (
+            <select
+              className="min-w-[9rem] rounded-sm border border-grid bg-white px-2 py-1.5 text-sm text-stone-700"
+              value={unitFilter}
+              onChange={(e) => setUnitFilter(e.target.value)}
+              title={t('month.brigadeUnitFilterHint')}
+              aria-label={t('month.brigadeUnitFilter')}
+            >
+              <option value={BRIGADE_UNIT_FILTER_ALL}>{t('month.brigadeUnitFilterAll')}</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+              {hasUnassigned ? (
+                <option value={NO_STRUCTURAL_UNIT_ID}>{t('month.brigadeUnitFilterNone')}</option>
+              ) : null}
+            </select>
+          ) : null}
+          <span className="text-xs text-stone-400">
+            {visibleBrigades.length}/{store.brigades.length}
+          </span>
+        </div>
         <ul className="space-y-2">
-          {store.brigades.map((name) => (
+          {visibleBrigades.length === 0 ? (
+            <li className="px-1 py-2 text-sm text-stone-400">{t('month.noBrigadeMatch')}</li>
+          ) : (
+            visibleBrigades.map((name) => (
             <li
               key={name}
               className="flex flex-wrap items-center gap-2 rounded-sm border border-grid bg-paper/40 px-3 py-2"
@@ -138,7 +203,13 @@ export function BrigadesDirectoryPanel({
                     className="min-w-[10rem] flex-1 rounded-sm border border-grid px-2 py-1 text-sm"
                     value={editBrigadeKa}
                     onChange={(e) => setEditBrigadeKa(e.target.value)}
-                    placeholder="GE"
+                    placeholder="KA"
+                  />
+                  <input
+                    className="min-w-[10rem] flex-1 rounded-sm border border-grid px-2 py-1 text-sm"
+                    value={editBrigadeEn}
+                    onChange={(e) => setEditBrigadeEn(e.target.value)}
+                    placeholder="EN"
                   />
                   <button
                     type="button"
@@ -159,15 +230,34 @@ export function BrigadesDirectoryPanel({
                 <>
                   <span className="flex-1 text-sm font-medium">
                     {name}
-                    {store.brigadeNamesKa[name] && (
+                    {store.brigadeNamesKa[name] ? (
                       <span className="ml-2 text-xs text-stone-400">
                         / {store.brigadeNamesKa[name]}
                       </span>
-                    )}
+                    ) : null}
+                    {store.brigadeNamesEn?.[name] ? (
+                      <span className="ml-2 text-xs text-stone-400">
+                        / {store.brigadeNamesEn[name]}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="text-xs text-stone-400">
                     {brigadeEmployeeCount(store, name)} {t('settings.empCount')}
                   </span>
+                  {onSetBrigadeHasBrigadier ? (
+                    <label
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-grid bg-white px-2 py-1 text-xs text-stone-700"
+                      title={t('settings.brigadeHasBrigadierHint')}
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded-sm"
+                        checked={brigadeAllowsBrigadier(store, name)}
+                        onChange={(e) => onSetBrigadeHasBrigadier(name, e.target.checked)}
+                      />
+                      {t('settings.brigadeHasBrigadier')}
+                    </label>
+                  ) : null}
                   {onSetBrigadeUnit && (
                     <select
                       className="max-w-[14rem] rounded-sm border border-grid px-2 py-1 text-xs"
@@ -190,6 +280,7 @@ export function BrigadesDirectoryPanel({
                       setEditingBrigade(name)
                       setEditBrigadeName(name)
                       setEditBrigadeKa(store.brigadeNamesKa[name] ?? '')
+                      setEditBrigadeEn(store.brigadeNamesEn?.[name] ?? '')
                     }}
                   >
                     {t('common.edit')}
@@ -205,7 +296,8 @@ export function BrigadesDirectoryPanel({
                 </>
               )}
             </li>
-          ))}
+            ))
+          )}
         </ul>
         <form onSubmit={handleAddBrigade} className="mt-4 flex flex-wrap gap-2">
           <input

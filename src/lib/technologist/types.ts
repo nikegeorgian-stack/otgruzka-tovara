@@ -152,11 +152,42 @@ export type RoomClimateRecord = {
   createdAt: string
 }
 
+/** Пересменка технологов: срочность сообщения. */
+export type ShiftHandoffUrgency = 'normal' | 'urgent' | 'critical'
+
+export type ShiftHandoffStatus = 'open' | 'closed'
+
+export type ShiftHandoffAck = {
+  userId?: string
+  userName: string
+  at: string
+}
+
+/** Передача дел смены → смены (внутренние нюансы, что где использовалось). */
+export type ShiftHandoffRecord = {
+  id: string
+  /** YYYY-MM-DD — день исходящей смены */
+  shiftDate: string
+  createdAt: string
+  updatedAt: string
+  authorId?: string
+  authorName?: string
+  title: string
+  body: string
+  /** Зона / линия / куб / участок */
+  area?: string
+  urgency: ShiftHandoffUrgency
+  status: ShiftHandoffStatus
+  acknowledgements: ShiftHandoffAck[]
+}
+
 export type TechnologistQcStore = {
   eadCalculations: EadCalculationRecord[]
   eadControls: EadControlRecord[]
   incomingControls: IncomingControlRecord[]
   impregnationQc: ImpregnationQcRecord[]
   roomClimateLog: RoomClimateRecord[]
+  /** Передача дел между сменами технологов */
+  shiftHandoffs: ShiftHandoffRecord[]
   settings: TechnologistQcSettings
 }

@@ -1,4 +1,6 @@
 import type { FormulationCategory, FormulationRecipe, FormulationStore } from './types'
+import { labelRuKa } from '@/i18n/localeFormat'
+import type { Locale } from '@/i18n/types'
 
 /** Стандартные пресеты граммовки — база для расчётов и подбора рецептов */
 export const STANDARD_GRAMMAGE_PRESETS: {
@@ -48,7 +50,7 @@ export function presetForRecipe(recipe: Pick<FormulationRecipe, 'grammageGsm' | 
 /** Собрать список граммовок: стандарт + база + рецепты */
 export function buildGrammageOptions(
   store: FormulationStore,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): GrammageOption[] {
   const seen = new Set<string>()
   const out: GrammageOption[] = []
@@ -65,7 +67,7 @@ export function buildGrammageOptions(
       id: p.id,
       gsm: p.gsm,
       category: p.category,
-      label: locale === 'ka' ? p.labelKa : p.labelRu,
+      label: labelRuKa(locale, p.labelRu, p.labelKa),
     })
   }
 

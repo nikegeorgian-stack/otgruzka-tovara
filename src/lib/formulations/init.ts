@@ -1,4 +1,5 @@
 import { normalizeGrammageRegistry } from './grammages'
+import { normalizeRecipeVersions } from './recipeApproval'
 import { newId } from '@/lib/production/files'
 import { isFormulationWaterComponent } from './calc'
 import type {
@@ -212,6 +213,7 @@ export function normalizeFormulationStore(
       nextInternalCode: resolveNextInternalCode(batchRuns, raw?.nextInternalCode),
       mixTasks: normalizeMixTasks(raw?.mixTasks),
       grammageRegistry: normalizeGrammageRegistry(raw?.grammageRegistry, []),
+      recipeVersions: normalizeRecipeVersions(raw?.recipeVersions),
     }
   }
 
@@ -235,6 +237,7 @@ export function normalizeFormulationStore(
     nextInternalCode: resolveNextInternalCode(batchRuns, raw.nextInternalCode),
     mixTasks: normalizeMixTasks(raw.mixTasks),
     grammageRegistry: normalizeGrammageRegistry(raw.grammageRegistry, recipes),
+    recipeVersions: normalizeRecipeVersions(raw.recipeVersions),
   }
 }
 

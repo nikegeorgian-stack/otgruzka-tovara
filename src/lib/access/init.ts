@@ -1,8 +1,10 @@
 import type { ViewId } from '@/lib/types'
 import { DEFAULT_ROLE_VIEWS } from './roles'
+import { roleNeedsDirectories, sanitizeDirectorySections } from '@/lib/directories/access'
 import { HR_INSPECTOR_LOGIN, HR_INSPECTOR_USER_ID } from '@/lib/hr/inspector'
 import type { AccessRoleId, AccessStore, AppUser } from './types'
-import { SYSTEM_ADMIN_USER_ID } from './types'
+import { QC_RELEASE_ROLES, SYSTEM_ADMIN_USER_ID } from './types'
+import { normalizeWorkshopMasterCoverages } from './workshopMasterCoverage'
 import type {
   FinanceViewDefaults,
   GlobalViewDefaults,
@@ -15,34 +17,40 @@ import { WAREHOUSE_TABS, WAREHOUSE_WEB_TABS } from '@/components/warehouse/wareh
 import type { FinanceSection } from '@/pages/FinancePage'
 import type { HrSection } from '@/lib/types'
 
+const VALID_SHELLS = new Set(['classic', 'workspace'])
 const VALID_LAYOUTS = new Set(['dual', 'plan', 'fact'])
 const VALID_GROUP_MODES = new Set(['brigade', 'unit'])
 const VALID_WAREHOUSE_TABS = new Set([...WAREHOUSE_TABS, ...WAREHOUSE_WEB_TABS])
 const VALID_FINANCE_SECTIONS = new Set<FinanceSection>([
   'dashboard',
+  'preview',
   'statement',
+  'documents',
   'payments',
   'sick',
+  'vacation',
   'ledger',
   'rates',
   'employees',
   'org',
-  'summary',
 ])
 const VALID_HR_SECTIONS = new Set<HrSection>([
   'employees',
-  'cards',
   'candidates',
+  'contracts',
   'documents',
   'absences',
   'trainings',
   'pay',
+  'fired',
   'trash',
   'reports',
   'settings',
 ])
 
 const MANAGED_VIEWS = new Set<ViewId>([
+  'my',
+  'timeclock',
   'month',
   'summary',
   'production',
@@ -54,10 +62,16 @@ const MANAGED_VIEWS = new Set<ViewId>([
   'finance',
   'directories',
   'technologist',
+  'otc',
   'mixer',
   'director',
   'journals',
+  'engineer_log',
   'it',
+  'office',
+  'meals',
+  'protocols',
+  'org_tree',
   'settings',
 ])
 
@@ -67,6 +81,7 @@ function normalizeMonthViewDefaults(
 ): MonthViewDefaults | undefined {
   if (!raw && !legacyBrigades?.length) return undefined
   const out: MonthViewDefaults = {}
+  if (raw?.shell && VALID_SHELLS.has(raw.shell)) out.shell = raw.shell
   if (raw?.layout && VALID_LAYOUTS.has(raw.layout)) out.layout = raw.layout
   if (raw?.groupMode && VALID_GROUP_MODES.has(raw.groupMode)) out.groupMode = raw.groupMode
   const brigades = raw?.defaultBrigades?.length
@@ -116,13 +131,21 @@ function normalizeWarehouseViewDefaults(
 function normalizeFinanceViewDefaults(
   raw: FinanceViewDefaults | undefined,
 ): FinanceViewDefaults | undefined {
-  if (!raw?.section || !VALID_FINANCE_SECTIONS.has(raw.section)) return undefined
-  return { section: raw.section }
+  if (!raw?.section) return undefined
+  // Legacy: сводка внутри финансов = отдельный раздел «Сводка» в сайдбаре
+  const section =
+    (raw.section as string) === 'summary' ? ('dashboard' as FinanceSection) : raw.section
+  if (!VALID_FINANCE_SECTIONS.has(section)) return undefined
+  return { section }
 }
 
 function normalizeHrViewDefaults(raw: HrViewDefaults | undefined): HrViewDefaults | undefined {
-  if (!raw?.section || !VALID_HR_SECTIONS.has(raw.section)) return undefined
-  return { section: raw.section }
+  if (!raw?.section) return undefined
+  // Legacy: «Карточки» склеены с «Сотрудники»
+  const section =
+    (raw.section as string) === 'cards' ? ('employees' as HrSection) : raw.section
+  if (!VALID_HR_SECTIONS.has(section)) return undefined
+  return { section }
 }
 
 function normalizeViewDefaults(
@@ -153,10 +176,19 @@ const VALID_ROLES = new Set<AccessRoleId>([
   'procurement_manager',
   'chief_engineer',
   'technologist',
+  'otc',
   'mixer',
   'finance',
+  'employee',
+  'timeclock',
+  'it_specialist',
+  'sales_dispatcher',
+  'office_manager',
+  'cook',
+  'secretary',
 ])
 
+/** Сохранённые в облаке массивы побеждают DEFAULT, кроме киоск-ролей ниже. */
 function normalizeRoleViews(
   raw: Partial<Record<AccessRoleId, ViewId[]>> | undefined,
 ): Record<AccessRoleId, ViewId[]> {
@@ -172,6 +204,40 @@ function normalizeRoleViews(
     if (roleId === 'sysadmin') {
       out[roleId] = [...DEFAULT_ROLE_VIEWS.sysadmin]
     }
+    if (roleId === 'employee') {
+      out[roleId] = ['my', 'meals', 'tasks']
+    }
+    if (roleId === 'timeclock') {
+      out[roleId] = ['timeclock']
+    }
+    if (roleId === 'office_manager') {
+      out[roleId] = ['office', 'my', 'meals']
+    }
+    if (roleId === 'cook') {
+      out[roleId] = ['meals', 'my', 'tasks']
+    }
+    if (roleId !== 'timeclock' && !out[roleId].includes('meals')) {
+      out[roleId] = [...out[roleId], 'meals']
+    }
+    if (roleId !== 'timeclock' && !out[roleId].includes('tasks')) {
+      out[roleId] = ['tasks', ...out[roleId]]
+    }
+    if (roleId === 'chief_engineer' && !out[roleId].includes('engineer_log')) {
+      out[roleId] = ['engineer_log', ...out[roleId]]
+    }
+    if (roleId === 'technologist' && !out[roleId].includes('warehouse')) {
+      out[roleId] = [...out[roleId], 'warehouse']
+    }
+    // Директор: технолог + ОТК (очередь рецептов / качество)
+    if (roleId === 'operations_director') {
+      for (const v of ['technologist', 'otc'] as const) {
+        if (!out[roleId].includes(v)) out[roleId] = [...out[roleId], v]
+      }
+    }
+    // Справочники по матрице вкладок роли (директор, продажи, технолог…)
+    if (roleNeedsDirectories(roleId) && !out[roleId].includes('directories')) {
+      out[roleId] = [...out[roleId], 'directories']
+    }
   }
   return out
 }
@@ -179,6 +245,7 @@ function normalizeRoleViews(
 function normalizeRoleAllowNegativeStock(
   _raw: Partial<Record<AccessRoleId, boolean>> | undefined,
 ): Partial<Record<AccessRoleId, boolean>> {
+  void _raw
   return {}
 }
 
@@ -194,10 +261,90 @@ function normalizeRoleAllowDocumentCancel(
   return out
 }
 
+function normalizeRoleAllowQcRelease(
+  raw: Partial<Record<AccessRoleId, boolean>> | undefined,
+): Partial<Record<AccessRoleId, boolean>> {
+  const out: Partial<Record<AccessRoleId, boolean>> = {}
+  if (!raw) return out
+  for (const roleId of QC_RELEASE_ROLES) {
+    if (raw[roleId] === true) out[roleId] = true
+  }
+  return out
+}
+
+function normalizeRoleAllowReservationReallocation(
+  raw: Partial<Record<AccessRoleId, boolean>> | undefined,
+): Partial<Record<AccessRoleId, boolean>> {
+  const out: Partial<Record<AccessRoleId, boolean>> = {}
+  if (!raw) return out
+  // Explicit capability only — never auto-grant for sysadmin via this map
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin' || roleId === 'operations_director') continue
+    if (raw[roleId] === true) out[roleId] = true
+  }
+  return out
+}
+
+function normalizeRoleTimesheetAccess(
+  raw: AccessStore['roleTimesheetAccess'],
+): AccessStore['roleTimesheetAccess'] {
+  const out: NonNullable<AccessStore['roleTimesheetAccess']> = {}
+  if (!raw) return out
+  const levels = new Set(['none', 'view', 'edit'])
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin') continue
+    const v = raw[roleId]
+    if (v && levels.has(v)) out[roleId] = v
+  }
+  return out
+}
+
+function normalizeRoleTaskAccess(
+  raw: AccessStore['roleTaskAccess'],
+): AccessStore['roleTaskAccess'] {
+  const out: NonNullable<AccessStore['roleTaskAccess']> = {}
+  if (!raw) return out
+  const levels = new Set(['none', 'my', 'board', 'manage'])
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin') continue
+    const v = raw[roleId]
+    if (v && levels.has(v)) out[roleId] = v
+  }
+  return out
+}
+
+function normalizeRoleTaskBoards(
+  raw: AccessStore['roleTaskBoards'],
+): AccessStore['roleTaskBoards'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: NonNullable<AccessStore['roleTaskBoards']> = {}
+  let any = false
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin') continue
+    if (!Object.prototype.hasOwnProperty.call(raw, roleId)) continue
+    const boards = Array.isArray(raw[roleId])
+      ? [...new Set(raw[roleId]!.filter((id) => typeof id === 'string' && id.trim()))]
+      : []
+    out[roleId] = boards
+    any = true
+  }
+  return any ? out : undefined
+}
+
 function normalizeUser(u: AppUser): AppUser {
   const roleId = VALID_ROLES.has(u.roleId as AccessRoleId)
     ? (u.roleId as AccessRoleId)
     : 'warehouse_keeper'
+  const tsLevel =
+    u.timesheetLevel === 'none' || u.timesheetLevel === 'view' || u.timesheetLevel === 'edit'
+      ? u.timesheetLevel
+      : undefined
+  const viewBrigades = Array.isArray(u.timesheetViewBrigades)
+    ? u.timesheetViewBrigades.filter((b) => typeof b === 'string' && b.trim())
+    : undefined
+  const editBrigades = Array.isArray(u.timesheetEditBrigades)
+    ? u.timesheetEditBrigades.filter((b) => typeof b === 'string' && b.trim())
+    : undefined
   return {
     id: u.id || crypto.randomUUID(),
     login: u.login?.trim().toLowerCase() ?? '',
@@ -205,21 +352,55 @@ function normalizeUser(u: AppUser): AppUser {
     roleId,
     passwordHash: u.passwordHash ?? '',
     passwordSalt: u.passwordSalt ?? '',
-    active: u.active !== false,
     employeeId: u.employeeId?.trim() || undefined,
     defaultBrigades: Array.isArray(u.defaultBrigades)
       ? u.defaultBrigades.filter((b) => typeof b === 'string' && b.trim())
       : undefined,
     viewDefaults: normalizeViewDefaults(u.viewDefaults, u.defaultBrigades),
     webAccount: u.webAccount === true,
-    webViews: Array.isArray(u.webViews)
-      ? [...new Set(u.webViews.filter((v) => MANAGED_VIEWS.has(v as import('@/lib/types').ViewId)))]
+    // Сотрудник — только «Моё»; старые галочки «Табель» и т.п. сбрасываем.
+    webViews:
+      roleId === 'employee'
+        ? undefined
+        : Array.isArray(u.webViews)
+          ? [...new Set(u.webViews.filter((v) => MANAGED_VIEWS.has(v as ViewId)))]
+          : undefined,
+    directorySections:
+      roleId === 'employee'
+        ? undefined
+        : (() => {
+            const sections = sanitizeDirectorySections(u.directorySections)
+            return sections && sections.length > 0 ? sections : undefined
+          })(),
+    timesheetLevel: roleId === 'employee' ? undefined : tsLevel,
+    timesheetViewBrigades:
+      roleId === 'employee' || viewBrigades === undefined ? undefined : viewBrigades,
+    timesheetEditBrigades:
+      roleId === 'employee' || editBrigades === undefined ? undefined : editBrigades,
+    taskAccessLevel:
+      u.taskAccessLevel === 'none' ||
+      u.taskAccessLevel === 'my' ||
+      u.taskAccessLevel === 'board' ||
+      u.taskAccessLevel === 'manage'
+        ? u.taskAccessLevel
+        : undefined,
+    taskBoards: Array.isArray(u.taskBoards)
+      ? [...new Set(u.taskBoards.filter((id) => typeof id === 'string' && id.trim()))]
       : undefined,
+    mustChangePassword: u.mustChangePassword === true,
+    pendingDeletion: u.pendingDeletion === true,
+    externalEffectOperationId: u.externalEffectOperationId?.trim() || undefined,
+    active: u.pendingDeletion === true ? false : u.active !== false,
     createdAt: u.createdAt || new Date().toISOString(),
     updatedAt: u.updatedAt || new Date().toISOString(),
   }
 }
 
+/**
+ * Только добавляет недостающих builtin-пользователей.
+ * Уже заведённые в облаке учётки (роль, ФИО, бригады, разделы, active) не трогаем —
+ * иначе после деплоя/normalize local «грязный» updatedAt уезжал в Firestore и затирал настройки.
+ */
 function ensureBuiltinWebUsers(users: AppUser[]): AppUser[] {
   const now = new Date().toISOString()
   const builtins: AppUser[] = [
@@ -238,24 +419,9 @@ function ensureBuiltinWebUsers(users: AppUser[]): AppUser[] {
   ]
   const out = [...users]
   for (const builtin of builtins) {
-    const byLogin = out.findIndex((u) => u.login === builtin.login)
-    if (byLogin >= 0) {
-      out[byLogin] = {
-        ...out[byLogin]!,
-        id: builtin.id,
-        roleId: builtin.roleId,
-        displayName: builtin.displayName,
-        webAccount: true,
-        active: true,
-        updatedAt: now,
-      }
-      continue
-    }
-    const byId = out.findIndex((u) => u.id === builtin.id)
-    if (byId >= 0) {
-      out[byId] = { ...out[byId]!, ...builtin, updatedAt: now }
-      continue
-    }
+    const exists =
+      out.some((u) => u.login === builtin.login) || out.some((u) => u.id === builtin.id)
+    if (exists) continue
     out.push(builtin)
   }
   return out
@@ -298,10 +464,85 @@ export function normalizeAccessStore(raw: AccessStore | undefined): AccessStore 
   if (!hasAdmin) {
     users.unshift(createDefaultAccessStore().users[0]!)
   }
+  const workshopMasterCoverages = normalizeWorkshopMasterCoverages(
+    raw.workshopMasterCoverages,
+  )
+  const userGroups = normalizeUserGroups(raw.userGroups, users)
   return {
     users,
     roleViews: normalizeRoleViews(raw.roleViews),
+    roleDirectorySections: normalizeRoleDirectorySections(raw.roleDirectorySections),
+    roleTimesheetAccess: normalizeRoleTimesheetAccess(raw.roleTimesheetAccess),
+    roleTaskAccess: normalizeRoleTaskAccess(raw.roleTaskAccess),
+    roleTaskBoards: normalizeRoleTaskBoards(raw.roleTaskBoards),
     roleAllowNegativeStock: normalizeRoleAllowNegativeStock(raw.roleAllowNegativeStock),
     roleAllowDocumentCancel: normalizeRoleAllowDocumentCancel(raw.roleAllowDocumentCancel),
+    roleAllowQcRelease: normalizeRoleAllowQcRelease(raw.roleAllowQcRelease),
+    roleAllowReservationReallocation: normalizeRoleAllowReservationReallocation(
+      raw.roleAllowReservationReallocation,
+    ),
+    userAllowReservationReallocation: Array.isArray(raw.userAllowReservationReallocation)
+      ? raw.userAllowReservationReallocation.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      : undefined,
+    roleAllowRecipeApproval: normalizeRoleAllowReservationReallocation(
+      raw.roleAllowRecipeApproval,
+    ),
+    workshopMasterProductionLines:
+      raw.workshopMasterProductionLines && typeof raw.workshopMasterProductionLines === 'object'
+        ? Object.fromEntries(
+            Object.entries(raw.workshopMasterProductionLines).filter(
+              ([k, v]) => typeof k === 'string' && Array.isArray(v),
+            ) as [string, string[]][],
+          )
+        : undefined,
+    ...(workshopMasterCoverages.length > 0 ? { workshopMasterCoverages } : {}),
+    ...(userGroups.length > 0 ? { userGroups } : {}),
   }
+}
+
+function normalizeRoleDirectorySections(
+  raw: AccessStore['roleDirectorySections'],
+): AccessStore['roleDirectorySections'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: NonNullable<AccessStore['roleDirectorySections']> = {}
+  let any = false
+  for (const roleId of VALID_ROLES) {
+    if (roleId === 'sysadmin') continue
+    if (!Object.prototype.hasOwnProperty.call(raw, roleId)) continue
+    const sections = sanitizeDirectorySections(raw[roleId]) ?? []
+    out[roleId] = sections
+    any = true
+  }
+  return any ? out : undefined
+}
+
+function normalizeUserGroups(
+  raw: AccessStore['userGroups'],
+  users: AppUser[],
+): NonNullable<AccessStore['userGroups']> {
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  const known = new Set(users.map((u) => u.id))
+  const out: NonNullable<AccessStore['userGroups']> = []
+  const seen = new Set<string>()
+  for (const g of raw) {
+    if (!g || typeof g !== 'object') continue
+    const id = typeof g.id === 'string' && g.id.trim() ? g.id.trim() : crypto.randomUUID()
+    if (seen.has(id)) continue
+    seen.add(id)
+    const name = typeof g.name === 'string' ? g.name.trim() : ''
+    if (!name) continue
+    const userIds = Array.isArray(g.userIds)
+      ? [...new Set(g.userIds.filter((uid) => typeof uid === 'string' && known.has(uid)))]
+      : []
+    const now = new Date().toISOString()
+    out.push({
+      id,
+      name,
+      note: typeof g.note === 'string' && g.note.trim() ? g.note.trim() : undefined,
+      userIds,
+      createdAt: typeof g.createdAt === 'string' ? g.createdAt : now,
+      updatedAt: typeof g.updatedAt === 'string' ? g.updatedAt : now,
+    })
+  }
+  return out
 }

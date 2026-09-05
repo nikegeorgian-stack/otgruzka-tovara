@@ -50,6 +50,16 @@ export type JournalLink =
   | { kind: 'sales_order'; orderId: string }
   | { kind: 'hr'; employeeId: string }
   | { kind: 'it' }
+  | { kind: 'finance_advance_document'; documentId: string; month?: string }
+  | { kind: 'finance_payout_document'; documentId: string; month?: string }
+  | { kind: 'finance_accrual_document'; documentId: string; month?: string }
+  | { kind: 'finance_month'; month: string }
+  | { kind: 'meals' }
+  | { kind: 'directories' }
+  | { kind: 'timesheet_entry_document'; documentId: string; month?: string }
+
+/** Документ (вечный) vs событие auditLog (кольцевой буфер). */
+export type JournalEntryKind = 'document' | 'event'
 
 export type UnifiedJournalEntry = {
   id: string
@@ -58,7 +68,12 @@ export type UnifiedJournalEntry = {
   at: string
   title: string
   detail: string
+  /** Имя исполнителя (кто сделал) */
   actor?: string
+  /** Id учётки / сотрудника-исполнителя, если есть */
+  actorId?: string
+  /** document = ведомость/складской док; event = audit / движение */
+  entryKind?: JournalEntryKind
   refId?: string
   /** Дата документа (если отличается от at) */
   docDate?: string
@@ -68,6 +83,8 @@ export type UnifiedJournalEntry = {
   docTypeKey?: string
   /** Сырой тип / статус для фильтра */
   docStatus?: string
+  /** Контрагент (для журнала документов как в 1С) */
+  counterpartyName?: string
   /** Просмотр или редактирование */
   mode?: 'view' | 'edit'
   /** Переход к первоисточнику */

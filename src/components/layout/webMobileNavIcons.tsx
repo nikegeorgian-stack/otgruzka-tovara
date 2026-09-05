@@ -22,6 +22,32 @@ function Icon({ className, children }: IconProps) {
 
 export function viewNavIcon(view: ViewId, className?: string) {
   switch (view) {
+    case 'my':
+      return (
+        <Icon className={className}>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+        </Icon>
+      )
+    case 'meals':
+      return (
+        <Icon className={className}>
+          <path d="M4 20h16M7 20V8M17 20V8M7 8c0-3 2.5-5 5-5s5 2 5 5M4 12h16" />
+        </Icon>
+      )
+    case 'protocols':
+      return (
+        <Icon className={className}>
+          <path d="M8 4h8v4H8zM6 8h12v12H6zM9 12h6M9 16h4" />
+        </Icon>
+      )
+    case 'org_tree':
+      return (
+        <Icon className={className}>
+          <circle cx="12" cy="5" r="2.5" />
+          <path d="M12 7.5v3M7 14v-2.5h10V14M7 14v5M12 14v5M17 14v5" />
+        </Icon>
+      )
     case 'month':
       return (
         <Icon className={className}>
@@ -89,11 +115,32 @@ export function viewNavIcon(view: ViewId, className?: string) {
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
         </Icon>
       )
+    case 'otc':
+      return (
+        <Icon className={className}>
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </Icon>
+      )
     case 'mixer':
       return (
         <Icon className={className}>
           <path d="M5 3h14l-1.5 5.5a6 6 0 0 1-11 0L5 3z" />
           <path d="M12 14v5M8 21h8" />
+        </Icon>
+      )
+    case 'engineer_log':
+      return (
+        <Icon className={className}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </Icon>
+      )
+    case 'tasks':
+      return (
+        <Icon className={className}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M8 10h8M8 14h5" />
         </Icon>
       )
     case 'director':
@@ -130,6 +177,12 @@ export function viewNavIcon(view: ViewId, className?: string) {
         <Icon className={className}>
           <rect x="2" y="3" width="20" height="14" rx="2" />
           <path d="M8 21h8M12 17v4" />
+        </Icon>
+      )
+    case 'office':
+      return (
+        <Icon className={className}>
+          <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
         </Icon>
       )
     default:

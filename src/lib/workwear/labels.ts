@@ -1,7 +1,9 @@
 import type { WorkwearPpeCategory, WorkwearSeason, WorkwearSizeGrid } from './types'
 import { defaultSizeGridForCategory, sizesForGrid } from './sizes'
 
-export function workwearSeasonLabel(season: WorkwearSeason, locale: 'ru' | 'ka'): string {
+import type { Locale } from '@/i18n/types'
+
+export function workwearSeasonLabel(season: WorkwearSeason, locale: Locale): string {
   const ru: Record<WorkwearSeason, string> = {
     summer: 'Летняя',
     winter: 'Зимняя',
@@ -13,7 +15,7 @@ export function workwearSeasonLabel(season: WorkwearSeason, locale: 'ru' | 'ka')
   return locale === 'ka' ? ka[season] : ru[season]
 }
 
-export function workwearPpeCategoryLabel(cat: WorkwearPpeCategory, locale: 'ru' | 'ka'): string {
+export function workwearPpeCategoryLabel(cat: WorkwearPpeCategory, locale: Locale): string {
   const ru: Record<WorkwearPpeCategory, string> = {
     headwear: 'Головной убор',
     upper: 'Верхняя одежда',
@@ -39,7 +41,7 @@ export function workwearPpeCategoryLabel(cat: WorkwearPpeCategory, locale: 'ru' 
   return locale === 'ka' ? ka[cat] : ru[cat]
 }
 
-export function workwearSizeGridLabel(grid: WorkwearSizeGrid, locale: 'ru' | 'ka'): string {
+export function workwearSizeGridLabel(grid: WorkwearSizeGrid, locale: Locale): string {
   const ru: Record<WorkwearSizeGrid, string> = {
     clothing_eu: 'Одежда (EU)',
     footwear_eu: 'Обувь (EU)',

@@ -17,6 +17,9 @@ export const FST_STORE_SHARDS_COLLECTION = 'fstStoreShards' as const
 /** Архив табеля: один документ на месяц YYYY-MM. */
 export const FST_MONTH_ARCHIVE_COLLECTION = 'fstMonthArchive' as const
 
+/** Soft-lock: кто сейчас редактирует сотрудника/документ. */
+export const FST_EDIT_LOCKS_COLLECTION = 'editLocks' as const
+
 export const CLOUD_STORAGE_FORMAT_SHARDED = 2 as const
 
 /** Общая база FiberCell для всех облачных учёток (admin, HR, …). */

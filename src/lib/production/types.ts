@@ -1,5 +1,6 @@
 import type { PackagingPlan } from '@/lib/packaging/types'
 import type { PlannerStore } from '@/lib/planner/types'
+import type { Locale } from '@/i18n/types'
 
 /** Линии: пропитка (RATL) 1 и 2, упаковка */
 export type ProductionLineId = '1' | '2' | 'pack'
@@ -146,6 +147,14 @@ export type ProductionRequest = {
 export type ProductionStore = {
   requests: ProductionRequest[]
   planner: PlannerStore
+  /** PHASE P1B — сменные производственные отчёты */
+  shiftReports?: import('./shiftReports').ProductionShiftReport[]
+  /** PHASE P1C — упаковочные отчёты */
+  packagingReports?: import('./packagingReports').ProductionPackagingReport[]
+  /** PHASE P1C — канонические лоты готовой продукции */
+  finishedGoodsLots?: import('./finishedGoodsLots').FinishedGoodsLot[]
+  /** PHASE P1C — метаданные QC-вложений */
+  qcAttachments?: import('./qcAttachments').QcLotAttachment[]
 }
 
 export const PRODUCTION_LINES: {
@@ -228,7 +237,7 @@ export const PRODUCTION_CATEGORIES: {
 export function categoryLabel(
   key: ProductionCategoryKey,
   lineId: ProductionLineId,
-  locale: 'ru' | 'ka',
+  locale: Locale,
 ): string {
   const cat = PRODUCTION_CATEGORIES.find((c) => c.key === key)!
   if (locale === 'ka') return cat.labelKa

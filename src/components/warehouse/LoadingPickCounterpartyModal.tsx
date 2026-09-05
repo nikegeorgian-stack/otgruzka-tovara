@@ -131,7 +131,6 @@ export function LoadingPickCounterpartyModal({
     <ModalBackdrop
       open
       onClose={onClose}
-      className="fixed inset-0 flex items-center justify-center bg-stone-900/50 p-4"
       panelClassName="flex max-h-[90vh] w-full max-w-lg flex-col rounded-sm border border-grid bg-white shadow-sm"
     >
         <div className="border-b border-grid px-5 py-4">

@@ -3,13 +3,15 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { TabBar } from '@/components/ui/TabBar'
 import { WarehouseInventoryPrintPanel } from '@/components/warehouse/WarehouseInventoryPrintPanel'
 import { WarehouseInventoryRevisionModal } from '@/components/warehouse/WarehouseInventoryRevisionModal'
+import { WarehouseOpeningInventoryPanel } from '@/components/warehouse/WarehouseOpeningInventoryPanel'
 import { useI18n } from '@/context/I18nContext'
+import { isWarehouseAccountingActive } from '@/lib/warehouse/accountingStatus'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
 import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
 import type { WarehouseDocument } from '@/lib/warehouse/types'
 import type { WarehousePageProps } from './warehouseTypes'
 
-type InvMode = 'print' | 'revision' | 'opening' | 'single'
+type InvMode = 'print' | 'revision' | 'opening' | 'single' | 'activate'
 
 type Props = Pick<
   WarehousePageProps,
@@ -18,10 +20,12 @@ type Props = Pick<
   | 'onPostOpeningBalances'
   | 'onSaveDocumentDraft'
   | 'onPostExistingDocument'
-  | 'onUnpostDocument'
+  | 'onCancelDocument'
   | 'onAcquireDocumentLock'
   | 'onReleaseDocumentLock'
   | 'onQuickEditItem'
+  | 'onSaveOpeningInventoryDraft'
+  | 'onPostOpeningInventory'
   | 'printMeta'
   | 'keeperId'
   | 'keeperName'
@@ -39,10 +43,12 @@ export function WarehouseInventoryTab({
   onPostOpeningBalances,
   onSaveDocumentDraft,
   onPostExistingDocument,
-  onUnpostDocument,
+  onCancelDocument,
   onAcquireDocumentLock,
   onReleaseDocumentLock,
   onQuickEditItem,
+  onSaveOpeningInventoryDraft,
+  onPostOpeningInventory,
   printMeta,
   keeperId,
   keeperName,
@@ -50,12 +56,15 @@ export function WarehouseInventoryTab({
 }: Props) {
   const { t, tf } = useI18n()
   const whId = warehouseId || warehouse.locations[0]?.id || ''
+  const accountingActive = isWarehouseAccountingActive(warehouse, whId)
   const balances = useMemo(
     () => computeAllBalances(warehouse, whId || undefined),
     [warehouse, whId],
   )
 
-  const [mode, setMode] = useState<InvMode>('revision')
+  const [mode, setMode] = useState<InvMode>(() =>
+    accountingActive ? 'revision' : 'activate',
+  )
   const [notice, setNotice] = useState<string | null>(null)
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [comment, setComment] = useState('')
@@ -186,15 +195,35 @@ export function WarehouseInventoryTab({
       <TabBar
         tabs={(
           [
+            ['activate', 'warehouse.accounting.tabOpening'],
             ['revision', 'warehouse.inventory.tabRevision'],
             ['print', 'warehouse.inventory.tabPrint'],
             ['opening', 'warehouse.inventory.tabOpening'],
             ['single', 'warehouse.inventory.tabSingle'],
           ] as const
-        ).map(([id, key]) => ({ id, label: t(key) }))}
+        )
+          .filter(([id]) => {
+            if (id === 'activate') return Boolean(onSaveOpeningInventoryDraft && onPostOpeningInventory)
+            if (!accountingActive && (id === 'opening' || id === 'single' || id === 'revision')) {
+              return false
+            }
+            return true
+          })
+          .map(([id, key]) => ({ id, label: t(key) }))}
         value={mode}
         onChange={setMode}
       />
+
+      {mode === 'activate' && onSaveOpeningInventoryDraft && onPostOpeningInventory && (
+        <WarehouseOpeningInventoryPanel
+          warehouse={warehouse}
+          warehouseId={whId}
+          keeperId={keeperId}
+          keeperName={keeperName}
+          onSaveDraft={onSaveOpeningInventoryDraft}
+          onPost={onPostOpeningInventory}
+        />
+      )}
 
       {mode === 'print' && (
         <WarehouseInventoryPrintPanel
@@ -429,7 +458,7 @@ export function WarehouseInventoryTab({
           readOnly={editorDoc?.status === 'posted' || editorDoc?.status === 'cancelled'}
           onSaveDraft={onSaveDocumentDraft}
           onPostExistingDocument={onPostExistingDocument}
-          onUnpostDocument={onUnpostDocument}
+          onCancelDocument={onCancelDocument}
           onAcquireLock={onAcquireDocumentLock}
           onReleaseLock={onReleaseDocumentLock}
           onQuickEditItem={onQuickEditItem}

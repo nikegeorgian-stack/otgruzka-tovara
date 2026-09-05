@@ -17,7 +17,15 @@ import {
 import { WarehouseInvoiceLoader } from '@/components/warehouse/WarehouseInvoiceLoader'
 import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssuePrintPreview'
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
+import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
 import { isInvoiceAlreadyPosted } from '@/lib/warehouse/documents'
+import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
+import {
+  isG5WarehousePrintDoc,
+  receiptToPrintModel,
+  warehouseDocToReversalPrintModel,
+} from '@/lib/print/g5PrintFromDomain'
+import type { AppStore } from '@/lib/types'
 import {
   counterpartyOptionLabel,
   counterpartyOptionsForPurpose,
@@ -88,18 +96,23 @@ type Props = {
   brigades: string[]
   warehouseId: string
   variant?: 'page' | 'modal'
+  /** Тип зафиксирован снаружи (окно прихода/расхода). */
+  lockType?: boolean
+  onDirtyChange?: (dirty: boolean) => void
   printMeta?: WarehousePrintMeta
   initialType?: 'receipt' | 'issue'
   initialPickSearch?: string
   initialPickOpen?: boolean
-  onPost: (doc: Omit<WarehouseDocument, 'id' | 'createdAt'>) => PostDocumentResult
+  onPost: (
+    doc: Omit<WarehouseDocument, 'id' | 'createdAt'>,
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   /** Сохранить черновик (без движений). Если не задан — кнопки черновика нет. */
-  onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult
+  onSaveDraft?: (doc: SaveDraftInput) => PostDocumentResult | Promise<PostDocumentResult>
   onPostTransfer?: (
     doc: Omit<WarehouseDocument, 'id' | 'createdAt' | 'type' | 'docRole' | 'transferPairId'> & {
       targetWarehouseId: string
     },
-  ) => PostDocumentResult
+  ) => PostDocumentResult | Promise<PostDocumentResult>
   onMergeInvoiceRegistry: (registry: import('@/lib/warehouse/types').GeorgianInvoice[]) => void
   onCancel?: () => void
   allowNegativeStock?: boolean
@@ -112,11 +125,13 @@ type Props = {
   /** Редактирование / просмотр существующего документа (не inventory). */
   existingDocument?: WarehouseDocument | null
   readOnly?: boolean
+  exportStore?: AppStore | null
+  canViewCommercial?: boolean
 }
 
 export type WarehouseDocumentEditorHandle = {
   isDirty: () => boolean
-  saveDraft: () => boolean
+  saveDraft: () => boolean | Promise<boolean>
 }
 
 function newLine(): DocLineRow {
@@ -167,6 +182,8 @@ export const WarehouseDocumentEditor = forwardRef<WarehouseDocumentEditorHandle,
   brigades,
   warehouseId,
   variant = 'page',
+  lockType = false,
+  onDirtyChange,
   printMeta,
   initialType = 'receipt',
   initialPickSearch,
@@ -185,6 +202,8 @@ export const WarehouseDocumentEditor = forwardRef<WarehouseDocumentEditorHandle,
   keeperName,
   existingDocument = null,
   readOnly = false,
+  exportStore = null,
+  canViewCommercial = false,
 }: Props,
 ref,
 ) {
@@ -217,6 +236,11 @@ ref,
   const [printError, setPrintError] = useState<string | null>(null)
   const [receiptPrintPreview, setReceiptPrintPreview] = useState<ReceiptPrintModel | null>(null)
   const [issuePrintPreview, setIssuePrintPreview] = useState<IssuePrintModel | null>(null)
+  const [g5PrintModel, setG5PrintModel] = useState<G5DocumentPrintModel | null>(null)
+  const preferG5Print =
+    g5FlagsFromStore(exportStore).procurementActive ||
+    (existingDocument != null &&
+      isG5WarehousePrintDoc(existingDocument as unknown as Record<string, unknown>))
   const [pickCounterpartyOpen, setPickCounterpartyOpen] = useState(false)
 
   const qtyRefs = useRef<Map<string, HTMLInputElement>>(new Map())
@@ -530,7 +554,9 @@ ref,
         if (!(await confirm({ message: `${t('warehouse.issue.overdraftConfirm')}\n\n${detail}`, danger: true }))) return
       }
       setFormError(null)
-      const result = onPostTransfer({ ...buildDocBase(), lines: parsed, targetWarehouseId })
+      const result = await Promise.resolve(
+        onPostTransfer({ ...buildDocBase(), lines: parsed, targetWarehouseId }),
+      )
       if (showPostError(result)) return
       resetForm()
       return
@@ -572,16 +598,18 @@ ref,
     }
 
     setFormError(null)
-    const result = onPost({
-      type,
-      ...buildDocBase(),
-      lines: parsed,
-    })
+    const result = await Promise.resolve(
+      onPost({
+        type,
+        ...buildDocBase(),
+        lines: parsed,
+      }),
+    )
     if (showPostError(result)) return
     resetForm()
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!onSaveDraft || readOnly) return false
     const itemUnitMap = new Map(activeItems.map((i) => [i.id, i.unit]))
     const parsed = lines
@@ -602,12 +630,14 @@ ref,
             : {}),
         }
       })
-    const result = onSaveDraft({
-      id: existingDocument?.id,
-      type,
-      ...buildDocBase(),
-      lines: parsed,
-    })
+    const result = await Promise.resolve(
+      onSaveDraft({
+        id: existingDocument?.id,
+        type,
+        ...buildDocBase(),
+        lines: parsed,
+      }),
+    )
     if (showPostError(result)) return false
     setFormError(null)
     if (!existingDocument) resetForm()
@@ -713,6 +743,11 @@ ref,
     [isDirty, saveDraft],
   )
 
+  const dirtyFlag = isDirty()
+  useEffect(() => {
+    onDirtyChange?.(dirtyFlag)
+  }, [dirtyFlag, onDirtyChange])
+
   function printDraft() {
     if (!printMeta) return
     const parsed = lines
@@ -731,6 +766,73 @@ ref,
       return
     }
     setPrintError(null)
+
+    if (preferG5Print && existingDocument) {
+      const loose = {
+        ...(existingDocument as unknown as Record<string, unknown>),
+        number,
+        purpose,
+        lines: existingDocument.lines.length
+          ? existingDocument.lines
+          : parsed.map((l, i) => {
+              const item = warehouse.items.find((x) => x.id === l.itemId)
+              return {
+                lineId: `tmp-${i}`,
+                itemId: l.itemId,
+                quantity: l.quantity,
+                itemCodeSnapshot: item?.internalCode,
+                itemNameSnapshot: item?.name,
+                unit: item?.unit,
+                batchNo: lines[i]?.batchNo,
+                expiryDate: lines[i]?.expiryDate,
+              }
+            }),
+      }
+      const isReversal =
+        existingDocument.status === 'cancelled' ||
+        Boolean(existingDocument.reversesDocumentId) ||
+        String((existingDocument as { docRole?: string }).docRole ?? '') === 'reversal'
+      if (isReversal) {
+        setG5PrintModel(
+          warehouseDocToReversalPrintModel(loose, {
+            showPrices: canViewCommercial,
+            directories: {
+              items: warehouse.items.map((i) => ({
+                id: i.id,
+                internalCode: i.internalCode,
+                sku: i.sku,
+                name: i.name,
+              })),
+              warehouses: warehouse.locations.map((l) => ({ id: l.id, name: l.name })),
+            },
+            reason: existingDocument.cancellationReason,
+          }),
+        )
+        return
+      }
+      if (type === 'receipt' && (existingDocument.purchaseOrderId || purpose === 'purchase')) {
+        const po = exportStore?.procurement?.orders?.find(
+          (o) => o.id === existingDocument.purchaseOrderId,
+        )
+        setG5PrintModel(
+          receiptToPrintModel(loose, (po as unknown as Record<string, unknown>) ?? null, {
+            showPrices: canViewCommercial,
+            directories: {
+              items: warehouse.items.map((i) => ({
+                id: i.id,
+                internalCode: i.internalCode,
+                sku: i.sku,
+                name: i.name,
+              })),
+              warehouses: warehouse.locations.map((l) => ({ id: l.id, name: l.name })),
+            },
+            title: t('g5.print.receipt.title'),
+          }),
+        )
+        return
+      }
+    }
+
     const base = { ...buildDocBase(), lines: parsed }
     if (type === 'receipt') {
       setReceiptPrintPreview(
@@ -761,31 +863,42 @@ ref,
     }
   }
 
-  const shell = variant === 'modal' ? 'space-y-4' : 'rounded-sm border border-grid bg-white shadow-sm'
+  const shell = variant === 'modal' ? 'space-y-3' : 'rounded-sm border border-grid bg-white shadow-sm'
+  const showTypeToggle = !lockType && !existingDocument
 
   return (
     <div className={shell}>
       <div className={`${variant === 'page' ? 'border-b border-grid px-4 py-3' : ''}`}>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex rounded-sm border border-grid p-0.5">
-            {(['receipt', 'issue'] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                disabled={readOnly}
-                className={`rounded-sm px-4 py-1.5 text-sm font-semibold ${
-                  type === id
-                    ? id === 'receipt'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-red-600 text-white'
-                    : 'text-stone-600 hover:bg-stone-50'
-                }`}
-                onClick={() => handleTypeChange(id)}
-              >
-                {id === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {showTypeToggle ? (
+            <div className="flex rounded-sm border border-grid p-0.5">
+              {(['receipt', 'issue'] as const).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={readOnly}
+                  className={`rounded-sm px-4 py-1.5 text-sm font-semibold ${
+                    type === id
+                      ? id === 'receipt'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-red-600 text-white'
+                      : 'text-stone-600 hover:bg-stone-50'
+                  }`}
+                  onClick={() => handleTypeChange(id)}
+                >
+                  {id === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span
+              className={`rounded-sm px-3 py-1.5 text-sm font-bold ${
+                type === 'receipt' ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
+              }`}
+            >
+              {type === 'receipt' ? t('warehouse.receipt') : t('warehouse.issue')}
+            </span>
+          )}
           <button
             type="button"
             disabled={readOnly}
@@ -794,7 +907,9 @@ ref,
           >
             {t('warehouse.pick.button')}
           </button>
-          <span className="text-xs text-stone-400">{t('warehouse.picker.hint')}</span>
+          {variant === 'page' ? (
+            <span className="text-xs text-stone-400">{t('warehouse.picker.hint')}</span>
+          ) : null}
         </div>
       </div>
 
@@ -829,7 +944,13 @@ ref,
         </div>
       )}
 
-      <div className={`grid gap-3 ${variant === 'page' ? 'border-b border-grid px-4 py-3 sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-2'}`}>
+      <div
+        className={
+          variant === 'page'
+            ? 'grid gap-3 border-b border-grid px-4 py-3 sm:grid-cols-2 lg:grid-cols-4'
+            : 'grid gap-2 rounded-sm border border-grid bg-stone-50/60 p-2 sm:grid-cols-2 lg:grid-cols-3'
+        }
+      >
         <label className="block text-xs font-semibold text-stone-500">
           {t('warehouse.doc.number')}
           <input
@@ -1090,7 +1211,7 @@ ref,
                       balances={balances}
                       warehouseId={docWarehouseId}
                       value={line.itemId}
-                      autoFocus={idx === lines.length - 1 && !line.itemId}
+                      autoFocus={variant === 'page' && idx === lines.length - 1 && !line.itemId}
                       onChange={(id) => pickItem(line.key, id)}
                       onConfirmQty={() => focusQty(line.key)}
                     />
@@ -1244,7 +1365,15 @@ ref,
               className="rounded-sm border border-grid px-4 py-2 text-sm font-medium hover:bg-stone-50"
               onClick={printDraft}
             >
-              {t('warehouse.print.previewBtn')}
+              {preferG5Print &&
+              existingDocument &&
+              (existingDocument.status === 'cancelled' || existingDocument.reversesDocumentId)
+                ? t('g5.print.action.printCancel')
+                : preferG5Print &&
+                    existingDocument &&
+                    (existingDocument.purchaseOrderId || purpose === 'purchase')
+                  ? t('g5.print.action.printReceipt')
+                  : t('warehouse.print.previewBtn')}
             </button>
           )}
           {onCancel && (
@@ -1314,6 +1443,13 @@ ref,
           onClose={() => setIssuePrintPreview(null)}
         />
       )}
+      {g5PrintModel ? (
+        <G5DocumentPrintModal
+          model={g5PrintModel}
+          onClose={() => setG5PrintModel(null)}
+          showCommercial={canViewCommercial}
+        />
+      ) : null}
     </div>
   )
 })

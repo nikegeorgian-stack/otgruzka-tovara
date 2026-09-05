@@ -150,6 +150,14 @@ export function validateWarehouseDocumentInput(
         break
       }
     }
+  } else if (doc.type === 'reservation') {
+    // PHASE W3 — allow qty 0 snapshot lines (shortage-only); require itemId
+    for (const line of doc.lines) {
+      if (!line.itemId || line.quantity < 0 || Number.isNaN(line.quantity)) {
+        errors.lines = 'warehouse.doc.errLines'
+        break
+      }
+    }
   } else {
     for (const line of doc.lines) {
       if (!line.itemId || line.quantity <= 0) {
@@ -167,5 +175,7 @@ export function documentCanBeCancelled(doc: WarehouseDocument): boolean {
   if (doc.reversesDocumentId) return false
   if (doc.batchRunId) return false
   if (doc.docRole === 'batch_issue' || doc.docRole === 'batch_receipt') return false
+  // PHASE W3 — reservation docs are corrected by release/increase docs, not storno cancel
+  if (doc.type === 'reservation') return false
   return true
 }

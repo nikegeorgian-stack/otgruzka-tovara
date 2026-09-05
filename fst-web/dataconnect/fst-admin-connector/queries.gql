@@ -1,0 +1,290 @@
+# PHASE P1C.3 — admin-only QC reads (NO_ACCESS = Admin SDK only)
+
+query GetQcPermissionByUidStore($firebaseUid: String!, $storeId: String!)
+  @auth(level: NO_ACCESS) {
+  qcPermissions(
+    where: {
+      firebaseUid: { eq: $firebaseUid }
+      storeId: { eq: $storeId }
+      active: { eq: true }
+    }
+    limit: 1
+  ) {
+    id
+    firebaseUid
+    storeId
+    active
+    canView
+    canUpload
+    canRelease
+    canRegrade
+    canReject
+    canPostShipment
+    revision
+    createdAt
+    createdByUid
+    updatedAt
+    updatedByUid
+    revokedAt
+    revokedByUid
+    revokeReason
+  }
+}
+
+query GetQcPermissionById($id: String!) @auth(level: NO_ACCESS) {
+  qcPermission(id: $id) {
+    id
+    firebaseUid
+    storeId
+    active
+    canView
+    canUpload
+    canRelease
+    canRegrade
+    canReject
+    canPostShipment
+    revision
+    createdAt
+    createdByUid
+    updatedAt
+    updatedByUid
+    revokedAt
+    revokedByUid
+    revokeReason
+  }
+}
+
+query ListQcPermissionsForStore($storeId: String!, $limit: Int!)
+  @auth(level: NO_ACCESS) {
+  qcPermissions(
+    where: { storeId: { eq: $storeId } }
+    orderBy: [{ updatedAt: DESC }]
+    limit: $limit
+  ) {
+    id
+    firebaseUid
+    storeId
+    active
+    canView
+    canUpload
+    canRelease
+    canRegrade
+    canReject
+    canPostShipment
+    revision
+    updatedAt
+    revokedAt
+    revokeReason
+  }
+}
+
+query GetQcAttachmentRecord($id: String!) @auth(level: NO_ACCESS) {
+  qcAttachmentRecord(id: $id) {
+    id
+    storeId
+    lotId
+    documentKind
+    storagePath
+    contentType
+    sizeBytes
+    checksum
+    objectGeneration
+    status
+    uploadedByUid
+    verifiedAt
+    revision
+    idempotencyKey
+    createdAt
+    updatedAt
+  }
+}
+
+query GetQcAttachmentByIdempotency($idempotencyKey: String!)
+  @auth(level: NO_ACCESS) {
+  qcAttachmentRecords(
+    where: { idempotencyKey: { eq: $idempotencyKey } }
+    limit: 1
+  ) {
+    id
+    storeId
+    lotId
+    documentKind
+    storagePath
+    contentType
+    sizeBytes
+    checksum
+    objectGeneration
+    status
+    uploadedByUid
+    verifiedAt
+    revision
+    idempotencyKey
+  }
+}
+
+query ListVerifiedLotAttachments($storeId: String!, $lotId: String!)
+  @auth(level: NO_ACCESS) {
+  qcAttachmentRecords(
+    where: {
+      storeId: { eq: $storeId }
+      lotId: { eq: $lotId }
+      status: { eq: "verified" }
+    }
+    limit: 50
+  ) {
+    id
+    documentKind
+    storagePath
+    contentType
+    sizeBytes
+    checksum
+    objectGeneration
+    status
+    revision
+  }
+}
+
+query GetQcLotDecision($id: String!) @auth(level: NO_ACCESS) {
+  qcLotDecision(id: $id) {
+    id
+    storeId
+    lotId
+    lotRevision
+    decisionVersion
+    status
+    passportAttachmentId
+    protocolAttachmentId
+    targetFinishedProductId
+    reason
+    decidedByUid
+    decidedAt
+    revision
+    idempotencyKey
+    createdAt
+    updatedAt
+  }
+}
+
+query GetLatestQcLotDecision($storeId: String!, $lotId: String!)
+  @auth(level: NO_ACCESS) {
+  qcLotDecisions(
+    where: { storeId: { eq: $storeId }, lotId: { eq: $lotId } }
+    orderBy: [{ decisionVersion: DESC }]
+    limit: 1
+  ) {
+    id
+    storeId
+    lotId
+    lotRevision
+    decisionVersion
+    status
+    passportAttachmentId
+    protocolAttachmentId
+    targetFinishedProductId
+    reason
+    decidedByUid
+    decidedAt
+    revision
+    idempotencyKey
+  }
+}
+
+query GetQcFinishedGoodsLot($id: String!) @auth(level: NO_ACCESS) {
+  qcFinishedGoodsLot(id: $id) {
+    id
+    storeId
+    finishedProductId
+    warehouseItemId
+    batchNo
+    quantityProduced
+    quantityShipped
+    packagingReportId
+    status
+    revision
+    updatedAt
+    updatedByUid
+  }
+}
+
+query GetQcLotDecisionByIdempotency($idempotencyKey: String!)
+  @auth(level: NO_ACCESS) {
+  qcLotDecisions(
+    where: { idempotencyKey: { eq: $idempotencyKey } }
+    limit: 1
+  ) {
+    id
+    storeId
+    lotId
+    decisionVersion
+    status
+    revision
+    idempotencyKey
+    decidedByUid
+    decidedAt
+  }
+}
+
+# ---------------------------------------------------------------------------
+# PHASE G1
+# ---------------------------------------------------------------------------
+
+query GetFstPrincipalAccessByUidStore($firebaseUid: String!, $storeId: String!)
+  @auth(level: NO_ACCESS) {
+  fstPrincipalAccesses(
+    where: {
+      firebaseUid: { eq: $firebaseUid }
+      storeId: { eq: $storeId }
+    }
+    limit: 1
+  ) {
+    id
+    firebaseUid
+    storeId
+    roleId
+    capabilitiesJson
+    active
+    revision
+    updatedAt
+    revokedAt
+    revokeReason
+  }
+}
+
+query GetFstPrincipalAccessById($id: String!) @auth(level: NO_ACCESS) {
+  fstPrincipalAccess(id: $id) {
+    id
+    firebaseUid
+    storeId
+    roleId
+    capabilitiesJson
+    active
+    revision
+    createdByUid
+    updatedByUid
+    revokedAt
+    revokeReason
+  }
+}
+
+query GetFstCriticalStore($id: String!) @auth(level: NO_ACCESS) {
+  fstCriticalStore(id: $id) {
+    id
+    revision
+    payloadJson
+    fingerprint
+    updatedAt
+    updatedByUid
+  }
+}
+
+query GetFstCommandReceipt($id: String!) @auth(level: NO_ACCESS) {
+  fstCommandReceipt(id: $id) {
+    id
+    storeId
+    commandType
+    actorUid
+    resultJson
+    criticalRevisionAfter
+    createdAt
+  }
+}

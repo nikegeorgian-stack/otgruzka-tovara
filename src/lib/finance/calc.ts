@@ -1,11 +1,21 @@
 import { daysInMonth, dayDateKey, parseMonthKey } from '../dates'
-import { factWorkedHours } from '../factExtra'
 import { employeeActiveOnDate } from '../hr/employeeActive'
 import { isMonthClosed } from '../monthManage'
+import { resolvePayrollAccrualRules } from './payrollAccrualRules'
 import { calculateRowPay, isPayableInMonth, type PayBreakdown } from '../payroll'
-import { getFactMark, rowStats } from '../stats'
+import { getFactMark } from '../stats'
 import type { AppStore, Employee, MonthSheet } from '../types'
+import { autoEmployeeBonuses, employeeBonusBreakdown } from './employeeBonus'
 import { createDefaultFinanceStore } from './init'
+import {
+  brigadierBonusFromDetail,
+  computeBrigadierPay,
+  computePayrollHourDetail,
+  type PayrollHourDetail,
+} from './payrollDetail'
+import { documentNumberForAdvance } from './advanceDocuments'
+import { documentNumberForPayout } from './payoutDocuments'
+import { employeeAcceptedMealDeduction } from '../meals/calc'
 import type {
   FinanceAdjustment,
   FinanceAdvance,
@@ -14,6 +24,7 @@ import type {
   PayrollSnapshot,
   PayrollSnapshotRow,
   SickConfirmation,
+  VacationConfirmation,
 } from './types'
 
 /** Безопасный доступ к финансовому стору (поле добавлено аддитивно). */
@@ -23,6 +34,12 @@ export function getFinance(store: AppStore): FinanceStore {
 
 export function isSickConfirmed(store: AppStore, employeeId: string, month: string): boolean {
   return getFinance(store).sickConfirmations.some(
+    (c) => c.employeeId === employeeId && c.month === month,
+  )
+}
+
+export function isVacationConfirmed(store: AppStore, employeeId: string, month: string): boolean {
+  return getFinance(store).vacationConfirmations.some(
     (c) => c.employeeId === employeeId && c.month === month,
   )
 }
@@ -87,6 +104,16 @@ function sumPayouts(
     .reduce((s, p) => s + p.amount, 0)
 }
 
+export function vacationConfirmationFor(
+  store: AppStore,
+  employeeId: string,
+  month: string,
+): VacationConfirmation | undefined {
+  return getFinance(store).vacationConfirmations.find(
+    (c) => c.employeeId === employeeId && c.month === month,
+  )
+}
+
 /** Сколько дней «Б» в факте у строки за месяц. */
 function sickDays(store: AppStore, month: string, rowId: string): string[] {
   const sheet = store.months[month]
@@ -101,6 +128,20 @@ function sickDays(store: AppStore, month: string, rowId: string): string[] {
   return out
 }
 
+/** Сколько дней «ОТ» в факте у строки за месяц. */
+function vacationDays(store: AppStore, month: string, rowId: string): string[] {
+  const sheet = store.months[month]
+  if (!sheet) return []
+  const { year, month: mo } = parseMonthKey(month)
+  const days = daysInMonth(year, mo)
+  const out: string[] = []
+  for (let d = 1; d <= days; d++) {
+    const key = dayDateKey(year, mo, d)
+    if (getFactMark(sheet, rowId, key) === 'ОТ') out.push(key)
+  }
+  return out
+}
+
 const DEFAULT_BRIGADIER_BONUS = 300
 
 /** Полная бригадирская премия за месяц (₾) из настроек, по умолчанию 300. */
@@ -109,39 +150,25 @@ export function brigadierBonusAmount(store: AppStore): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : DEFAULT_BRIGADIER_BONUS
 }
 
-/**
- * Бригадирская премия строки за месяц:
- * полная сумма × (факт. часы в дни бригадирства / план. часы строки), не более полной суммы.
- * «Был бригадиром весь месяц по плану и отработал» → полная сумма.
- */
+export type { BrigadierPayDetail, PayrollHourDetail } from './payrollDetail'
+export { brigadierDateKeys, computeBrigadierPay, computePayrollHourDetail } from './payrollDetail'
+
+/** Бригадирская премия строки за месяц (₾). */
 export function computeBrigadierBonus(
   store: AppStore,
   sheet: MonthSheet,
   rowId: string,
   year: number,
   month: number,
+  emp?: Employee,
 ): number {
-  const marks = sheet.brigadierDays
-  if (!marks) return 0
-  const days = daysInMonth(year, month)
-  let factBrigHours = 0
-  let hasMark = false
-  for (let d = 1; d <= days; d++) {
-    const dateKey = dayDateKey(year, month, d)
-    if (!marks[`${rowId}|${dateKey}`]) continue
-    hasMark = true
-    factBrigHours += factWorkedHours(
-      sheet,
-      rowId,
-      dateKey,
-      getFactMark(sheet, rowId, dateKey),
-    )
+  if (!emp) {
+    const row = sheet.rows.find((r) => r.id === rowId)
+    if (!row?.employeeId) return 0
+    emp = store.employees.find((e) => e.id === row.employeeId)
+    if (!emp) return 0
   }
-  if (!hasMark) return 0
-  const planHours = rowStats(sheet, rowId, days, year, month).planHours
-  if (planHours <= 0) return 0
-  const ratio = Math.min(1, factBrigHours / planHours)
-  return Math.round(brigadierBonusAmount(store) * ratio)
+  return brigadierBonusFromDetail(computeBrigadierPay(store, sheet, rowId, emp, year, month))
 }
 
 export type StatementRow = {
@@ -156,11 +183,19 @@ export type StatementRow = {
   /** Начислено (gross). */
   accrued: number
   bonus: number
+  /** Автопремии (индивидуальная + 10%). */
+  autoBonus: number
+  /** Премия по выработке (разовая, ввод вручную). */
+  productivityBonus: number
+  /** Прочие разовые премии. */
+  otherManualBonus: number
   /** Бригадирская премия (авторасчёт по дням бригадирства). */
   brigadierBonus: number
   penalty: number
   advance: number
-  /** К выплате = начислено + премии − штрафы − аванс. */
+  /** Удержание за принятые обеды (после принятия дня поваром). */
+  mealDeduction: number
+  /** К выплате = начислено + премии − штрафы − аванс − обеды. */
   net: number
   /** Уже выплачено. */
   paid: number
@@ -170,6 +205,10 @@ export type StatementRow = {
   frozen: boolean
   sickDates: string[]
   sickConfirmed: boolean
+  vacationDates: string[]
+  vacationConfirmed: boolean
+  /** Детализация часов и бригадирской доплаты. */
+  hourDetail: PayrollHourDetail
 }
 
 /**
@@ -183,7 +222,17 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
   const { year, month: mo } = parseMonthKey(month)
   const closed = isMonthClosed(store, month)
   const snapshot = fin.snapshots[month]
-  const snapRows = new Map((snapshot?.rows ?? []).map((r) => [r.employeeId, r]))
+  const snapByRowId = new Map(
+    (snapshot?.rows ?? [])
+      .filter((r) => r.rowId)
+      .map((r) => [r.rowId!, r]),
+  )
+  const snapByEmp = new Map((snapshot?.rows ?? []).map((r) => [r.employeeId, r]))
+  const empRowCount = new Map<string, number>()
+  for (const r of sheet.rows) {
+    if (!r.employeeId) continue
+    empRowCount.set(r.employeeId, (empRowCount.get(r.employeeId) ?? 0) + 1)
+  }
 
   const rows: StatementRow[] = []
   for (const row of sheet.rows) {
@@ -192,48 +241,115 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
     if (!emp || !isPayableInMonth(emp, month)) continue
     if (asOfDate && !employeeActiveOnDate(emp, asOfDate)) continue
 
-    const confirmed = isSickConfirmed(store, emp.id, month)
-    const pay = calculateRowPay(emp, sheet, row.id, year, mo, { sickConfirmed: confirmed })
+    const sickConfirmed = isSickConfirmed(store, emp.id, month)
+    const vacationConfirmed = isVacationConfirmed(store, emp.id, month)
+    const payOpts = {
+      sickConfirmed,
+      vacationConfirmed,
+      accrual: resolvePayrollAccrualRules(store.settings),
+      asOfDate,
+    }
+    const pay = calculateRowPay(emp, sheet, row.id, year, mo, payOpts)
     const sick = sickDays(store, month, row.id)
-    const paid = sumPayouts(fin.payouts, emp.id, month, asOfDate)
+    const vacation = vacationDays(store, month, row.id)
 
-    const liveBonus = sumAdjustments(fin.adjustments, emp.id, month, 'bonus', asOfDate)
-    const livePenalty = sumAdjustments(fin.adjustments, emp.id, month, 'penalty', asOfDate)
-    const liveAdvance = sumAdvances(fin.advances, emp.id, month, asOfDate)
-    const liveBrigadierBonus = computeBrigadierBonus(store, sheet, row.id, year, mo)
+    // Аванс/премии/выплаты — один раз на сотрудника (домашняя бригада после перевода).
+    const splitCount = empRowCount.get(emp.id) ?? 0
+    const isFinanceHome = splitCount <= 1 || row.brigade === emp.brigade
+    const paid = isFinanceHome ? sumPayouts(fin.payouts, emp.id, month, asOfDate) : 0
 
-    const snap = closed ? snapRows.get(emp.id) : undefined
+    const liveManualBonus = isFinanceHome
+      ? sumAdjustments(fin.adjustments, emp.id, month, 'bonus', asOfDate)
+      : 0
+    let autoBase = pay.amount
+    if (isFinanceHome && splitCount > 1) {
+      autoBase = 0
+      for (const r of sheet.rows) {
+        if (r.employeeId !== emp.id) continue
+        autoBase += calculateRowPay(emp, sheet, r.id, year, mo, payOpts).amount
+      }
+    }
+    const liveAutoBonus = isFinanceHome ? autoEmployeeBonuses(emp, autoBase, month) : 0
+    const liveBonus = liveManualBonus + liveAutoBonus
+    const livePenalty = isFinanceHome
+      ? sumAdjustments(fin.adjustments, emp.id, month, 'penalty', asOfDate)
+      : 0
+    const liveAdvance = isFinanceHome ? sumAdvances(fin.advances, emp.id, month, asOfDate) : 0
+    const liveMealDeduction = isFinanceHome
+      ? employeeAcceptedMealDeduction(store, emp.id, month, asOfDate)
+      : 0
+    const liveBrigadierBonus = brigadierBonusFromDetail(
+      computeBrigadierPay(store, sheet, row.id, emp, year, mo, asOfDate),
+    )
+    const hourDetail = computePayrollHourDetail(store, sheet, row.id, emp, year, mo, {
+      sickConfirmed,
+      vacationConfirmed,
+      asOfDate,
+    })
+
+    const snap =
+      closed
+        ? snapByRowId.get(row.id) ??
+          (splitCount <= 1 ? snapByEmp.get(emp.id) : undefined)
+        : undefined
     const accrued = snap ? snap.accrued : pay.amount
     const bonus = snap ? snap.bonus : liveBonus
+    const bonusParts = employeeBonusBreakdown(
+      emp,
+      isFinanceHome ? (splitCount > 1 ? autoBase : accrued) : accrued,
+      fin.adjustments,
+      emp.id,
+      month,
+      asOfDate,
+      snap ? snap.bonus : undefined,
+    )
     const brigadierBonus = snap ? (snap.brigadierBonus ?? 0) : liveBrigadierBonus
     const penalty = snap ? snap.penalty : livePenalty
     const advance = snap ? snap.advance : liveAdvance
-    const factHours = snap ? snap.factHours : pay.factHours
-    const net = accrued + bonus + brigadierBonus - penalty - advance
+    const mealDeduction = liveMealDeduction
+    const factHours = snap ? snap.factHours : hourDetail.factHours
+    const net = accrued + bonus + brigadierBonus - penalty - advance - mealDeduction
 
     rows.push({
       rowId: row.id,
       employeeId: emp.id,
       emp,
-      brigade: emp.brigade,
+      brigade: row.brigade,
       schedule: emp.schedule,
       factHours,
       rateLabel: pay.rateLabel,
       breakdown: pay.breakdown,
       accrued,
       bonus,
+      autoBonus: bonusParts.auto,
+      productivityBonus: bonusParts.productivity,
+      otherManualBonus: bonusParts.otherManual,
       brigadierBonus,
       penalty,
       advance,
+      mealDeduction,
       net,
       paid,
       remaining: net - paid,
       frozen: !!snap,
       sickDates: sick,
-      sickConfirmed: confirmed,
+      sickConfirmed,
+      vacationDates: vacation,
+      vacationConfirmed,
+      hourDetail,
     })
   }
   return rows
+}
+
+/** Строка ведомости для одного сотрудника (предварительный или зафиксированный расчёт). */
+export function statementRowForEmployee(
+  store: AppStore,
+  month: string,
+  employeeId: string,
+  asOfDate?: string,
+): StatementRow | undefined {
+  return monthStatement(store, month, asOfDate).find((r) => r.employeeId === employeeId)
 }
 
 export type StatementTotals = {
@@ -272,6 +388,7 @@ export function buildPayrollSnapshot(
   const rows = monthStatement(store, month)
   const snapRows: PayrollSnapshotRow[] = rows.map((r) => ({
     employeeId: r.employeeId,
+    rowId: r.rowId,
     accrued: r.accrued,
     bonus: r.bonus,
     brigadierBonus: r.brigadierBonus,
@@ -325,6 +442,8 @@ export type LedgerEntry = {
   amount: number
   label: string
   byName?: string
+  financeDocumentId?: string
+  financeDocumentNumber?: string
 }
 
 /** Лицевой счёт сотрудника — все финансовые движения по месяцам. */
@@ -359,8 +478,12 @@ export function employeeLedger(store: AppStore, employeeId: string, asOfDate?: s
       month: a.month,
       kind: 'advance',
       amount: a.amount,
-      label: 'Аванс',
+      label: documentNumberForAdvance(fin, a)
+        ? `Аванс · ${documentNumberForAdvance(fin, a)}`
+        : 'Аванс',
       byName: a.byName,
+      financeDocumentId: a.documentId,
+      financeDocumentNumber: documentNumberForAdvance(fin, a),
     })
   }
   for (const adj of fin.adjustments) {
@@ -389,8 +512,12 @@ export function employeeLedger(store: AppStore, employeeId: string, asOfDate?: s
       month: p.month,
       kind: 'payout',
       amount: p.amount,
-      label: 'Выплата',
+      label: documentNumberForPayout(fin, p)
+        ? `Выплата · ${documentNumberForPayout(fin, p)}`
+        : 'Выплата',
       byName: p.byName,
+      financeDocumentId: p.documentId,
+      financeDocumentNumber: documentNumberForPayout(fin, p),
     })
   }
 

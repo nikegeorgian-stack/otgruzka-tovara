@@ -1,7 +1,11 @@
 import { AppDialog } from '@/components/ui/AppDialog'
 import { Button } from '@/components/ui/Button'
 import { useI18n } from '@/context/I18nContext'
-import { isGoogleDriveUrl, resolveDocumentPreview } from '@/lib/hr/documentPreview'
+import {
+  googleDriveDownloadUrl,
+  isGoogleDriveUrl,
+  resolveDocumentPreview,
+} from '@/lib/hr/documentPreview'
 import type { HrDocument } from '@/lib/hr/types'
 
 type Props = {
@@ -14,6 +18,12 @@ export function HrDocumentPreviewModal({ doc, onClose }: Props) {
   const url = doc.fileUrl ?? ''
   const preview = resolveDocumentPreview(url)
   const google = isGoogleDriveUrl(url)
+  const driveDownload = google ? googleDriveDownloadUrl(url) : null
+  const canDownloadData = url.startsWith('data:')
+  const canDownloadHttp =
+    Boolean(driveDownload) ||
+    (preview.kind === 'image' && url.startsWith('http')) ||
+    (preview.kind === 'external' && url.startsWith('http'))
 
   return (
     <AppDialog
@@ -27,11 +37,32 @@ export function HrDocumentPreviewModal({ doc, onClose }: Props) {
           {google && (
             <p className="text-xs text-stone-500">{t('hr.document.googleHint')}</p>
           )}
-          <div className="ml-auto flex gap-2">
-            {url.startsWith('data:') && (
+          <div className="ml-auto flex flex-wrap gap-2">
+            {canDownloadData && (
               <a
                 href={url}
                 download={doc.fileName || doc.title}
+                className="inline-flex items-center rounded-sm border border-grid px-3 py-1.5 text-sm font-medium hover:bg-white"
+              >
+                {t('hr.document.download')}
+              </a>
+            )}
+            {driveDownload && (
+              <a
+                href={driveDownload}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-sm border border-grid px-3 py-1.5 text-sm font-medium hover:bg-white"
+              >
+                {t('hr.document.download')}
+              </a>
+            )}
+            {!driveDownload && canDownloadHttp && preview.kind === 'image' && (
+              <a
+                href={url}
+                download={doc.fileName || doc.title}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex items-center rounded-sm border border-grid px-3 py-1.5 text-sm font-medium hover:bg-white"
               >
                 {t('hr.document.download')}
