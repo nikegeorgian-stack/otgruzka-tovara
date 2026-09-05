@@ -2,7 +2,7 @@
  * PHASE G5.1 — issued-to-line is not free supply; netNeed; linked production reduces FG BOM.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -20,7 +20,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -31,7 +31,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -116,7 +116,7 @@ function payload(): any {
 }
 
 async function g5() {
-  return import('../api/fst/_g5SalesProcurementService.mjs')
+  return import('../server/fst/_g5SalesProcurementService.mjs')
 }
 
 async function cmd(
@@ -144,7 +144,7 @@ async function bootstrap() {
   ] as const) {
     expect((await cmd(svc, type, { reason: 'g51' }, key)).ok).toBe(true)
   }
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = payload()
   p = h.markWarehouseDomainActive(p, 'u1')
   p = h.markProductionDomainActive(p, 'u1')
@@ -218,7 +218,7 @@ async function bootstrap() {
 describe('G5.1 issued-to-line / netNeed / linked production', () => {
   it('does not treat line-warehouse stock as free supply', async () => {
     const svc = await bootstrap()
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const p = payload()
     // 100 kg only on line warehouse — must NOT cover FG packaging shortage
     p.domains.warehouse.movements = [
@@ -266,7 +266,7 @@ describe('G5.1 issued-to-line / netNeed / linked production', () => {
 
   it('netNeed = recipeNeed - issuedToLine for production materials', async () => {
     const svc = await bootstrap()
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const p = payload()
     p.domains.production.orders = [
       {
@@ -311,7 +311,7 @@ describe('G5.1 issued-to-line / netNeed / linked production', () => {
 
   it('linked production remaining reduces FG packaging BOM demand', async () => {
     const svc = await bootstrap()
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
 
     await cmd(
       svc,

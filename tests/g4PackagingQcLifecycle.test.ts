@@ -1,7 +1,7 @@
 /**
  * PHASE G4 — packaging / finished-goods lot / QC / shipment lifecycle.
  *
- * Everything outside `api/fst/_g4PackagingService.mjs` is mocked in memory:
+ * Everything outside `server/fst/_g4PackagingService.mjs` is mocked in memory:
  * Data Connect (critical store + principals + receipts + CAS revision), the QC
  * read-model connector and QC Storage verification.
  */
@@ -26,7 +26,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -37,7 +37,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -68,7 +68,7 @@ const storageState = {
   objects: new Map<string, { generation: string }>(),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ qcMocked: true })),
   listVerifiedLotAttachments: async (_dc: unknown, vars: { storeId: string; lotId: string }) => ({
     data: {
@@ -87,7 +87,7 @@ vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
   },
 }))
 
-vi.mock('../api/fst/_qcStorage.mjs', () => {
+vi.mock('../server/fst/_qcStorage.mjs', () => {
   const seg = (value: unknown, fallback: string) =>
     String(value ?? '')
       .replace(/[^a-zA-Z0-9-]/g, '')
@@ -360,7 +360,7 @@ function seedCriticalFixtures({ wipQty = 200, materialQty = 40 } = {}) {
 }
 
 async function activateProduction() {
-  const g3 = await import('../api/fst/_g3ProductionService.mjs')
+  const g3 = await import('../server/fst/_g3ProductionService.mjs')
   const r = await g3.executeG3Command({
     actor,
     storeId: STORE,
@@ -380,7 +380,7 @@ async function bootstrap(options: { wipQty?: number; materialQty?: number; caps?
   grant(options.caps ?? ALL_CAPS)
   await activateProduction()
   seedCriticalFixtures({ wipQty: options.wipQty, materialQty: options.materialQty })
-  const g4 = await import('../api/fst/_g4PackagingService.mjs')
+  const g4 = await import('../server/fst/_g4PackagingService.mjs')
   const activated = await g4.executeG4Command({
     actor,
     storeId: STORE,
@@ -440,7 +440,7 @@ async function releaseLot(g4: any, lotId: string, idempotencyKey = 'qc-release')
 
 describe('G4 trust boundary', () => {
   it('no principal → 403 for every packaging command', async () => {
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     for (const commandType of ['packaging.read', 'packaging.report.confirm', 'shipment.post']) {
       const r = await g4.executeG4Command({
         actor,
@@ -456,7 +456,7 @@ describe('G4 trust boundary', () => {
 
   it('inactive principal → 403 even with full capabilities', async () => {
     grant(ALL_CAPS, 'u1', false)
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const r = await g4.executeG4Command({
       actor,
       storeId: STORE,
@@ -1150,7 +1150,7 @@ describe('G4 regrade, reject and scrap write-off', () => {
 describe('G4 feature activation', () => {
   it('packaging.domain.activate requires an active production domain', async () => {
     grant(ALL_CAPS)
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const denied = await g4.executeG4Command({
       actor,
       storeId: STORE,
@@ -1180,7 +1180,7 @@ describe('G4 feature activation', () => {
     grant(ALL_CAPS)
     await activateProduction()
     seedCriticalFixtures()
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
 
     const confirm = await confirmPackaging(g4, 'pk-inactive')
     expect(confirm.ok).toBe(false)

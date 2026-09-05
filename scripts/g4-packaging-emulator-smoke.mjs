@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
-const apiDir = path.join(repoRoot, 'api', 'fst')
+const apiDir = path.join(repoRoot, 'server', 'fst')
 
 const STORE_ID = 'fibercell-main'
 const PROJECT = 'demo-otgruzka'
@@ -202,7 +202,7 @@ function installInProcessStubs() {
   registerHooks({
     load(url, context, nextLoad) {
       for (const [file, source] of STUBS) {
-        if (url.endsWith(`/api/fst/${file}`)) {
+        if (url.endsWith(`/server/fst/${file}`)) {
           return { format: 'module', shortCircuit: true, source }
         }
       }

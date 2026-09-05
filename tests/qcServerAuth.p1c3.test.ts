@@ -17,7 +17,7 @@ const calls = {
   updateAttachment: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ mocked: true })),
   getQcPermissionByUidStore: (...args: unknown[]) => calls.getPermission(...args),
   getQcFinishedGoodsLot: (...args: unknown[]) => calls.getLot(...args),
@@ -79,11 +79,11 @@ describe('qc signed upload / vercel gate', () => {
   it(
     'documents Vercel 4.5MiB limit and refuses binary proxy semantics',
     async () => {
-      const mod = await import('../api/fst/_qcStorage.mjs')
+      const mod = await import('../server/fst/_qcStorage.mjs')
       expect(mod.VERCEL_FUNCTION_BODY_LIMIT_BYTES).toBe(4.5 * 1024 * 1024)
       expect(mod.QC_ATTACHMENT_MAX_BYTES).toBeGreaterThan(mod.VERCEL_FUNCTION_BODY_LIMIT_BYTES)
 
-      const putSrc = await fs.readFile(path.resolve('api/fst/qc-upload-put.mjs'), 'utf8')
+      const putSrc = await fs.readFile(path.resolve('server/fst/qc-upload-put.mjs'), 'utf8')
       expect(putSrc).toMatch(/binary_proxy_forbidden/)
       expect(putSrc).toMatch(/createSignedUploadSession/)
       expect(putSrc).not.toMatch(/Buffer\.from\(base64/)
@@ -92,7 +92,7 @@ describe('qc signed upload / vercel gate', () => {
   )
 
   it('signed session is bound to exact storage path and content type', async () => {
-    const mod = await import('../api/fst/_qcStorage.mjs')
+    const mod = await import('../server/fst/_qcStorage.mjs')
     const storagePath = mod.buildQcStoragePath('fibercell-main', 'lot-1', 'att-1')
     const session = await mod.createSignedUploadSession({
       storagePath,
@@ -132,7 +132,7 @@ describe('qc signed upload / vercel gate', () => {
 
 describe('qc service layer', () => {
   it('grants permissions without auto-enabling release', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const result = await service.grantPermission({
       actor: { uid: 'sys-1', claims: { fstSysadmin: true } },
       firebaseUid: 'user-1',
@@ -145,7 +145,7 @@ describe('qc service layer', () => {
   })
 
   it('denies ordinary user grant and requires reason on revoke', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const denied = await service.grantPermission({
       actor: { uid: 'user-2', claims: { fstSysadmin: false }, email: 'otc@example.com' },
       firebaseUid: 'user-1',
@@ -163,7 +163,7 @@ describe('qc service layer', () => {
   })
 
   it('initiate issues signed session; cross-store finalize denied', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     calls.getPermission.mockResolvedValue(activePermission({ canUpload: true }))
     const init = await service.initiateAttachment({
       actor: { uid: 'user-1' },
@@ -205,7 +205,7 @@ describe('qc service layer', () => {
   })
 
   it('finalize rejects lot/path mismatch and missing object', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     calls.getPermission.mockResolvedValue(activePermission({ canUpload: true }))
     calls.getAttachment.mockResolvedValue({
       data: {
@@ -240,7 +240,7 @@ describe('qc service layer', () => {
   })
 
   it('release requires verified passport+protocol; forged qcStatus ignored', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     calls.getPermission.mockResolvedValue(activePermission({ canRelease: false }))
     calls.getLot.mockResolvedValue({
       data: {
@@ -273,7 +273,7 @@ describe('qc service layer', () => {
   })
 
   it('shipment requires server decision; forged lot.status ignored; revoke denies', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     calls.getPermission.mockResolvedValue(activePermission({ canPostShipment: true }))
     calls.getLot.mockResolvedValue({
       data: {
@@ -337,7 +337,7 @@ describe('qc service layer', () => {
   })
 
   it('idempotent finalize when already verified', async () => {
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     calls.getPermission.mockResolvedValue(activePermission({ canUpload: true }))
     const verified = {
       id: 'att-1',

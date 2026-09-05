@@ -10,8 +10,8 @@ import {
   markMasterDataDomainActive,
   serializeCriticalPayload,
   fingerprintCriticalPayload,
-} from '../api/fst/_g1CriticalHelpers.mjs'
-import { G6_CAPS, defaultG6Capabilities } from '../api/fst/_g6Capabilities.mjs'
+} from '../server/fst/_g1CriticalHelpers.mjs'
+import { G6_CAPS, defaultG6Capabilities } from '../server/fst/_g6Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -29,7 +29,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -40,7 +40,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -115,7 +115,7 @@ function payload(): any {
 }
 
 async function g6() {
-  return import('../api/fst/_g6CapacityService.mjs')
+  return import('../server/fst/_g6CapacityService.mjs')
 }
 
 function installCasBarrier(n = 2) {

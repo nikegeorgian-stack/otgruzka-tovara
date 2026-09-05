@@ -19,7 +19,7 @@ describe('g41 signed session (memory adapter)', () => {
   })
 
   it('creates path-bound memory signed session and redeems exact bytes', async () => {
-    const mod = await import('../api/fst/_qcStorage.mjs')
+    const mod = await import('../server/fst/_qcStorage.mjs')
     const storagePath = mod.buildQcStoragePath('fibercell-main', 'g41-lot', 'g41-att')
     const session = await mod.createSignedUploadSession({
       storagePath,

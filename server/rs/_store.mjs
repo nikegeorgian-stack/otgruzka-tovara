@@ -1,5 +1,5 @@
 import { getFirestore } from 'firebase-admin/firestore'
-import { sanitizeRsCredential, sanitizeRsPassword } from '../../server/rs/soap.mjs'
+import { sanitizeRsCredential, sanitizeRsPassword } from './soap.mjs'
 import { initFirebaseAdmin, verifySysAdminRequest } from '../fst/_adminAuth.mjs'
 
 const SECRETS_DOC = 'secrets/rsGe'

@@ -103,8 +103,8 @@ async function main() {
       log('reusing already-running local emulator')
     }
 
-    const service = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1WarehouseService.mjs')).href)
-    const helpers = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1CriticalHelpers.mjs')).href)
+    const service = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1WarehouseService.mjs')).href)
+    const helpers = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1CriticalHelpers.mjs')).href)
 
     const clientMut = fs.readFileSync(
       path.join(repoRoot, 'fst-web/dataconnect/fst-connector/mutations.gql'),

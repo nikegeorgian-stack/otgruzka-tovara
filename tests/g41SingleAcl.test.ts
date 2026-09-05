@@ -33,7 +33,7 @@ const g1 = {
   upsertPrincipal: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ g1Mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => g1.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => g1.getCritical(...args),
@@ -44,7 +44,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => g1.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -82,7 +82,7 @@ const qc = {
   }),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ qcMocked: true })),
   getQcPermissionByUidStore: (...args: unknown[]) => qc.getPermission(...args),
   upsertQcPermission: (...args: unknown[]) => qc.upsertPermission(...args),
@@ -214,7 +214,7 @@ async function seedCritical({
   lots?: Record<string, unknown>[]
   qcDecisions?: Record<string, unknown>[]
 }) {
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = h.emptyCriticalPayload()
   p = h.markWarehouseDomainActive(p, 'sys')
   p = h.markProductionDomainActive(p, 'sys')
@@ -262,7 +262,7 @@ describe('G4.1 requireActivePermission with packagingQc active', () => {
     setPrincipal({ 'qc.release': true }, { active: false })
     setQcPermission({ canRelease: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const denied = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(denied.ok).toBe(false)
     expect(denied.error).toBe('forbidden')
@@ -275,7 +275,7 @@ describe('G4.1 requireActivePermission with packagingQc active', () => {
     await seedCritical({ packagingQc: true })
     setQcPermission({ canRelease: true, canPostShipment: true, canUpload: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     for (const flag of ['canRelease', 'canPostShipment', 'canUpload'] as const) {
       const denied = await service.requireActivePermission(UID, STORE, flag)
       expect(denied.ok).toBe(false)
@@ -289,7 +289,7 @@ describe('G4.1 requireActivePermission with packagingQc active', () => {
     setPrincipal({ 'qc.release': true })
     setQcPermission({ canRelease: false })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const allowed = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(allowed.ok).toBe(true)
     expect(allowed.source).toBe('fst_principal_access')
@@ -306,7 +306,7 @@ describe('G4.1 requireActivePermission with packagingQc active', () => {
     await seedCritical({ packagingQc: true })
     setPrincipal({ 'qc.release': true, canSomethingElse: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const denied = await service.requireActivePermission(UID, STORE, 'canSomethingElse')
     expect(denied.ok).toBe(false)
     expect(denied.status).toBe(403)
@@ -322,7 +322,7 @@ describe('G4.1 requireActivePermission with packagingQc inactive', () => {
     await seedCritical({ packagingQc: false })
     setQcPermission({ canRelease: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const allowed = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(allowed.ok).toBe(true)
     expect(allowed.source).toBe('qc_permission_legacy')
@@ -334,7 +334,7 @@ describe('G4.1 requireActivePermission with packagingQc inactive', () => {
     await seedCritical({ packagingQc: false })
     setPrincipal({ 'shipment.post': true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const allowed = await service.requireActivePermission(UID, STORE, 'canPostShipment')
     expect(allowed.ok).toBe(true)
     expect(allowed.source).toBe('fst_principal_access')
@@ -345,7 +345,7 @@ describe('G4.1 requireActivePermission with packagingQc inactive', () => {
     g1State.critical = null
     setQcPermission({ canRelease: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     expect(await service.isPackagingQcActiveForStore(STORE)).toBe(false)
     const allowed = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(allowed.ok).toBe(true)
@@ -370,7 +370,7 @@ describe('G4.1 legacy QC endpoints redirect to the G4 gateway', () => {
       quantityShipped: 0,
     })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const released = await service.releaseLot({ actor, storeId: STORE, lotId: 'fgl-1' })
     expect(released.ok).toBe(false)
     expect(released.error).toBe('use_g4_gateway')
@@ -389,7 +389,7 @@ describe('G4.1 legacy QC endpoints redirect to the G4 gateway', () => {
       'shipment.post': true,
     })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const base = { actor, storeId: STORE, lotId: 'fgl-1', reason: 'x', quantity: 1 }
     const calls: Array<[string, Promise<{ ok: boolean; error?: string; status?: number }>]> = [
       ['releaseLot', service.releaseLot(base)],
@@ -420,7 +420,7 @@ describe('G4.1 G4 gateway capability check', () => {
     await seedCritical({ packagingQc: true, lots: [pendingLot()] })
     setPrincipal({ 'packaging.read': true, 'qc.review': true, productionLineIds: ['*'] })
 
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const denied = await g4.executeG4Command({
       actor: sysadminActor,
       storeId: STORE,
@@ -453,7 +453,7 @@ describe('G4.1 G4 gateway capability check', () => {
 describe('G4.1 grant / revoke write the canonical principal', () => {
   it('grantPermission maps QC flags onto G4 capabilities', async () => {
     await seedCritical({ packagingQc: true })
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const granted = await service.grantPermission({
       actor: { uid: 'sys-1', claims: { fstSysadmin: true } },
       firebaseUid: UID,
@@ -482,7 +482,7 @@ describe('G4.1 grant / revoke write the canonical principal', () => {
     setPrincipal({ 'qc.release': true, 'shipment.post': true })
     setQcPermission({ canRelease: true, canPostShipment: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     expect((await service.requireActivePermission(UID, STORE, 'canRelease')).ok).toBe(true)
 
     const revoked = await service.revokePermission({
@@ -517,7 +517,7 @@ describe('G4.1 AppStore role is not an ACL source', () => {
     setPrincipal({}, { roleId: 'sysadmin' })
     setQcPermission({ canRelease: true })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const denied = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(denied.ok).toBe(false)
     expect(denied.status).toBe(403)
@@ -527,14 +527,14 @@ describe('G4.1 AppStore role is not an ACL source', () => {
     await seedCritical({ packagingQc: true })
     setPrincipal({ 'qc.release': true }, { roleId: 'guest' })
 
-    const service = await import('../api/fst/_qcService.mjs')
+    const service = await import('../server/fst/_qcService.mjs')
     const allowed = await service.requireActivePermission(UID, STORE, 'canRelease')
     expect(allowed.ok).toBe(true)
     expect(allowed.principal?.roleId).toBe('guest')
   })
 
   it('the ACL source slice never reads roleId / roleViews / webViews', async () => {
-    const src = await fs.readFile(path.resolve('api/fst/_qcService.mjs'), 'utf8')
+    const src = await fs.readFile(path.resolve('server/fst/_qcService.mjs'), 'utf8')
     const aclStart = src.indexOf('export async function requireActivePermission')
     const aclEnd = src.indexOf('export async function rejectIfPackagingQcAuthoritative')
     expect(aclStart).toBeGreaterThan(0)

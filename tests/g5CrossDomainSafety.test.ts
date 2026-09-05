@@ -6,7 +6,7 @@
  * packagingQc feature flag. Bare revision / warehouse active ≠ salesPlanning.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -24,7 +24,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -35,7 +35,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -123,7 +123,7 @@ function payload(): any {
 }
 
 async function g5() {
-  return import('../api/fst/_g5SalesProcurementService.mjs')
+  return import('../server/fst/_g5SalesProcurementService.mjs')
 }
 
 async function cmd(
@@ -146,7 +146,7 @@ async function cmd(
  * then activate G5 domains so subsequent sales writes exercise casCommitG5 preservation.
  */
 async function seedSiblingDomainsAndActivateG5() {
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = h.emptyCriticalPayload()
   p = h.markWarehouseDomainActive(p, 'seed')
   p = h.markProductionDomainActive(p, 'seed')
@@ -298,7 +298,7 @@ describe('G5 cross-domain preservation', () => {
 
 describe('G5 activation isolation', () => {
   it('bare critical revision / warehouse active does not make salesPlanningActive', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = h.emptyCriticalPayload()
     p = h.markWarehouseDomainActive(p, 'u1')
     const json = h.serializeCriticalPayload(p)
@@ -326,7 +326,7 @@ describe('G5 activation isolation', () => {
 
 describe('G5 payload / domain allow-list', () => {
   it('parseCriticalPayload allows G5 domains; rejects employees', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     expect(h.G1_ALLOWED_DOMAINS).toEqual(
       expect.arrayContaining(['masterData', 'sales', 'planning', 'procurement']),
     )

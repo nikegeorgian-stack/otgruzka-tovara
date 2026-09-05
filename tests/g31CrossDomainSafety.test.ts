@@ -19,7 +19,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -30,7 +30,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -120,7 +120,7 @@ function payload() {
   return JSON.parse(String(dcState.critical!.payloadJson))
 }
 
-async function activateProduction(svc: typeof import('../api/fst/_g3ProductionService.mjs')) {
+async function activateProduction(svc: typeof import('../server/fst/_g3ProductionService.mjs')) {
   grant('u1', STORE, ALL_CAPS)
   const r = await svc.executeG3Command({
     actor,
@@ -134,7 +134,7 @@ async function activateProduction(svc: typeof import('../api/fst/_g3ProductionSe
   return r
 }
 
-async function seedWhAndRecipe(svc: typeof import('../api/fst/_g3ProductionService.mjs')) {
+async function seedWhAndRecipe(svc: typeof import('../server/fst/_g3ProductionService.mjs')) {
   await activateProduction(svc)
   await svc.executeG3Command({
     actor,
@@ -179,7 +179,7 @@ async function seedWhAndRecipe(svc: typeof import('../api/fst/_g3ProductionServi
 
 describe('G3.1 domain activation', () => {
   it('warehouse active + production inactive keeps legacy production readable; revision alone does not activate production', async () => {
-    const helpers = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const helpers = await import('../server/fst/_g1CriticalHelpers.mjs')
     const raw = {
       schemaVersion: 2,
       domains: {
@@ -223,8 +223,8 @@ describe('G3.1 domain activation', () => {
   })
 
   it('mutating G3 without activate → production_domain_inactive; activate does not wipe warehouse', async () => {
-    const g2 = await import('../api/fst/_g2WarehouseService.mjs')
-    const g3 = await import('../api/fst/_g3ProductionService.mjs')
+    const g2 = await import('../server/fst/_g2WarehouseService.mjs')
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
     grant('u1', STORE, ALL_CAPS)
     await g2.executeG2Command({
       actor,
@@ -258,8 +258,8 @@ describe('G3.1 domain activation', () => {
 
 describe('G3.1 cross-domain preservation', () => {
   it('G2 warehouse commands preserve production deep-equal; unknown fields survive', async () => {
-    const g2 = await import('../api/fst/_g2WarehouseService.mjs')
-    const g3 = await import('../api/fst/_g3ProductionService.mjs')
+    const g2 = await import('../server/fst/_g2WarehouseService.mjs')
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
     await seedWhAndRecipe(g3)
     const marker = { secretFuture: [1, 2, 3], nested: { a: true } }
     const p = payload()
@@ -309,7 +309,7 @@ describe('G3.1 cross-domain preservation', () => {
   })
 
   it('parse v1/v2 without production key does not activate production; serialize round-trip keeps extras', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const v1 = {
       schemaVersion: 1,
       domains: { warehouse: { ...h.emptyWarehouseStore(), customWh: 42 } },
@@ -328,7 +328,7 @@ describe('G3.1 cross-domain preservation', () => {
 
 describe('G3.1 CAS + embedded receipt fail-safe', () => {
   it('CAS success + external receipt failure → retry same key does not double-write', async () => {
-    const g3 = await import('../api/fst/_g3ProductionService.mjs')
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
     await seedWhAndRecipe(g3)
     const receiptsBefore = dcState.receipts.size
     calls.insertReceipt.mockImplementation(async () => {
@@ -382,7 +382,7 @@ describe('G3.1 CAS + embedded receipt fail-safe', () => {
 
 describe('G3.1 command coverage + ACL', () => {
   it('covers recipe/order/reserve/material/shift success and denial paths', async () => {
-    const g3 = await import('../api/fst/_g3ProductionService.mjs')
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
     await seedWhAndRecipe(g3)
 
     // recipe draft delete denied on approved
@@ -694,7 +694,7 @@ describe('G3.1 command coverage + ACL', () => {
   })
 
   it('deterministic concurrent CAS race: only one final-stock issue succeeds', async () => {
-    const g3 = await import('../api/fst/_g3ProductionService.mjs')
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
     await seedWhAndRecipe(g3)
     await g3.executeG3Command({
       actor,

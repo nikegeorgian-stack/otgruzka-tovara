@@ -22,7 +22,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -33,7 +33,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   insertFstCommandReceipt: (...args: unknown[]) => calls.insertReceipt(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -101,7 +101,7 @@ function grant(uid: string, storeId: string, caps: Record<string, boolean>, acti
 
 describe('G1 critical helpers', () => {
   it('rejects non-allowlisted domains in critical payload', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const bad = h.parseCriticalPayload(
       JSON.stringify({
         schemaVersion: 1,
@@ -136,7 +136,7 @@ describe('G1 critical helpers', () => {
   })
 
   it('server recomputes balance from movements (ignores client balances)', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const bal = h.computeServerBalance(
       [
         { warehouseId: 'w1', itemId: 'i1', type: 'in', quantity: 10 },
@@ -152,7 +152,7 @@ describe('G1 critical helpers', () => {
 
 describe('G1 principal access bootstrap', () => {
   it('sysadmin bootstrap requires trusted claim/email', async () => {
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const denied = await svc.grantPrincipalAccess({
       actor: { uid: 'u1', email: 'user@example.com', claims: {} },
       firebaseUid: 'u2',
@@ -174,7 +174,7 @@ describe('G1 principal access bootstrap', () => {
 
   it('disabled permission is forbidden', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true }, false)
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const r = await svc.requirePrincipalCapability('u1', 'fibercell-main', 'canPostWarehouseDocument')
     expect(r.ok).toBe(false)
     expect(r.error).toBe('forbidden')
@@ -184,7 +184,7 @@ describe('G1 principal access bootstrap', () => {
 describe('G1 warehouse post command', () => {
   it('rejects arbitrary payloadJson / warehousePatch / fullStore', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true, canViewWarehouse: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const r = await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1', email: 'u1@x' },
       storeId: 'fibercell-main',
@@ -198,7 +198,7 @@ describe('G1 warehouse post command', () => {
 
   it('forged roleId/capability in FstStore is irrelevant — principal table gates post', async () => {
     // No principal row even if "forged" client role would claim warehouse admin.
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const r = await svc.postWarehouseDocumentCommand({
       actor: { uid: 'forger', email: 'forger@x' },
       storeId: 'fibercell-main',
@@ -211,7 +211,7 @@ describe('G1 warehouse post command', () => {
 
   it('foreign storeId is forbidden', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const r = await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1' },
       storeId: 'other-store',
@@ -224,7 +224,7 @@ describe('G1 warehouse post command', () => {
 
   it('posts receipt atomically: document + movements + audit via CAS', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const r = await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1', email: 'u1@x' },
       storeId: 'fibercell-main',
@@ -246,7 +246,7 @@ describe('G1 warehouse post command', () => {
 
   it('rejects issue that would go negative (server-side stock)', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1' },
       storeId: 'fibercell-main',
@@ -265,7 +265,7 @@ describe('G1 warehouse post command', () => {
 
   it('revision conflict applies nothing (CAS)', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     // Seed critical
     await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1' },
@@ -291,7 +291,7 @@ describe('G1 warehouse post command', () => {
 
   it('replay with same idempotencyKey does not create second document', async () => {
     grant('u1', 'fibercell-main', { canPostWarehouseDocument: true })
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const a = await svc.postWarehouseDocumentCommand({
       actor: { uid: 'u1' },
       storeId: 'fibercell-main',
@@ -314,7 +314,7 @@ describe('G1 warehouse post command', () => {
 
 describe('G1 forged UpdateFstStore does not affect authoritative warehouse', () => {
   it('resolveAuthoritativeWarehouse prefers critical store when revision>0', async () => {
-    const svc = await import('../api/fst/_g1WarehouseService.mjs')
+    const svc = await import('../server/fst/_g1WarehouseService.mjs')
     const forged = {
       documents: [{ id: 'fake', status: 'posted' }],
       movements: [{ id: 'fake-m', quantity: 999 }],

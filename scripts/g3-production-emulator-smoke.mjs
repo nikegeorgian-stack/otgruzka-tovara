@@ -88,8 +88,8 @@ async function main() {
       await new Promise((r) => setTimeout(r, 4000))
     } else log('reusing local emulator')
 
-    const g2 = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g2WarehouseService.mjs')).href)
-    const g3 = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g3ProductionService.mjs')).href)
+    const g2 = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g2WarehouseService.mjs')).href)
+    const g3 = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g3ProductionService.mjs')).href)
 
     const sys = { uid: 'g3-sys', email: 'admin@fibercell.net', claims: { fstSysadmin: true } }
     const user = { uid: 'g3-user', email: 'g3@example.com', claims: {} }
@@ -153,8 +153,8 @@ async function main() {
     const payload = JSON.parse(
       (
         await (
-          await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1DataConnect.mjs')).href)
-        ).getFstCriticalStore((await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1DataConnect.mjs')).href)).getG1DataConnect(), {
+          await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1DataConnect.mjs')).href)
+        ).getFstCriticalStore((await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1DataConnect.mjs')).href)).getG1DataConnect(), {
           id: storeId,
         })
       ).data.fstCriticalStore.payloadJson,
@@ -166,8 +166,8 @@ async function main() {
     payload.domains.warehouse.scrapLocationId = 'scrap'
     // Force via G2 period no-op close/open to rewrite? Instead use upsert through next G3 command after manual CAS — simplify: inject via updateCas by revision bump using g3 recipe which loads critical
     // Direct upsertCriticalStore:
-    const dcMod = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1DataConnect.mjs')).href)
-    const helpers = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_g1CriticalHelpers.mjs')).href)
+    const dcMod = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1DataConnect.mjs')).href)
+    const helpers = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_g1CriticalHelpers.mjs')).href)
     const dc = dcMod.getG1DataConnect()
     const { data } = await dcMod.getFstCriticalStore(dc, { id: storeId })
     const row = data.fstCriticalStore

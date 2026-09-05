@@ -31,7 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
 const fstWeb = path.join(repoRoot, 'fst-web')
-const apiDir = path.join(repoRoot, 'api', 'fst')
+const apiDir = path.join(repoRoot, 'server', 'fst')
 const dataconnectSourceAbs = path.join(fstWeb, 'dataconnect')
 
 const EMULATOR_HOST = '127.0.0.1'

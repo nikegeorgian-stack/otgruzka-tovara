@@ -106,11 +106,11 @@ async function main() {
       log('reusing already-running local emulator')
     }
 
-    const service = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_qcService.mjs')).href)
+    const service = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_qcService.mjs')).href)
     const adminSdk = await import(
-      pathToFileURL(path.join(repoRoot, 'api/fst/dataconnect-admin-generated/index.cjs.js')).href
+      pathToFileURL(path.join(repoRoot, 'server/fst/dataconnect-admin-generated/index.cjs.js')).href
     )
-    const storage = await import(pathToFileURL(path.join(repoRoot, 'api/fst/_qcStorage.mjs')).href)
+    const storage = await import(pathToFileURL(path.join(repoRoot, 'server/fst/_qcStorage.mjs')).href)
 
     const clientDts = fs.readFileSync(
       path.join(repoRoot, 'fst-web/src/lib/dataconnect-generated/index.d.ts'),

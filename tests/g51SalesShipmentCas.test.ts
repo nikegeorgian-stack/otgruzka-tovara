@@ -2,7 +2,7 @@
  * PHASE G5.1 — sales.shipment CAS; G4 shipment.post → use_g5_gateway when salesPlanning active.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -19,7 +19,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -30,7 +30,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -129,10 +129,10 @@ async function g5cmd(
 
 async function seedShipReady() {
   grant(ALL_CAPS)
-  const svc = await import('../api/fst/_g5SalesProcurementService.mjs')
+  const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
   expect((await g5cmd(svc, 'masterdata.domain.activate', { reason: 'x' }, 'md')).ok).toBe(true)
   expect((await g5cmd(svc, 'sales.domain.activate', { reason: 'x' }, 'sp')).ok).toBe(true)
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = payload()
   p = h.markWarehouseDomainActive(p, 'u1')
   p = h.markProductionDomainActive(p, 'u1')
@@ -252,7 +252,7 @@ describe('G5.1 sales shipment CAS', () => {
 
   it('G4 shipment.post returns use_g5_gateway when salesPlanning is active', async () => {
     await seedShipReady()
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const denied = await g4.executeG4Command({
       actor,
       storeId: STORE,

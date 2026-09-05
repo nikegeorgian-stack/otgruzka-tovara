@@ -27,7 +27,7 @@ import {
   parseCriticalPayload,
   serializeCriticalPayload,
   G1_ALLOWED_DOMAINS,
-} from '../api/fst/_g1CriticalHelpers.mjs'
+} from '../server/fst/_g1CriticalHelpers.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')

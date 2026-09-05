@@ -6,7 +6,7 @@ import {
   emptyCriticalPayload,
   markCapacityPlanningFeatureActive,
   markMasterDataDomainActive,
-} from '../api/fst/_g1CriticalHelpers.mjs'
+} from '../server/fst/_g1CriticalHelpers.mjs'
 import {
   applyG6CommandLocal,
   allocateHorizon,
@@ -14,7 +14,7 @@ import {
   computeOrderCapacityBalances,
   expandShiftsForDate,
   tbilisiWeekdayIso,
-} from '../api/fst/_g6CapacityService.mjs'
+} from '../server/fst/_g6CapacityService.mjs'
 
 const actor = { uid: 'u1', email: 'u1@x', claims: {} }
 const NOW = '2026-09-04T12:00:00.000Z'

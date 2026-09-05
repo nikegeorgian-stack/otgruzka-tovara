@@ -3,7 +3,7 @@
  * and local overlay does not rewrite those roots.
  */
 import { describe, expect, it } from 'vitest'
-import { emptyCriticalPayload, parseCriticalPayload, serializeCriticalPayload } from '../api/fst/_g1CriticalHelpers.mjs'
+import { emptyCriticalPayload, parseCriticalPayload, serializeCriticalPayload } from '../server/fst/_g1CriticalHelpers.mjs'
 import { resolveAuthoritativeWarehouseOverlay } from '@/lib/warehouse/g1ServerClient'
 import { createDefaultStore } from '@/lib/storage'
 

@@ -9,8 +9,8 @@
  * - UI rule: executeG5Command failure does not call mirrorG5Ack
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
-import { G2_CAPS } from '../api/fst/_g2Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
+import { G2_CAPS } from '../server/fst/_g2Capabilities.mjs'
 import {
   G5_UI_GATEWAY_MATRIX,
   mirrorG5AckIfOk,
@@ -35,7 +35,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -46,7 +46,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -146,7 +146,7 @@ async function cmd(
 
 async function activateAndSeedCatalog(opts: { withBom?: boolean } = {}) {
   grant({ ...ALL_G5, ...ALL_G2, 'shipment.post': true, 'packaging.read': true })
-  const svc = await import('../api/fst/_g5SalesProcurementService.mjs')
+  const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
   for (const [type, key] of [
     ['masterdata.domain.activate', 'a1'],
     ['sales.domain.activate', 'a2'],
@@ -154,7 +154,7 @@ async function activateAndSeedCatalog(opts: { withBom?: boolean } = {}) {
   ] as const) {
     expect((await cmd(svc, type, { reason: 'x' }, key)).ok).toBe(true)
   }
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = payload()
   p = h.markWarehouseDomainActive(p, 'u1')
   p.domains.warehouse.locations = [
@@ -221,7 +221,7 @@ async function activateAndSeedCatalog(opts: { withBom?: boolean } = {}) {
 describe('G5.2 bypass gates', () => {
   it('G2 purchase purpose after procurement.active → use_g5_gateway', async () => {
     await activateAndSeedCatalog()
-    const g2 = await import('../api/fst/_g2WarehouseService.mjs')
+    const g2 = await import('../server/fst/_g2WarehouseService.mjs')
     const denied = await g2.executeG2Command({
       actor,
       storeId: STORE,
@@ -241,7 +241,7 @@ describe('G5.2 bypass gates', () => {
 
   it('G4 shipment.post after salesPlanning.active → use_g5_gateway', async () => {
     const svc = await activateAndSeedCatalog()
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = payload()
     p = h.markProductionDomainActive(p, 'u1')
     p = h.markPackagingQcFeatureActive(p, 'u1')
@@ -281,7 +281,7 @@ describe('G5.2 bypass gates', () => {
     expect(payload().domainMeta.salesPlanning.active).toBe(true)
     void svc
 
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const denied = await g4.executeG4Command({
       actor,
       storeId: STORE,
@@ -412,7 +412,7 @@ describe('G5.2 planning / MRP safety', () => {
 
   it('issued-to-line is not free supply for other orders', async () => {
     const svc = await activateAndSeedCatalog()
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const p = payload()
     p.domains.warehouse.movements = [
       {

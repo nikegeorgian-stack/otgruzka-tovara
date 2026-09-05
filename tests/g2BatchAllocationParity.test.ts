@@ -2,7 +2,7 @@
  * PHASE G2.1 — FEFO/FIFO batch allocation + client/server parity.
  */
 import { describe, expect, it } from 'vitest'
-import * as server from '../api/fst/_g2BatchAllocation.mjs'
+import * as server from '../server/fst/_g2BatchAllocation.mjs'
 import * as client from '../src/lib/warehouse/batchAllocation'
 
 const FIXTURE_MOVEMENTS = [

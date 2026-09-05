@@ -3,7 +3,7 @@
  * double-ship race (second fails), stale planningRun.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -20,7 +20,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -31,7 +31,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -131,7 +131,7 @@ async function cmd(
 describe('G5.1 security / concurrency', () => {
   it('rejects forged client roleId and finance cannot receipt', async () => {
     grant(ALL_CAPS)
-    const svc = await import('../api/fst/_g5SalesProcurementService.mjs')
+    const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
     const forged = await svc.executeG5Command({
       actor,
       storeId: STORE,
@@ -144,7 +144,7 @@ describe('G5.1 security / concurrency', () => {
 
     expect((await cmd(svc, 'masterdata.domain.activate', { reason: 'x' }, 'md')).ok).toBe(true)
     expect((await cmd(svc, 'procurement.domain.activate', { reason: 'x' }, 'pr')).ok).toBe(true)
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = payload()
     p = h.markWarehouseDomainActive(p, 'u1')
     p.domains.warehouse.locations = [{ id: LOC, warehouseId: WH }]
@@ -187,10 +187,10 @@ describe('G5.1 security / concurrency', () => {
 
   it('second concurrent ship of overlapping qty fails after first posts', async () => {
     grant(ALL_CAPS)
-    const svc = await import('../api/fst/_g5SalesProcurementService.mjs')
+    const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
     expect((await cmd(svc, 'masterdata.domain.activate', { reason: 'x' }, 'md')).ok).toBe(true)
     expect((await cmd(svc, 'sales.domain.activate', { reason: 'x' }, 'sp')).ok).toBe(true)
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = payload()
     p = h.markWarehouseDomainActive(p, 'u1')
     p = h.markPackagingQcFeatureActive(p, 'u1')
@@ -286,7 +286,7 @@ describe('G5.1 security / concurrency', () => {
 
   it('stale planningRun cannot generate drafts', async () => {
     grant(ALL_CAPS)
-    const svc = await import('../api/fst/_g5SalesProcurementService.mjs')
+    const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
     expect((await cmd(svc, 'masterdata.domain.activate', { reason: 'x' }, 'md')).ok).toBe(true)
     expect((await cmd(svc, 'sales.domain.activate', { reason: 'x' }, 'sp')).ok).toBe(true)
     expect((await cmd(svc, 'procurement.domain.activate', { reason: 'x' }, 'pr')).ok).toBe(true)

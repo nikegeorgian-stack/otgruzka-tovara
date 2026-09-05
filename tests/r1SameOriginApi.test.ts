@@ -9,8 +9,8 @@ import {
 } from '@/lib/cloud/fstApiOrigin'
 import {
   evaluateBrowserOrigin,
-} from '../api/fst/_apiOriginPolicy.mjs'
-import { rejectCrossOriginBrowser } from '../api/fst/_qcHttp.mjs'
+} from '../server/fst/_apiOriginPolicy.mjs'
+import { rejectCrossOriginBrowser } from '../server/fst/_qcHttp.mjs'
 
 describe('resolveFstApiOrigin', () => {
   it('localhost → relative (empty origin)', () => {
@@ -129,10 +129,11 @@ describe('evaluateBrowserOrigin', () => {
   })
 })
 
-describe('api/fst g1–g6/qc command files: no wildcard CORS', () => {
+describe('server/fst g1–g6/qc command files: no wildcard CORS', () => {
   it('has zero Access-Control-Allow-Origin: * matches (exclude clear-must-change-password)', () => {
     const here = dirname(fileURLToPath(import.meta.url))
-    const apiDir = join(here, '..', 'api', 'fst')
+    // Handlers live under server/fst after R2.3 catch-all consolidation.
+    const apiDir = join(here, '..', 'server', 'fst')
     const files = readdirSync(apiDir).filter((name) => {
       if (name === 'clear-must-change-password.mjs') return false
       return /^(g[1-6]-|qc-).+\.mjs$/i.test(name)

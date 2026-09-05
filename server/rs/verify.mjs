@@ -1,5 +1,4 @@
-import { verifyRsAuth } from '../../server/rs/soap.mjs'
-
+import { verifyRsAuth } from './soap.mjs'
 import { resolveRsCredentials, verifySysAdminRequest } from './_store.mjs'
 
 

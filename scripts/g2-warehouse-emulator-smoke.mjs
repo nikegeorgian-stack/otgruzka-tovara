@@ -136,10 +136,10 @@ async function main() {
     }
 
     const service = await import(
-      pathToFileURL(path.join(repoRoot, 'api/fst/_g2WarehouseService.mjs')).href
+      pathToFileURL(path.join(repoRoot, 'server/fst/_g2WarehouseService.mjs')).href
     )
     const helpers = await import(
-      pathToFileURL(path.join(repoRoot, 'api/fst/_g1CriticalHelpers.mjs')).href
+      pathToFileURL(path.join(repoRoot, 'server/fst/_g1CriticalHelpers.mjs')).href
     )
 
     const clientMut = fs.readFileSync(

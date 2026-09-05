@@ -18,7 +18,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -28,7 +28,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   insertFstCommandReceipt: (...args: unknown[]) => calls.insertReceipt(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -94,7 +94,7 @@ const actor = { uid: 'u1', email: 'u1@x', claims: {} }
 const STORE = 'fibercell-main'
 
 async function seedStock() {
-  const svc = await import('../api/fst/_g3ProductionService.mjs')
+  const svc = await import('../server/fst/_g3ProductionService.mjs')
   // bootstrap via recipe draft requires caps — use order path after grant
   grant('u1', STORE, {
     'production.recipe.draft.edit': true,
@@ -181,7 +181,7 @@ async function seedStock() {
 
 describe('G3 security', () => {
   it('no principal → 403', async () => {
-    const svc = await import('../api/fst/_g3ProductionService.mjs')
+    const svc = await import('../server/fst/_g3ProductionService.mjs')
     const r = await svc.executeG3Command({
       actor,
       storeId: STORE,
@@ -198,7 +198,7 @@ describe('G3 security', () => {
       'production.shift.confirm': true,
       productionLineIds: ['other-line'],
     })
-    const svc = await import('../api/fst/_g3ProductionService.mjs')
+    const svc = await import('../server/fst/_g3ProductionService.mjs')
     const r = await svc.executeG3Command({
       actor,
       storeId: STORE,
@@ -212,7 +212,7 @@ describe('G3 security', () => {
 
   it('arbitrary patch forbidden', async () => {
     grant('u1', STORE, { 'production.read': true })
-    const svc = await import('../api/fst/_g3ProductionService.mjs')
+    const svc = await import('../server/fst/_g3ProductionService.mjs')
     const r = await svc.executeG3Command({
       actor,
       storeId: STORE,
@@ -233,7 +233,7 @@ describe('G3 recipes / orders / reserve', () => {
       'production.order.confirm': true,
       productionLineIds: ['*'],
     })
-    const svc = await import('../api/fst/_g3ProductionService.mjs')
+    const svc = await import('../server/fst/_g3ProductionService.mjs')
     await svc.executeG3Command({
       actor,
       storeId: STORE,
@@ -465,7 +465,7 @@ describe('G3 materials / shift / atomicity', () => {
   })
 
   it('client/server domains share one CAS envelope (production preserved with warehouse)', async () => {
-    const helpers = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const helpers = await import('../server/fst/_g1CriticalHelpers.mjs')
     const empty = helpers.emptyCriticalPayload()
     expect(empty.domains.warehouse).toBeTruthy()
     expect(empty.domains.production).toBeTruthy()

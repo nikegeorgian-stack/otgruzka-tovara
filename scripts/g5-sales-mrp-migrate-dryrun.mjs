@@ -15,7 +15,7 @@ import {
   isWarehouseDomainActive,
   parseCriticalPayload,
   G1_ALLOWED_DOMAINS,
-} from '../api/fst/_g1CriticalHelpers.mjs'
+} from '../server/fst/_g1CriticalHelpers.mjs'
 
 const path = process.argv[2]
 let raw = emptyCriticalPayload()

@@ -42,7 +42,7 @@ export async function registerFstPushNotifications(): Promise<void> {
 
   await PushNotifications.removeAllListeners()
 
-  // Android 8+: канал должен совпадать с channelId в api/fst/send-push.mjs
+  // Android 8+: канал должен совпадать с channelId в server/fst/send-push.mjs
   await PushNotifications.createChannel({
     id: 'fst_default',
     name: 'FiberCell',

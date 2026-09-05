@@ -22,7 +22,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -33,7 +33,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   insertFstCommandReceipt: (...args: unknown[]) => calls.insertReceipt(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -103,7 +103,7 @@ const actor = { uid: 'u1', email: 'u1@x', claims: {} }
 
 describe('G2 ACL', () => {
   it('user without permission → 403', async () => {
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -121,7 +121,7 @@ describe('G2 ACL', () => {
 
   it('foreign storeId → 403', async () => {
     grant('u1', 'store-a', { 'warehouse.draft.edit': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'store-b',
@@ -144,7 +144,7 @@ describe('G2 draft lifecycle', () => {
       'warehouse.draft.edit': true,
       'warehouse.document.post': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const draft = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -189,7 +189,7 @@ describe('G2 draft lifecycle', () => {
 
   it('double post is idempotent via receipt', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const a = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -224,7 +224,7 @@ describe('G2 draft lifecycle', () => {
 describe('G2 transfer / storno / period', () => {
   it('transfer insufficient stock leaves no partial write', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.transfer.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -247,7 +247,7 @@ describe('G2 transfer / storno / period', () => {
       'warehouse.document.post': true,
       'warehouse.transfer.post': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -283,7 +283,7 @@ describe('G2 transfer / storno / period', () => {
       'warehouse.document.post': true,
       'warehouse.document.cancel': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const posted = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -327,7 +327,7 @@ describe('G2 transfer / storno / period', () => {
       'warehouse.period.reopen': true,
       'warehouse.document.post': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const closed = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -367,7 +367,7 @@ describe('G2 transfer / storno / period', () => {
 describe('G2 opening / inventory / excel / CAS', () => {
   it('opening inventory activates only target warehouse', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.opening.activate': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -391,7 +391,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
       'warehouse.document.post': true,
       'warehouse.inventory.post': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -417,14 +417,14 @@ describe('G2 opening / inventory / excel / CAS', () => {
     })
     expect(inv.ok).toBe(true)
     expect(inv.applied).toBe(1)
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const bal = h.computeServerBalance(inv.warehouse.movements, 'w1', 'i1')
     expect(bal).toBe(7)
   })
 
   it('excel import creates drafts only', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.draft.edit': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -444,7 +444,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
 
   it('CAS conflict does not leave partial state', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     calls.updateCas.mockImplementationOnce(async () => {
       throw new Error('revision_conflict')
     })
@@ -467,7 +467,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
 
   it('forged actor/status/movements are ignored', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -523,7 +523,7 @@ describe('G2 security guards', () => {
   })
 
   it('verifyIdToken uses checkRevoked=true', async () => {
-    const src = await fs.readFile(path.resolve('api/fst/_adminAuth.mjs'), 'utf8')
+    const src = await fs.readFile(path.resolve('server/fst/_adminAuth.mjs'), 'utf8')
     expect(src).toMatch(/verifyIdToken\(token,\s*true\)/)
   })
 
@@ -558,7 +558,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
     grant('u1', 'fibercell-main', {
       'warehouse.document.post': true,
     })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const r1 = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -630,7 +630,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
 
   it('manual batch override without reason fails; client number ignored', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -669,7 +669,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
 
   it('emergency negative is sysadmin-only with reason; Settings period UI not desktop-only', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     const denied = await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',
@@ -695,7 +695,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
 
   it('failed CAS does not insert command receipt', async () => {
     grant('u1', 'fibercell-main', { 'warehouse.document.post': true })
-    const svc = await import('../api/fst/_g2WarehouseService.mjs')
+    const svc = await import('../server/fst/_g2WarehouseService.mjs')
     await svc.executeG2Command({
       actor,
       storeId: 'fibercell-main',

@@ -1,6 +1,6 @@
 /**
  * PHASE G2.1 — TypeScript copy of canonical FEFO/FIFO (parity-tested vs batchAllocationCore.mjs).
- * Server uses api/fst/_g2BatchAllocation.mjs → batchAllocationCore.mjs.
+ * Server uses server/fst/_g2BatchAllocation.mjs → batchAllocationCore.mjs.
  */
 
 /** Authoritative movement shape (server + client ledger rows). */

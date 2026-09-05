@@ -1,4 +1,4 @@
-import { getTpInfoPublic } from '../../server/rs/soap.mjs'
+import { getTpInfoPublic } from './soap.mjs'
 import { checkRateLimit, verifyAllowedFstUser } from '../fst/_allowedUser.mjs'
 import { resolveRsCredentials } from './_store.mjs'
 

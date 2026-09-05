@@ -3,8 +3,8 @@
  * only one wins; loser gets 409 revision_conflict; retry/idempotency behave correctly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
-import { G3_CAPS } from '../api/fst/_g3Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
+import { G3_CAPS } from '../server/fst/_g3Capabilities.mjs'
 
 const dcState = {
   principals: new Map<string, Record<string, unknown>>(),
@@ -22,7 +22,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -33,19 +33,19 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({})),
   insertQcLotDecision: vi.fn(async () => undefined),
   listVerifiedLotAttachments: vi.fn(async () => []),
   upsertQcFinishedGoodsLot: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_qcStorage.mjs', () => ({
+vi.mock('../server/fst/_qcStorage.mjs', () => ({
   buildQcStoragePath: vi.fn(() => 'path'),
   verifyStorageObject: vi.fn(async () => ({ ok: true })),
 }))
@@ -125,10 +125,10 @@ function payload(): any {
 }
 
 async function g5() {
-  return import('../api/fst/_g5SalesProcurementService.mjs')
+  return import('../server/fst/_g5SalesProcurementService.mjs')
 }
 async function g3() {
-  return import('../api/fst/_g3ProductionService.mjs')
+  return import('../server/fst/_g3ProductionService.mjs')
 }
 
 /**
@@ -207,7 +207,7 @@ async function bootstrapG5MasterData() {
     })).ok,
   ).toBe(true)
 
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = payload()
   p = h.markWarehouseDomainActive(p, 'u1')
   p = h.markProductionDomainActive(p, 'u1')
@@ -341,7 +341,7 @@ describe('G5.5 CAS concurrency', () => {
         })
       ).ok,
     ).toBe(true)
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = payload()
     p = h.markWarehouseDomainActive(p, 'u1')
     p = h.markProductionDomainActive(p, 'u1')

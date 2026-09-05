@@ -5,7 +5,7 @@
  * and admin auth — mirrors G4 packaging tests.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { G5_CAPS, defaultG5Capabilities } from '../api/fst/_g5Capabilities.mjs'
+import { G5_CAPS, defaultG5Capabilities } from '../server/fst/_g5Capabilities.mjs'
 
 // ---------------------------------------------------------------------------
 // In-memory Data Connect
@@ -27,7 +27,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -38,7 +38,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => calls.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -137,7 +137,7 @@ function payload(): any {
 }
 
 async function g5() {
-  return import('../api/fst/_g5SalesProcurementService.mjs')
+  return import('../server/fst/_g5SalesProcurementService.mjs')
 }
 
 async function cmd(
@@ -167,7 +167,7 @@ async function activateAll(svc: Awaited<ReturnType<typeof g5>>) {
     const r = await cmd(svc, type, { reason: 'g5 bootstrap' }, key)
     expect(r.ok).toBe(true)
   }
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   const p = payload()
   const marked = h.markWarehouseDomainActive(p, 'u1')
   marked.domains.warehouse.locations = [{ id: WH }, { id: LOC }]
@@ -280,7 +280,7 @@ async function confirmSalesOrder(
 
 describe('G5 domain activation', () => {
   it('empty domains are not authoritative; login/pull / sibling domains do not activate G5', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const empty = h.emptyCriticalPayload()
     expect(h.isMasterDataDomainActive(empty)).toBe(false)
     expect(h.isSalesPlanningActive(empty)).toBe(false)
@@ -574,7 +574,7 @@ describe('G5 MRP', () => {
 
 describe('G5 procurement', () => {
   it('submit → approve → receipt.post updates warehouse + PO receivedQty; payment leaves warehouse hash', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const svc = await g5()
     await activateAll(svc)
     await seedMasterCatalog(svc, { moq: 10 })
@@ -670,7 +670,7 @@ describe('G5 trust boundary', () => {
     grant(defaultG5Capabilities({ [G5_CAPS.SALES_READ]: true }))
     const svc = await g5()
     // Seed salesPlanning active so the gate is capability, not domain inactive
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const seeded = h.markSalesPlanningActive(h.emptyCriticalPayload(), 'sys')
     const json = h.serializeCriticalPayload(seeded)
     dcState.critical = {

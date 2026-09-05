@@ -23,7 +23,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -34,7 +34,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -61,7 +61,7 @@ const storageState = {
   objects: new Map<string, { generation: string }>(),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ qcMocked: true })),
   listVerifiedLotAttachments: async (_dc: unknown, vars: { storeId: string; lotId: string }) => ({
     data: {
@@ -80,7 +80,7 @@ vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
   },
 }))
 
-vi.mock('../api/fst/_qcStorage.mjs', () => {
+vi.mock('../server/fst/_qcStorage.mjs', () => {
   const seg = (value: unknown, fallback: string) =>
     String(value ?? '')
       .replace(/[^a-zA-Z0-9-]/g, '')
@@ -299,7 +299,7 @@ function seedLedgerFixtures() {
 }
 
 async function activateProduction() {
-  const g3 = await import('../api/fst/_g3ProductionService.mjs')
+  const g3 = await import('../server/fst/_g3ProductionService.mjs')
   const activated = await g3.executeG3Command({
     actor,
     storeId: STORE,
@@ -318,7 +318,7 @@ async function bootstrap(): Promise<G4> {
   grant(ALL_CAPS)
   await activateProduction()
   seedLedgerFixtures()
-  const g4 = await import('../api/fst/_g4PackagingService.mjs')
+  const g4 = await import('../server/fst/_g4PackagingService.mjs')
   const activated = await g4.executeG4Command({
     actor,
     storeId: STORE,
@@ -486,7 +486,7 @@ describe('G4.1 activation is scoped', () => {
     grant(ALL_CAPS)
     await activateProduction()
     seedLedgerFixtures()
-    const helpers = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const helpers = await import('../server/fst/_g1CriticalHelpers.mjs')
     const parsed = helpers.parseCriticalPayload(dcState.critical!.payloadJson, {
       revision: Number(dcState.critical!.revision) || 0,
     })
@@ -496,7 +496,7 @@ describe('G4.1 activation is scoped', () => {
     )
     expect(helpers.isPackagingQcFeatureActive(parsed.payload)).toBe(false)
 
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const read = await g4.executeG4Command({
       actor,
       storeId: STORE,
@@ -554,7 +554,7 @@ describe('G4.1 activation is scoped', () => {
     const productionVersionBefore = payload().domainMeta.production.version
     const ledgerBefore = warehouseLedgerFingerprint()
 
-    const g4 = await import('../api/fst/_g4PackagingService.mjs')
+    const g4 = await import('../server/fst/_g4PackagingService.mjs')
     const activated = await g4.executeG4Command({
       actor,
       storeId: STORE,

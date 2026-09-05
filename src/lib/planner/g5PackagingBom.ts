@@ -2,7 +2,7 @@
  * PHASE G5.3 — packaging BOM helpers (canonical body + recipe → components).
  *
  * Server computes sha256 contentHash from the same canonical shape (see
- * packagingBomContentHash in api/fst/_g5SalesProcurementService.mjs).
+ * packagingBomContentHash in server/fst/_g5SalesProcurementService.mjs).
  *
  * G4 compatibility: packaging reports / recipeSnapshot should carry packagingBomId +
  * version (+ contentHash) when available so printed packaging matches MRP packagingBomRefs.

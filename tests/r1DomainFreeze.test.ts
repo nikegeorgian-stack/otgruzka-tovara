@@ -18,11 +18,11 @@ import {
   markWarehouseDomainActive,
   parseCriticalPayload,
   serializeCriticalPayload,
-} from '../api/fst/_g1CriticalHelpers.mjs'
+} from '../server/fst/_g1CriticalHelpers.mjs'
 import {
   applyDomainFreezeCommandLocal,
   DOMAIN_FREEZE_COMMANDS,
-} from '../api/fst/_g1DomainFreeze.mjs'
+} from '../server/fst/_g1DomainFreeze.mjs'
 
 const NOW = '2026-09-04T12:00:00.000Z'
 const ACTOR = { uid: 'admin-1', email: 'admin@fibercell.net' }

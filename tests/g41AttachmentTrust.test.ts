@@ -31,7 +31,7 @@ const g1 = {
   upsertPrincipal: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ g1Mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => g1.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => g1.getCritical(...args),
@@ -42,7 +42,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: (...args: unknown[]) => g1.upsertPrincipal(...args),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -81,7 +81,7 @@ const qc = {
   }),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ qcMocked: true })),
   getQcPermissionByUidStore: async (_dc: unknown, vars: { firebaseUid: string; storeId: string }) => ({
     data: {
@@ -175,7 +175,7 @@ function setQcPermission(flags: Record<string, boolean>) {
 }
 
 async function seedCritical({ packagingQc }: { packagingQc: boolean }) {
-  const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+  const h = await import('../server/fst/_g1CriticalHelpers.mjs')
   let p = h.emptyCriticalPayload()
   p = h.markWarehouseDomainActive(p, 'sys')
   p = h.markProductionDomainActive(p, 'sys')
@@ -199,8 +199,8 @@ type Loaded = {
 
 /** Imports service + the real storage module so they share one memory adapter. */
 async function load(): Promise<Loaded> {
-  const storage = await import('../api/fst/_qcStorage.mjs')
-  const service = await import('../api/fst/_qcService.mjs')
+  const storage = await import('../server/fst/_qcStorage.mjs')
+  const service = await import('../server/fst/_qcService.mjs')
   return { service, storage }
 }
 

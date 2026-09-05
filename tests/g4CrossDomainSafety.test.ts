@@ -22,7 +22,7 @@ const calls = {
   insertReceipt: vi.fn(async () => undefined),
 }
 
-vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
+vi.mock('../server/fst/_g1DataConnect.mjs', () => ({
   getG1DataConnect: vi.fn(() => ({ mocked: true })),
   getFstPrincipalAccessByUidStore: (...args: unknown[]) => calls.getPrincipal(...args),
   getFstCriticalStore: (...args: unknown[]) => calls.getCritical(...args),
@@ -33,7 +33,7 @@ vi.mock('../api/fst/_g1DataConnect.mjs', () => ({
   upsertFstPrincipalAccess: vi.fn(async () => undefined),
 }))
 
-vi.mock('../api/fst/_adminAuth.mjs', () => ({
+vi.mock('../server/fst/_adminAuth.mjs', () => ({
   FST_ADMIN_EMAILS: new Set(['admin@fibercell.net']),
   initFirebaseAdmin: vi.fn(),
 }))
@@ -60,7 +60,7 @@ const storageState = {
   objects: new Map<string, { generation: string }>(),
 }
 
-vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
+vi.mock('../server/fst/_qcDataConnect.mjs', () => ({
   getQcDataConnect: vi.fn(() => ({ qcMocked: true })),
   listVerifiedLotAttachments: async (_dc: unknown, vars: { storeId: string; lotId: string }) => ({
     data: {
@@ -79,7 +79,7 @@ vi.mock('../api/fst/_qcDataConnect.mjs', () => ({
   },
 }))
 
-vi.mock('../api/fst/_qcStorage.mjs', () => {
+vi.mock('../server/fst/_qcStorage.mjs', () => {
   const seg = (value: unknown, fallback: string) =>
     String(value ?? '')
       .replace(/[^a-zA-Z0-9-]/g, '')
@@ -257,8 +257,8 @@ function attachVerified(lotId: string, documentKind: 'passport' | 'protocol') {
  */
 async function bootstrapFullStack() {
   grant(ALL_CAPS)
-  const g2 = await import('../api/fst/_g2WarehouseService.mjs')
-  const g3 = await import('../api/fst/_g3ProductionService.mjs')
+  const g2 = await import('../server/fst/_g2WarehouseService.mjs')
+  const g3 = await import('../server/fst/_g3ProductionService.mjs')
 
   const activated = await g3.executeG3Command({
     actor,
@@ -335,7 +335,7 @@ async function bootstrapFullStack() {
   ]
   dcState.critical!.payloadJson = JSON.stringify(p)
 
-  const g4 = await import('../api/fst/_g4PackagingService.mjs')
+  const g4 = await import('../server/fst/_g4PackagingService.mjs')
   const packagingActive = await g4.executeG4Command({
     actor,
     storeId: STORE,
@@ -604,7 +604,7 @@ describe('G4 cross-domain preservation', () => {
 
 describe('G4 feature flag helpers', () => {
   it('isPackagingQcFeatureActive is false when only production.active is true', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     const activeProduction = h.markProductionDomainActive(h.emptyCriticalPayload(), 'u1')
     expect(h.isProductionDomainActive(activeProduction, 1)).toBe(true)
     expect(h.isPackagingQcFeatureActive(activeProduction)).toBe(false)
@@ -627,7 +627,7 @@ describe('G4 feature flag helpers', () => {
   })
 
   it('markPackagingQcFeatureActive does not clear production.active or warehouse activation', async () => {
-    const h = await import('../api/fst/_g1CriticalHelpers.mjs')
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
     let p = h.emptyCriticalPayload()
     p = h.markWarehouseDomainActive(p, 'u1')
     p = h.markProductionDomainActive(p, 'u1')

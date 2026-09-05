@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 
-/** Kept in sync with `QC_PERMISSION_TO_G4` in `api/fst/_g4Capabilities.mjs`. */
+/** Kept in sync with `QC_PERMISSION_TO_G4` in `server/fst/_g4Capabilities.mjs`. */
 const QC_PERMISSION_TO_G4 = Object.freeze({
   canView: 'packaging.read',
   canUpload: 'qc.attachment.upload',
