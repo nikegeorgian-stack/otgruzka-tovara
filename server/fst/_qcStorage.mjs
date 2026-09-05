@@ -99,9 +99,11 @@ export async function createSignedUploadSession({
   }
 
   try {
-    const { initFirebaseAdmin } = await import('./_adminAuth.mjs')
+    const { initFirebaseAdmin, resolveFirebaseStorageBucket } = await import('./_adminAuth.mjs')
     initFirebaseAdmin()
-    const file = getStorage().bucket().file(objectPath)
+    const bucketName = resolveFirebaseStorageBucket()
+    const bucket = bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
+    const file = bucket.file(objectPath)
     const expires = Date.now() + expiresInMs
     const [uploadUrl] = await file.getSignedUrl({
       version: 'v4',
@@ -185,7 +187,11 @@ async function verifyMemoryObject(storagePath, expectedContentType, expectedSize
 
 async function verifyAdminStorageObject(storagePath, expectedContentType, expectedSizeBytes, expectedChecksum) {
   try {
-    const file = getStorage().bucket().file(storagePath)
+    const { initFirebaseAdmin, resolveFirebaseStorageBucket } = await import('./_adminAuth.mjs')
+    initFirebaseAdmin()
+    const bucketName = resolveFirebaseStorageBucket()
+    const bucket = bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
+    const file = bucket.file(storagePath)
     const [metadata] = await file.getMetadata()
     const contentType = String(metadata?.contentType ?? '')
     const sizeBytes = Number(metadata?.size ?? 0)

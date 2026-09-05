@@ -56,7 +56,7 @@ export async function verifyAllowedFstUser(req) {
   }
 
   try {
-    const decoded = await getAuth().verifyIdToken(token)
+    const decoded = await getAuth().verifyIdToken(token, true)
     const email = decoded.email?.trim().toLowerCase() || ''
     if (!email) return { ok: false, status: 401, error: 'unauthorized' }
     if (!(await isAllowedFstEmail(email))) {

@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const decoded = await getAuth().verifyIdToken(token)
+    const decoded = await getAuth().verifyIdToken(token, true)
     const adminAuth = getAdminAuth()
     const record = await adminAuth.getUser(decoded.uid)
     const claims = { ...(record.customClaims ?? {}) }

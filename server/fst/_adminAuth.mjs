@@ -36,12 +36,28 @@ export function assertStagingServiceAccountIsolation(rawJson) {
   }
 }
 
+/** Explicit bucket for Admin Storage (signed URL / verify). Never logs values. */
+export function resolveFirebaseStorageBucket(projectId = '') {
+  const fromEnv = String(process.env.FST_FIREBASE_STORAGE_BUCKET ?? '').trim()
+  if (fromEnv) return fromEnv
+  const pid = String(projectId || '').trim()
+  if (pid === FST_STAGING_PROJECT_ID || isStagingIsolatedRuntime()) {
+    return `${FST_STAGING_PROJECT_ID}.firebasestorage.app`
+  }
+  return undefined
+}
+
 export function initFirebaseAdmin() {
   if (getApps().length > 0) return
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
   if (raw?.trim()) {
     assertStagingServiceAccountIsolation(raw)
-    initializeApp({ credential: cert(JSON.parse(raw)) })
+    const parsed = JSON.parse(raw)
+    const storageBucket = resolveFirebaseStorageBucket(parsed?.project_id)
+    initializeApp({
+      credential: cert(parsed),
+      ...(storageBucket ? { storageBucket } : {}),
+    })
     return
   }
   // Local Data Connect emulator only — never use production service account here.
@@ -52,8 +68,12 @@ export function initFirebaseAdmin() {
     if (isStagingIsolatedRuntime()) {
       throw new Error('staging_service_account_required')
     }
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'otgruzka-tovara'
     initializeApp({
-      projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'otgruzka-tovara',
+      projectId,
+      ...(resolveFirebaseStorageBucket(projectId)
+        ? { storageBucket: resolveFirebaseStorageBucket(projectId) }
+        : {}),
     })
     return
   }

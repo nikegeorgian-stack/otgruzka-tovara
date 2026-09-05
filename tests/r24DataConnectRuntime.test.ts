@@ -1,7 +1,7 @@
 /**
  * PHASE R2.4 — Data Connect runtime routing + Preview fail-closed isolation.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   FST_DC_DEFAULT_SERVICE_ID,
   FST_STAGING_PROJECT_ID,
@@ -21,8 +21,16 @@ const ENV_KEYS = [
   'FST_DATACONNECT_SERVICE_ID',
 ]
 
-afterEach(() => {
+function clearRuntimeEnv() {
   for (const k of ENV_KEYS) delete process.env[k]
+}
+
+beforeEach(() => {
+  clearRuntimeEnv()
+})
+
+afterEach(() => {
+  clearRuntimeEnv()
 })
 
 describe('r24 data connect runtime', () => {
