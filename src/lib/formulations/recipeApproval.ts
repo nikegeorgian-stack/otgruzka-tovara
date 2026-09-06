@@ -3,6 +3,7 @@
  * Extends FormulationStore; does not rewrite legacy FormulationRecipe rows.
  */
 import type { AccessRoleId, AccessStore, AppUser } from '@/lib/access/types'
+import { isFormulationWaterComponent } from './calc'
 import type { FormulationComponent, FormulationRecipe, FormulationStore } from './types'
 
 export type RecipeApprovalStatus = 'draft' | 'approved' | 'retired'
@@ -69,6 +70,9 @@ export const RECIPE_IMMUTABLE = 'formulations.recipe.errImmutable' as const
 export const RECIPE_APPROVE_FORBIDDEN = 'formulations.recipe.errApproveForbidden' as const
 export const RECIPE_EDIT_FORBIDDEN = 'formulations.recipe.errEditForbidden' as const
 export const LEGACY_CAPTURE_REASON_REQUIRED = 'formulations.recipe.errLegacyReason' as const
+export const RECIPE_COMPONENTS = 'formulations.recipe.errComponents' as const
+export const RECIPE_INVALID_QTY = 'formulations.recipe.errInvalidQty' as const
+export const RECIPE_INVALID_BATCH = 'formulations.recipe.errInvalidBatch' as const
 
 export function hashRecipeVersionContent(
   input: Pick<FormulationRecipeVersion, 'recipeId' | 'versionNumber' | 'normBase' | 'batchSize' | 'components'>,
@@ -165,6 +169,72 @@ export function assertCanApproveRecipeVersion(
   return { ok: false, error: RECIPE_APPROVE_FORBIDDEN }
 }
 
+/** Component quantity for BOM / version snapshot (batchKg preferred). */
+export function componentNormQtyKg(c: FormulationComponent): number {
+  const qty = c.batchKg ?? c.weightKg ?? 0
+  return Number.isFinite(qty) ? qty : NaN
+}
+
+/**
+ * Gate before draft version create/submit: non-empty BOM, warehouse links
+ * on non-water lines, positive finite quantities, valid total/dry.
+ * Water may omit warehouseItemId (normalize strips it — not stock-tracked).
+ */
+export function validateRecipeBomForVersion(
+  recipe: FormulationRecipe,
+): { ok: true; batchSize: number } | { ok: false; error: string } {
+  const comps = recipe.components ?? []
+  if (!comps.length) return { ok: false, error: RECIPE_COMPONENTS }
+  const stockLines = comps.filter((c) => !isFormulationWaterComponent(c))
+  if (!stockLines.length) return { ok: false, error: RECIPE_COMPONENTS }
+  for (const c of stockLines) {
+    if (!c.warehouseItemId?.trim()) return { ok: false, error: RECIPE_COMPONENTS }
+  }
+  for (const c of comps) {
+    const qty = componentNormQtyKg(c)
+    if (!Number.isFinite(qty) || !(qty > 0)) return { ok: false, error: RECIPE_INVALID_QTY }
+  }
+  const fromComponents = comps.reduce((sum, c) => sum + componentNormQtyKg(c), 0)
+  const total =
+    recipe.totalBatchKg != null && Number.isFinite(recipe.totalBatchKg) && recipe.totalBatchKg > 0
+      ? recipe.totalBatchKg
+      : fromComponents
+  if (!Number.isFinite(total) || !(total > 0)) return { ok: false, error: RECIPE_INVALID_BATCH }
+  const dryNonWater = stockLines.reduce((sum, c) => sum + componentNormQtyKg(c), 0)
+  if (!Number.isFinite(dryNonWater) || dryNonWater < 0) {
+    return { ok: false, error: RECIPE_INVALID_BATCH }
+  }
+  if (total + 1e-9 < dryNonWater) return { ok: false, error: RECIPE_INVALID_BATCH }
+  return { ok: true, batchSize: Math.round(total * 1000) / 1000 }
+}
+
+/** Content signature ignoring versionNumber — for idempotent draft replay. */
+export function bomSnapshotSignature(
+  input: Pick<FormulationRecipeVersion, 'recipeId' | 'normBase' | 'batchSize' | 'components'>,
+): string {
+  return hashRecipeVersionContent({ ...input, versionNumber: 0 })
+}
+
+export function findMatchingDraftRecipeVersion(
+  store: Pick<FormulationStore, 'recipeVersions'>,
+  input: {
+    recipeId: string
+    components: FormulationRecipeVersionComponent[]
+    normBase?: RecipeNormBase
+    batchSize?: number
+  },
+): FormulationRecipeVersion | undefined {
+  const want = bomSnapshotSignature({
+    recipeId: input.recipeId,
+    normBase: input.normBase ?? 'per_batch',
+    batchSize: input.batchSize,
+    components: input.components,
+  })
+  return listRecipeVersions(store, input.recipeId).find(
+    (v) => v.status === 'draft' && bomSnapshotSignature(v) === want,
+  )
+}
+
 export function componentsFromLegacyRecipe(
   recipe: FormulationRecipe,
   itemLookup?: (id: string) => { code?: string; name?: string; unit?: string } | undefined,
@@ -174,13 +244,14 @@ export function componentsFromLegacyRecipe(
     .filter((c) => Boolean(c.warehouseItemId?.trim()))
     .map((c, idx) => {
       const item = c.warehouseItemId ? itemLookup?.(c.warehouseItemId) : undefined
+      const qty = componentNormQtyKg(c)
       return {
         lineId: c.id || `comp-${idx}`,
         warehouseItemId: c.warehouseItemId!,
         itemCodeSnapshot: item?.code,
         itemNameSnapshot: item?.name ?? c.name,
         unitSnapshot: item?.unit ?? 'kg',
-        normQty: c.weightKg > 0 ? c.weightKg : 0,
+        normQty: Number.isFinite(qty) && qty > 0 ? qty : 0,
         tolerancePct: defaultTolerancePct,
         isWater: c.isWater,
       }
@@ -200,7 +271,20 @@ export function createDraftRecipeVersion(
   },
 ): { store: FormulationStore; version: FormulationRecipeVersion } | { error: string } {
   if (!input.components.length || input.components.some((c) => !c.warehouseItemId?.trim())) {
-    return { error: 'formulations.recipe.errComponents' }
+    return { error: RECIPE_COMPONENTS }
+  }
+  if (input.components.some((c) => !Number.isFinite(c.normQty) || !(c.normQty > 0))) {
+    return { error: RECIPE_INVALID_QTY }
+  }
+  if (
+    input.batchSize != null &&
+    (!Number.isFinite(input.batchSize) || !(input.batchSize > 0))
+  ) {
+    return { error: RECIPE_INVALID_BATCH }
+  }
+  const matched = findMatchingDraftRecipeVersion(store, input)
+  if (matched) {
+    return { store, version: matched }
   }
   const existing = listRecipeVersions(store, input.recipeId)
   const versionNumber = (existing[0]?.versionNumber ?? 0) + 1

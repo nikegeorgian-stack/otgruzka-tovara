@@ -12,10 +12,13 @@ import {
 } from '@/lib/formulations/calc'
 import { emptyFormulationRecipe } from '@/lib/formulations/init'
 import {
-  canApproveRecipeVersion,
   getApprovedRecipeVersion,
   listRecipeVersions,
 } from '@/lib/formulations/recipeApproval'
+import {
+  canShowRecipeApproveActions,
+  canShowRecipeEditActions,
+} from '@/lib/formulations/recipeAuth'
 import { syncFormulationRecipeWarehouse } from '@/lib/formulations/warehouseSync'
 import type { FormulationRecipe, FormulationStore } from '@/lib/formulations/types'
 import { formulationCategoryLabel, formulationColorLabel } from '@/lib/formulations/types'
@@ -33,7 +36,9 @@ type Props = {
   operatorName?: string
   currentUser?: AppUser | null
   access?: AccessStore | null
-  onUpsertRecipe: (r: FormulationRecipe) => void
+  onUpsertRecipe: (
+    r: FormulationRecipe,
+  ) => { ok: true } | { ok: false; error: string } | void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onRequestItem: (input: CreateItemRequestInput) => void
   onSubmitRecipeVersion: (
@@ -67,7 +72,16 @@ export function TechnologistRecipesPanel({
   const [error, setError] = useState<string | null>(null)
 
   const balances = useMemo(() => computeAllBalances(warehouse), [warehouse])
-  const canApprove = canApproveRecipeVersion(currentUser ?? null, access)
+  const session = useMemo(
+    () =>
+      currentUser
+        ? { id: currentUser.id, name: currentUser.displayName, login: currentUser.login }
+        : null,
+    [currentUser],
+  )
+  // Same resolver as directoriesSlice — AppStore access.users, not merged email privileges.
+  const canEdit = canShowRecipeEditActions(access, session)
+  const canApprove = canShowRecipeApproveActions(access, session)
 
   const recipes = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -91,13 +105,21 @@ export function TechnologistRecipesPanel({
 
   function saveRecipe() {
     if (!selected) return
+    if (!canEdit) {
+      setError(t('formulations.recipe.errEditForbidden'))
+      return
+    }
     const { recipe, outputItem } = syncFormulationRecipeWarehouse(
       { ...selected, updatedAt: new Date().toISOString() },
       warehouse,
       locale,
     )
+    const result = onUpsertRecipe(recipe)
+    if (result && typeof result === 'object' && 'ok' in result && !result.ok) {
+      setError(t(result.error) !== result.error ? t(result.error) : result.error)
+      return
+    }
     onUpsertWarehouseItem(outputItem)
-    onUpsertRecipe(recipe)
     setSelected(null)
     setNotice(t('formulation.savedSynced'))
   }
@@ -140,9 +162,11 @@ export function TechnologistRecipesPanel({
         title={t('technologist.recipesPanelTitle')}
         description={t('technologist.recipesPanelHint')}
         actions={
-          <Button variant="primary" size="sm" onClick={() => openRecipe(emptyFormulationRecipe(store))}>
-            + {t('formulation.add')}
-          </Button>
+          canEdit ? (
+            <Button variant="primary" size="sm" onClick={() => openRecipe(emptyFormulationRecipe(store))}>
+              + {t('formulation.add')}
+            </Button>
+          ) : undefined
         }
       >
         <input
@@ -216,16 +240,20 @@ export function TechnologistRecipesPanel({
                       </td>
                       <td className="text-right">
                         <div className="flex flex-wrap justify-end gap-1">
-                          <Button variant="secondary" size="sm" onClick={() => openRecipe(r)}>
-                            {t('common.edit')}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => submitVersion(r.id, false)}
-                          >
-                            {t('formulation.submitVersion')}
-                          </Button>
+                          {canEdit && (
+                            <Button variant="secondary" size="sm" onClick={() => openRecipe(r)}>
+                              {t('common.edit')}
+                            </Button>
+                          )}
+                          {canEdit && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => submitVersion(r.id, false)}
+                            >
+                              {t('formulation.submitVersion')}
+                            </Button>
+                          )}
                           {canApprove && (
                             <>
                               <Button

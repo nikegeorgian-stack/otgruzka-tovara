@@ -11,7 +11,18 @@ import { purgeExpiredTrash } from '@/lib/trash'
 import type { AppStore } from '@/lib/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { WorkwearStore } from '@/lib/workwear/types'
-import type { TimesheetActor } from '@/lib/access/timesheetGuard'
+
+/**
+ * Session actor for store slice commands.
+ * `login` is optional and used by recipe/auth resolution when Firebase UID ≠ access.users.id.
+ * Timesheet code continues to resolve by `id` only via TimesheetActor.
+ */
+export type StoreActor = {
+  id?: string
+  name?: string
+  /** Canonical AppUser.login (not displayName). */
+  login?: string
+}
 
 export type SetStore = {
   (action: SetStateAction<AppStore>, meta?: StoreUpdateMeta): void
@@ -21,7 +32,7 @@ export type GetStore = () => AppStore
 export type StoreSliceDeps = {
   setStore: SetStore
   getStore: GetStore
-  getActor?: () => TimesheetActor | null
+  getActor?: () => StoreActor | null
 }
 
 export function applyTrackedStoreUpdate(

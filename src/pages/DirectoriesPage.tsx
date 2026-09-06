@@ -75,7 +75,9 @@ export type DirectoriesPageProps = {
   canApprovePackagingBom?: boolean
   onUpsertBoxRecipe: (r: BoxRecipe) => void
   onRemoveBoxRecipe: (id: string) => void
-  onUpsertFormulationRecipe: (r: FormulationRecipe) => void
+  onUpsertFormulationRecipe: (
+    r: FormulationRecipe,
+  ) => { ok: true } | { ok: false; error: string } | void
   onRemoveFormulationRecipe: (id: string) => void
   onSavePayrollAccrual: (rules: PayrollAccrualRules) => void
   branchWorkspace: (target: WorkspaceBranchTarget, from?: WorkspaceBranchFrom) => void

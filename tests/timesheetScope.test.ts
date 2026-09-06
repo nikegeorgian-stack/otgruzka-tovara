@@ -219,4 +219,40 @@ describe('canMutateTimesheet', () => {
     expect(canMutateTimesheet(store, { id: 'u1' }, { month: '2026-07', rowId: 'r2' })).toBe(false)
     expect(canMutateTimesheet(store, { id: 'u1' }, { month: '2026-07' })).toBe(false)
   })
+
+  it('R2.9E-B1-GATE: optional login on actor is ignored (semantic no-op)', () => {
+    const store = emptyStore({
+      access: {
+        users: [
+          {
+            id: 'u1',
+            roleId: 'workshop_master',
+            login: 'm@x',
+            displayName: 'Master',
+            active: true,
+            defaultBrigades: ['A'],
+          } as AppUser,
+        ],
+        roleViews: {} as AppStore['access']['roleViews'],
+      },
+    })
+    const withoutLogin = canMutateTimesheet(store, { id: 'u1', name: 'Master' }, {
+      month: '2026-07',
+      rowId: 'r1',
+    })
+    const withLogin = canMutateTimesheet(
+      store,
+      { id: 'u1', name: 'Master', login: 'm@x' } as { id: string; name: string; login: string },
+      { month: '2026-07', rowId: 'r1' },
+    )
+    expect(withLogin).toBe(withoutLogin)
+    expect(withLogin).toBe(true)
+    // login alone still does not resolve timesheet actor (id-only)
+    expect(
+      canMutateTimesheet(store, { login: 'm@x' } as { login: string }, {
+        month: '2026-07',
+        rowId: 'r1',
+      }),
+    ).toBe(false)
+  })
 })

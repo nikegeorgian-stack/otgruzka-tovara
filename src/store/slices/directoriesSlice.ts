@@ -16,12 +16,18 @@ import {
 import type { FormulationRecipe } from '@/lib/formulations/types'
 import {
   approveRecipeVersion,
-  canEditRecipeDraft,
   componentsFromLegacyRecipe,
   createDraftRecipeVersion,
-  RECIPE_EDIT_FORBIDDEN,
+  listRecipeVersions,
   updateDraftRecipeVersion,
+  validateRecipeBomForVersion,
 } from '@/lib/formulations/recipeApproval'
+import {
+  assertCanApproveRecipe,
+  assertCanEditRecipe,
+  assertCanSubmitRecipe,
+  type RecipeSessionActor,
+} from '@/lib/formulations/recipeAuth'
 import {
   normalizeBoxRecipe,
   normalizePackagingRecipe,
@@ -35,6 +41,38 @@ import { isG5MasterDataActive } from '@/lib/planner/g5Activation'
 
 export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   const who = () => actorAuditFields(getActor)
+  const recipeSession = (): RecipeSessionActor => {
+    const a = getActor?.()
+    return { id: a?.id, name: a?.name, login: a?.login }
+  }
+
+  /**
+   * Private reducer for an already-authorized recipe upsert.
+   * Not exported — callers must go through upsertFormulationRecipe (auth gate).
+   */
+  function applyAuthorizedFormulationRecipeUpsert(
+    s: import('@/lib/types').AppStore,
+    normalized: FormulationRecipe,
+  ): import('@/lib/types').AppStore {
+    const exists = s.formulations.recipes.some((i) => i.id === normalized.id)
+    const recipes = exists
+      ? s.formulations.recipes.map((i) => (i.id === normalized.id ? normalized : i))
+      : [...s.formulations.recipes, normalized]
+    const nextRecipeCode = exists
+      ? s.formulations.nextRecipeCode
+      : s.formulations.nextRecipeCode + 1
+    return {
+      ...s,
+      formulations: withRegisteredGrammage(
+        normalizeFormulationStore({
+          ...s.formulations,
+          recipes,
+          nextRecipeCode,
+        }),
+        normalized.grammageGsm,
+      ),
+    }
+  }
 
   const slice = {
     async upsertCounterparty(entry: Counterparty) {
@@ -527,32 +565,33 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       }))
     },
 
-    upsertFormulationRecipe(entry: FormulationRecipe) {
+    /**
+     * Authorized create/update of a formulation recipe row.
+     * Uses the same recipeAuth decision as draft version create/submit.
+     */
+    upsertFormulationRecipe(
+      entry: FormulationRecipe,
+    ): { ok: true } | { ok: false; error: string } {
+      const session = recipeSession()
+      let result: { ok: true } | { ok: false; error: string } = {
+        ok: false,
+        error: 'unknown',
+      }
       const normalized = normalizeFormulationRecipe({
         ...entry,
         updatedAt: new Date().toISOString(),
         createdAt: entry.createdAt || new Date().toISOString(),
       })
       setStore((s) => {
-        const exists = s.formulations.recipes.some((i) => i.id === normalized.id)
-        const recipes = exists
-          ? s.formulations.recipes.map((i) => (i.id === normalized.id ? normalized : i))
-          : [...s.formulations.recipes, normalized]
-        const nextRecipeCode = exists
-          ? s.formulations.nextRecipeCode
-          : s.formulations.nextRecipeCode + 1
-        return {
-          ...s,
-          formulations: withRegisteredGrammage(
-            normalizeFormulationStore({
-              ...s.formulations,
-              recipes,
-              nextRecipeCode,
-            }),
-            normalized.grammageGsm,
-          ),
+        const auth = assertCanEditRecipe(s.access, session)
+        if (!auth.ok) {
+          result = { ok: false, error: auth.error }
+          return s
         }
+        result = { ok: true }
+        return applyAuthorizedFormulationRecipeUpsert(s, normalized)
       })
+      return result
     },
 
     removeFormulationRecipe(id: string) {
@@ -589,28 +628,35 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       normBase?: import('@/lib/formulations/recipeApproval').RecipeNormBase
       batchSize?: number
       note?: string
+      sourceRecipeUpdatedAt?: string
     }): { ok: true; versionId: string } | { ok: false; error: string } {
       let result: { ok: true; versionId: string } | { ok: false; error: string } = {
         ok: false,
         error: 'unknown',
       }
-      const actor = actorFromGetter(getActor)
+      const session = recipeSession()
       setStore((s) => {
-        const user = s.access.users.find((u) => u.id === actor.actorId)
-        if (!canEditRecipeDraft(user ?? null)) {
-          result = { ok: false, error: RECIPE_EDIT_FORBIDDEN }
+        const auth = assertCanEditRecipe(s.access, session)
+        if (!auth.ok) {
+          result = { ok: false, error: auth.error }
           return s
         }
         const out = createDraftRecipeVersion(s.formulations, {
           ...input,
-          actor: { id: actor.actorId, name: actor.actorName },
+          // Preserve authenticated session identity (Firebase UID), not remapped store id.
+          actor: { id: session.id, name: session.name ?? auth.user.displayName },
         })
         if ('error' in out) {
           result = { ok: false, error: out.error }
           return s
         }
+        const next = { ...s, formulations: out.store }
+        if (!listRecipeVersions(next.formulations, input.recipeId).some((v) => v.id === out.version.id)) {
+          result = { ok: false, error: 'formulations.recipe.errNotFound' }
+          return s
+        }
         result = { ok: true, versionId: out.version.id }
-        return { ...s, formulations: out.store }
+        return next
       })
       return result
     },
@@ -625,11 +671,11 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       >,
     ): { ok: true } | { ok: false; error: string } {
       let result: { ok: true } | { ok: false; error: string } = { ok: false, error: 'unknown' }
-      const actor = actorFromGetter(getActor)
+      const session = recipeSession()
       setStore((s) => {
-        const user = s.access.users.find((u) => u.id === actor.actorId)
-        if (!canEditRecipeDraft(user ?? null)) {
-          result = { ok: false, error: RECIPE_EDIT_FORBIDDEN }
+        const auth = assertCanEditRecipe(s.access, session)
+        if (!auth.ok) {
+          result = { ok: false, error: auth.error }
           return s
         }
         const out = updateDraftRecipeVersion(s.formulations, versionId, patch)
@@ -648,16 +694,20 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       opts?: { reason?: string },
     ): { ok: true } | { ok: false; error: string } {
       let result: { ok: true } | { ok: false; error: string } = { ok: false, error: 'unknown' }
-      const actor = actorFromGetter(getActor)
+      const session = recipeSession()
       setStore((s) => {
-        const user = s.access.users.find((u) => u.id === actor.actorId)
+        const auth = assertCanApproveRecipe(s.access, session, opts)
+        if (!auth.ok) {
+          result = { ok: false, error: auth.error }
+          return s
+        }
         const out = approveRecipeVersion(
           s.formulations,
           versionId,
           {
-            id: actor.actorId,
-            name: actor.actorName,
-            roleId: user?.roleId,
+            id: session.id,
+            name: session.name ?? auth.user.displayName,
+            roleId: auth.user.roleId,
           },
           s.access,
           opts,
@@ -671,8 +721,8 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
         return appendAudit(withFormulations, {
           action: 'directory_change',
           detail: out.auditDetail,
-          by: actor.actorId,
-          byName: actor.actorName,
+          by: session.id,
+          byName: session.name ?? auth.user.displayName,
         })
       })
       return result
@@ -687,8 +737,16 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       opts?: { approve?: boolean; reason?: string },
     ): { ok: true; versionId: string; approved: boolean } | { ok: false; error: string } {
       const s0 = getStore()
+      const session = recipeSession()
+      const submitAuth = assertCanSubmitRecipe(s0.access, session)
+      if (!submitAuth.ok) return { ok: false, error: submitAuth.error }
+
       const recipe = s0.formulations.recipes.find((r) => r.id === recipeId)
       if (!recipe) return { ok: false, error: 'formulations.recipe.errNotFound' }
+
+      const bom = validateRecipeBomForVersion(recipe)
+      if (!bom.ok) return { ok: false, error: bom.error }
+
       const itemsById = new Map(s0.warehouse.items.map((i) => [i.id, i]))
       const components = componentsFromLegacyRecipe(recipe, (id) => {
         const item = itemsById.get(id)
@@ -700,14 +758,31 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
             }
           : undefined
       })
+      const stockLineCount = recipe.components.filter(
+        (c) => !(c.isWater === true || c.name?.trim().toLowerCase() === 'вода'),
+      ).length
+      const versionStockCount = components.filter((c) => !c.isWater).length
+      if (versionStockCount !== stockLineCount || versionStockCount === 0) {
+        return { ok: false, error: 'formulations.recipe.errComponents' }
+      }
+
       const draft = slice.createDraftFormulationRecipeVersion({
         recipeId,
         components,
         normBase: 'per_batch',
-        batchSize: recipe.totalBatchKg ?? recipe.dryBatchKg,
+        batchSize: bom.batchSize,
         note: opts?.approve ? 'submit+approve' : 'submit-for-review',
+        sourceRecipeUpdatedAt: recipe.updatedAt,
       })
       if (!draft.ok) return draft
+
+      const after = getStore()
+      if (
+        !listRecipeVersions(after.formulations, recipeId).some((v) => v.id === draft.versionId)
+      ) {
+        return { ok: false, error: 'formulations.recipe.errNotFound' }
+      }
+
       if (!opts?.approve) {
         return { ok: true, versionId: draft.versionId, approved: false }
       }

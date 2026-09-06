@@ -67,7 +67,9 @@ type Props = {
   webTechnologistMode?: boolean
   webUserName?: string
   site?: string
-  onUpsertRecipe: (r: FormulationRecipe) => void
+  onUpsertRecipe: (
+    r: FormulationRecipe,
+  ) => { ok: true } | { ok: false; error: string } | void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onSubmitRecipeVersion: (
     recipeId: string,

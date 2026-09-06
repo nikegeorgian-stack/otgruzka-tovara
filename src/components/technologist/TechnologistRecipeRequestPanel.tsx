@@ -21,7 +21,9 @@ type Props = {
   warehouse: WarehouseStore
   categoryNames: Map<string, string>
   onAssignRecipe: (orderId: string, recipeId: string) => boolean
-  onUpsertRecipe: (r: FormulationRecipe) => void
+  onUpsertRecipe: (
+    r: FormulationRecipe,
+  ) => { ok: true } | { ok: false; error: string } | void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
 }
 
@@ -156,8 +158,12 @@ export function TechnologistRecipeRequestPanel({
       warehouse,
       locale,
     )
+    const result = onUpsertRecipe(recipe)
+    if (result && typeof result === 'object' && 'ok' in result && !result.ok) {
+      setPanelNotice(t(result.error) !== result.error ? t(result.error) : result.error)
+      return
+    }
     onUpsertWarehouseItem(outputItem)
-    onUpsertRecipe(recipe)
     const assigned = onAssignRecipe(builder.order.id, recipe.id)
     setBuilder(null)
     setPanelNotice(

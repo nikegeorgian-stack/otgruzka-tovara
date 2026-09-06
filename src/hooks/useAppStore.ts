@@ -136,7 +136,7 @@ export function useAppStore() {
 
   const getStore = useCallback(() => storeRef.current, [])
   const getActiveMonth = useCallback(() => activeMonthRef.current, [])
-  const actorRef = useRef<{ id?: string; name?: string } | null>(null)
+  const actorRef = useRef<{ id?: string; name?: string; login?: string } | null>(null)
   const getActor = useCallback(() => actorRef.current, [])
 
   const sliceDeps = useMemo(
@@ -282,7 +282,7 @@ export function useAppStore() {
   }, [store.access, sessionUserId, webSession.appUser, skipLocalAuth])
 
   actorRef.current = currentUser
-    ? { id: currentUser.id, name: currentUser.displayName }
+    ? { id: currentUser.id, name: currentUser.displayName, login: currentUser.login }
     : null
 
   /** Язык UI — только личный (учётка / localStorage), не общий settings.locale. */

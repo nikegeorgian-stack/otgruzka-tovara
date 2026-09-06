@@ -35,7 +35,9 @@ type Props = {
   store: FormulationStore
   warehouse: WarehouseStore
   categoryNames: Map<string, string>
-  onUpsertRecipe: (r: FormulationRecipe) => void
+  onUpsertRecipe: (
+    r: FormulationRecipe,
+  ) => { ok: true } | { ok: false; error: string } | void
   onRemoveRecipe: (id: string) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onOpenNomenclature: () => void
@@ -57,6 +59,7 @@ export function FormulationsDirectoryPanel({
   const [category, setCategory] = useState<FormulationCategory | ''>('')
   const [selected, setSelected] = useState<FormulationRecipe | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const filteredRecipes = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -109,15 +112,21 @@ export function FormulationsDirectoryPanel({
       warehouse,
       locale,
     )
+    const result = onUpsertRecipe(recipe)
+    if (result && typeof result === 'object' && 'ok' in result && !result.ok) {
+      setError(t(result.error) !== result.error ? t(result.error) : result.error)
+      return
+    }
     onUpsertWarehouseItem(outputItem)
-    onUpsertRecipe(recipe)
     setSelected(null)
+    setError(null)
     setNotice(t('formulation.savedSynced'))
   }
 
   return (
     <div className="space-y-4">
       {notice && <FormNotice type="info" message={notice} onDismiss={() => setNotice(null)} />}
+      {error && <FormNotice type="error" message={error} onDismiss={() => setError(null)} />}
 
       <div className="flex flex-wrap gap-2">
         {(
