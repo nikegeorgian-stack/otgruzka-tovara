@@ -54,7 +54,7 @@ function normalizeRecipeStatus(
 export function normalizeProductionOrder(order: ProductionOrder): ProductionOrder {
   return {
     ...order,
-    orderNumber: order.orderNumber?.trim() || `ЗП-${new Date().getFullYear()}-001`,
+    orderNumber: order.orderNumber?.trim() ?? '',
     counterpartyId: order.counterpartyId || undefined,
     customer: order.customer?.trim() ?? '',
     finishedProductId: order.finishedProductId || undefined,

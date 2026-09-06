@@ -876,10 +876,10 @@ function mergeProduction(
         local.planner.orders,
         onConflict,
       ),
-      nextOrderSeq: pick3(
-        base.planner.nextOrderSeq,
-        remote.planner.nextOrderSeq,
-        local.planner.nextOrderSeq,
+      nextOrderSeq: Math.max(
+        Number(base.planner.nextOrderSeq) || 1,
+        Number(remote.planner.nextOrderSeq) || 1,
+        Number(local.planner.nextOrderSeq) || 1,
       ),
     },
     shiftReports: mergeArrayById(

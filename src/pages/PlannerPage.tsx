@@ -22,6 +22,7 @@ import { KanbanViewToggle, type KanbanViewMode } from '@/components/kanban'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
+import { addDaysIso, todayIso } from '@/lib/planner/dates'
 import { emptyProductionOrder } from '@/lib/planner/init'
 import {
   extractSolidsPct,
@@ -204,12 +205,17 @@ export function PlannerPage({
   const [editing, setEditing] = useState(false)
   const [ordersView, setOrdersView] = useState<KanbanViewMode>('list')
 
-  const today = new Date().toISOString().slice(0, 10)
-  const monthEnd = activeMonth + '-31'
+  const today = todayIso()
+  /** Default window for a new order — not the whole month filter range. */
+  function defaultNewOrderDates(monthYm: string): { start: string; end: string } {
+    const start = today.startsWith(monthYm) ? today : `${monthYm}-01`
+    return { start, end: addDaysIso(start, 7) }
+  }
 
-  const [form, setForm] = useState<ProductionOrder>(() =>
-    emptyProductionOrder(activeMonth + '-01', monthEnd),
-  )
+  const [form, setForm] = useState<ProductionOrder>(() => {
+    const { start, end } = defaultNewOrderDates(activeMonth)
+    return emptyProductionOrder(start, end)
+  })
 
   useWorkspaceDraftRestore<PlannerWorkspaceDraft>(
     PLANNER_DRAFT_KEY,
@@ -361,7 +367,8 @@ export function PlannerPage({
   function startNew() {
     setSelectedId(null)
     setEditing(true)
-    setForm(emptyProductionOrder(activeMonth + '-01', monthEnd))
+    const { start, end } = defaultNewOrderDates(activeMonth)
+    setForm(emptyProductionOrder(start, end))
   }
 
   function openOrder(o: ProductionOrder) {

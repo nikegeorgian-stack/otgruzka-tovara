@@ -8,20 +8,28 @@ export function formatOrderNumber(year: number, seq: number): string {
   return `ЗП-${year}-${String(seq).padStart(3, '0')}`
 }
 
-/** Равномерное распределение объёма по рабочим дням */
+/** Равномерное распределение объёма по рабочим дням; сумма = totalQtyMp. */
 export function generateEvenDayPlans(order: ProductionOrder): PlannerDayPlan[] {
   const dates = dateRangeInclusive(order.startDate, order.endDate)
-  const working = dates.filter((d) => {
+  const workingDates = dates.filter((d) => {
     const existing = order.dayPlans.find((p) => p.date === d)
     return existing ? existing.isWorkingDay : true
   })
-  const perDay =
-    working.length > 0 ? Math.round((order.totalQtyMp / working.length) * 10) / 10 : 0
+  const totalTenths = Math.round((Number(order.totalQtyMp) || 0) * 10)
+  const n = workingDates.length
+  const baseTenths = n > 0 ? Math.floor(totalTenths / n) : 0
+  let remTenths = n > 0 ? totalTenths - baseTenths * n : 0
+  const qtyByDate = new Map<string, number>()
+  for (const date of workingDates) {
+    const extra = remTenths > 0 ? 1 : 0
+    if (remTenths > 0) remTenths -= 1
+    qtyByDate.set(date, (baseTenths + extra) / 10)
+  }
 
   return dates.map((date) => {
     const prev = order.dayPlans.find((p) => p.date === date)
     const isWorkingDay = prev?.isWorkingDay ?? true
-    const mp = isWorkingDay ? perDay : 0
+    const mp = isWorkingDay ? (qtyByDate.get(date) ?? 0) : 0
     return {
       id: prev?.id ?? newId(),
       date,

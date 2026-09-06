@@ -108,7 +108,11 @@ export function FormulationRecipeBuilder({
 
   const dryKg = recipeDryBatchKg(recipe)
   const totalKg = recipeTotalBatchKg(recipe)
-  const waterKg = Math.max(0, totalKg - dryKg)
+  const waterFromComponents = recipe.components
+    .filter((c) => isFormulationWaterComponent(c))
+    .reduce((sum, c) => sum + (c.batchKg ?? c.weightKg ?? 0), 0)
+  const waterKg =
+    waterFromComponents > 0 ? waterFromComponents : Math.max(0, totalKg - dryKg)
   const dryPct = totalKg > 0 ? Math.min(100, (dryKg / totalKg) * 100) : 0
 
   const unlinkedCount = recipe.components.filter(

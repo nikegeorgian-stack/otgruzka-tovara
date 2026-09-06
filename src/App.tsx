@@ -1300,12 +1300,16 @@ export default function App() {
                 app.store.settings.responsible ??
                 'Технолог'
               }
+              currentUser={app.currentUser}
+              access={app.store.access}
               allowNegativeStock={allowNegativeStock}
               webTechnologistMode={webTechnologistMode}
               webUserName={webUserName}
               site={app.store.settings.site}
               onUpsertRecipe={app.upsertFormulationRecipe}
               onUpsertWarehouseItem={app.upsertWarehouseItem}
+              onSubmitRecipeVersion={app.submitFormulationRecipeVersion}
+              onApproveRecipeVersion={app.approveFormulationRecipeVersion}
               onPostBatch={(input) =>
                 app.postFormulationBatchMix(input, app.uiLocale, {
                   allowNegativeStock,

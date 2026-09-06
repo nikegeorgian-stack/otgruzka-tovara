@@ -17,6 +17,7 @@ import type { FormulationRecipe } from '@/lib/formulations/types'
 import {
   approveRecipeVersion,
   canEditRecipeDraft,
+  componentsFromLegacyRecipe,
   createDraftRecipeVersion,
   RECIPE_EDIT_FORBIDDEN,
   updateDraftRecipeVersion,
@@ -35,7 +36,7 @@ import { isG5MasterDataActive } from '@/lib/planner/g5Activation'
 export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   const who = () => actorAuditFields(getActor)
 
-  return {
+  const slice = {
     async upsertCounterparty(entry: Counterparty) {
       const normalized = normalizeCounterparty({
         ...entry,
@@ -676,5 +677,45 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       })
       return result
     },
+
+    /**
+     * Create a draft version from the current legacy recipe row and optionally approve it.
+     * Used by technologist UI (submit / approve path).
+     */
+    submitFormulationRecipeVersion(
+      recipeId: string,
+      opts?: { approve?: boolean; reason?: string },
+    ): { ok: true; versionId: string; approved: boolean } | { ok: false; error: string } {
+      const actor = actorFromGetter(getActor)
+      const s0 = getStore()
+      const recipe = s0.formulations.recipes.find((r) => r.id === recipeId)
+      if (!recipe) return { ok: false, error: 'formulations.recipe.errNotFound' }
+      const itemsById = new Map(s0.warehouse.items.map((i) => [i.id, i]))
+      const components = componentsFromLegacyRecipe(recipe, (id) => {
+        const item = itemsById.get(id)
+        return item
+          ? { code: item.code, name: item.name, unit: item.unit }
+          : undefined
+      })
+      const draft = slice.createDraftFormulationRecipeVersion({
+        recipeId,
+        components,
+        normBase: 'per_batch',
+        batchSize: recipe.totalBatchKg ?? recipe.dryBatchKg,
+        note: opts?.approve ? 'submit+approve' : 'submit-for-review',
+      })
+      if (!draft.ok) return draft
+      if (!opts?.approve) {
+        return { ok: true, versionId: draft.versionId, approved: false }
+      }
+      const approved = slice.approveFormulationRecipeVersion(draft.versionId, {
+        reason: opts.reason,
+      })
+      if (!approved.ok) {
+        return { ok: false, error: approved.error }
+      }
+      return { ok: true, versionId: draft.versionId, approved: true }
+    },
   }
+  return slice
 }

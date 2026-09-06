@@ -749,6 +749,7 @@ export function useAppStore() {
     removeFormulationRecipe: directories.removeFormulationRecipe,
     createDraftFormulationRecipeVersion: directories.createDraftFormulationRecipeVersion,
     updateDraftFormulationRecipeVersion: directories.updateDraftFormulationRecipeVersion,
+    submitFormulationRecipeVersion: directories.submitFormulationRecipeVersion,
     approveFormulationRecipeVersion: directories.approveFormulationRecipeVersion,
     postFormulationBatchMix: formulationBatch.postFormulationBatchMix,
     confirmFormulationBatch: formulationBatch.confirmFormulationBatch,

@@ -61,12 +61,22 @@ type Props = {
   brigades: string[]
   operatorId?: string
   operatorName?: string
+  currentUser?: import('@/lib/access/types').AppUser | null
+  access?: import('@/lib/access/types').AccessStore | null
   allowNegativeStock?: boolean
   webTechnologistMode?: boolean
   webUserName?: string
   site?: string
   onUpsertRecipe: (r: FormulationRecipe) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
+  onSubmitRecipeVersion: (
+    recipeId: string,
+    opts?: { approve?: boolean; reason?: string },
+  ) => { ok: true; versionId: string; approved: boolean } | { ok: false; error: string }
+  onApproveRecipeVersion: (
+    versionId: string,
+    opts?: { reason?: string },
+  ) => { ok: true } | { ok: false; error: string }
   onPostBatch: (input: PostBatchMixInput) => PostBatchMixResult
   onCreateMixTask: (input: MixTaskInput) => import('@/store/slices/mixTasksSlice').CreateMixTaskResult
   onCancelMixTask: (id: string) => void
@@ -130,12 +140,16 @@ export function TechnologistPage({
   brigades,
   operatorId,
   operatorName,
+  currentUser,
+  access,
   allowNegativeStock = false,
   webTechnologistMode = false,
   webUserName,
   site,
   onUpsertRecipe,
   onUpsertWarehouseItem,
+  onSubmitRecipeVersion,
+  onApproveRecipeVersion,
   onPostBatch,
   onCreateMixTask,
   onCancelMixTask,
@@ -295,9 +309,13 @@ export function TechnologistPage({
           categoryNames={categoryNames}
           operatorId={operatorId}
           operatorName={operatorName}
+          currentUser={currentUser}
+          access={access}
           onUpsertRecipe={onUpsertRecipe}
           onUpsertWarehouseItem={onUpsertWarehouseItem}
           onRequestItem={onRequestItem}
+          onSubmitRecipeVersion={onSubmitRecipeVersion}
+          onApproveRecipeVersion={onApproveRecipeVersion}
         />
       )}
 

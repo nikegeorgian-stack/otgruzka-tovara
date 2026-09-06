@@ -275,7 +275,7 @@ export function ProductionPage({
 
 
   const activeOrders = useMemo(
-    () => orders.filter((o) => o.status === 'active' || o.status === 'draft'),
+    () => orders.filter((o) => o.status === 'active' || o.status === 'paused'),
     [orders],
   )
   const packagingWip = useMemo(
@@ -934,7 +934,14 @@ export function ProductionPage({
                 placeholder={t('production.orderNone')}
                 options={activeOrders.map((o) => ({
                   value: o.id,
-                  label: `${o.orderNumber || o.productName} · ${o.customer}`,
+                  label: [
+                    o.orderNumber || o.id.slice(0, 8),
+                    o.productName || '—',
+                    `${o.totalQtyMp} п.м`,
+                    o.endDate,
+                    o.status,
+                    o.customer,
+                  ].join(' · '),
                 }))}
                 onChange={(orderId) => {
                   const order = activeOrders.find((o) => o.id === orderId)

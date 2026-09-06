@@ -125,18 +125,33 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     },
 
     upsertProductionOrder(order: ProductionOrder) {
-      const normalized = normalizeProductionOrder({
-        ...order,
-        updatedAt: new Date().toISOString(),
-        createdAt: order.createdAt || new Date().toISOString(),
-      })
       const groupId = warehouseTransactionGroupId({
         kind: 'production_reservation_adjustment',
-        sourceId: normalized.id,
-        revision: `upsert:${normalized.updatedAt}`,
+        sourceId: order.id,
+        revision: `upsert:${order.updatedAt || Date.now()}`,
       })
       setStore(
         (s) => {
+          const year = new Date().getFullYear()
+          let nextSeq = Math.max(1, Number(s.production.planner.nextOrderSeq) || 1)
+          for (const o of s.production.planner.orders) {
+            const m = o.orderNumber?.match(/ЗП-(\d{4})-(\d+)/)
+            if (m && Number(m[1]) === year) {
+              nextSeq = Math.max(nextSeq, Number(m[2]) + 1)
+            }
+          }
+          const hadNumber = Boolean(order.orderNumber?.trim())
+          const assignedNumber = hadNumber
+            ? order.orderNumber!.trim()
+            : formatOrderNumber(year, nextSeq)
+          const bumpedSeq = hadNumber ? nextSeq : nextSeq + 1
+
+          const normalized = normalizeProductionOrder({
+            ...order,
+            orderNumber: assignedNumber,
+            updatedAt: new Date().toISOString(),
+            createdAt: order.createdAt || new Date().toISOString(),
+          })
           const prev = s.production.planner.orders.find((o) => o.id === normalized.id)
           const exists = Boolean(prev)
           const orders = exists
@@ -165,7 +180,11 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             warehouse,
             production: {
               ...s.production,
-              planner: normalizePlanner({ ...s.production.planner, orders }),
+              planner: normalizePlanner({
+                ...s.production.planner,
+                orders,
+                nextOrderSeq: Math.max(bumpedSeq, s.production.planner.nextOrderSeq ?? 1),
+              }),
             },
           }
         },
@@ -373,10 +392,20 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             }
           }
 
-          const seq = s.production.planner.nextOrderSeq
           const year = new Date().getFullYear()
+          let nextSeq = Math.max(1, Number(s.production.planner.nextOrderSeq) || 1)
+          for (const o of s.production.planner.orders) {
+            const m = o.orderNumber?.match(/ЗП-(\d{4})-(\d+)/)
+            if (m && Number(m[1]) === year) {
+              nextSeq = Math.max(nextSeq, Number(m[2]) + 1)
+            }
+          }
+          const hadNumber = Boolean(order.orderNumber?.trim())
+          const orderNumber = hadNumber
+            ? order.orderNumber!.trim()
+            : formatOrderNumber(year, nextSeq)
+          const bumpedSeq = hadNumber ? nextSeq : nextSeq + 1
           const actor = actorFromGetter(getActor)
-          const orderNumber = order.orderNumber || formatOrderNumber(year, seq)
           const base = {
             ...order,
             orderNumber,
@@ -448,10 +477,11 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             warehouse: reserved.store,
             production: {
               ...s.production,
-              planner: {
+              planner: normalizePlanner({
+                ...s.production.planner,
                 orders,
-                nextOrderSeq: seq + 1,
-              },
+                nextOrderSeq: Math.max(bumpedSeq, s.production.planner.nextOrderSeq ?? 1),
+              }),
             },
           }
         },

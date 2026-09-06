@@ -18,8 +18,19 @@ export function sumComponentCosts(components: FormulationComponent[]): number {
   return Math.round(total * 100) / 100
 }
 
+/** Сухой остаток: только не-вода. Вода входит в total, но не в dry. */
 export function recipeDryBatchKg(recipe: FormulationRecipe): number {
+  const nonWater = recipe.components.filter((c) => !isFormulationWaterComponent(c))
+  const hasWater = nonWater.length < recipe.components.length
+  if (hasWater) {
+    return sumComponentWeights(nonWater)
+  }
   return recipe.dryBatchKg ?? sumComponentWeights(recipe.components)
+}
+
+/** Масса воды в партии (кг). */
+export function recipeWaterBatchKg(recipe: FormulationRecipe): number {
+  return sumComponentWeights(recipe.components.filter(isFormulationWaterComponent))
 }
 
 export function recipeTotalCost(recipe: FormulationRecipe): number {
