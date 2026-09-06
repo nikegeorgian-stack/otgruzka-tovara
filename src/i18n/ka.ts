@@ -6333,6 +6333,11 @@ export const ka: Dict = {
   'warehouse.err.nameRequired': 'Укажите наименование позиции.',
   'warehouse.err.itemRequired': 'Выберите позицию из справочника.',
   'warehouse.err.qtyInvalid': 'Укажите количество больше нуля.',
+  'warehouse.err.duplicateInternalCode': 'შიდა კოდი უკვე გამოიყენება სხვა პოზიციაზე.',
+  'warehouse.err.invalidInternalCode': 'შიდა კოდის ფორმატი არასწორია.',
+  'warehouse.err.duplicateSku': 'ასეთი არტიკული უკვე გამოიყენება სხვა პოზიციაზე.',
+  'warehouse.err.unsafeIdentifierReconcile':
+    'სინქრონიზაციის შემდეგ კოდების შეთანხმება ვერ მოხერხდა. შეინახეთ თავიდან.',
   'warehouse.err.cannotDeleteHasHistory':
     'წაშლა შეუძლებელია: არის მოძრაობები ან დოკუმენტის სტრიქონები. გადაიტანეთ არქივში.',
   'warehouse.err.cannotDeleteLinkedMovement':

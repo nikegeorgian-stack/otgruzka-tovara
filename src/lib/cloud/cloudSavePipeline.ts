@@ -32,6 +32,7 @@ import {
   filterG6AuthoritativeDirtyOps,
   restoreG6AuthoritativeDomains,
 } from './g6AuthoritativeStrip'
+import { isWarehouseSkuConflictMessage } from '@/lib/warehouse/itemIdentity'
 
 export type CloudSaveBuildInput = {
   remote: AppStore
@@ -255,6 +256,18 @@ export function buildCloudSavePayload(input: CloudSaveBuildInput): CloudSaveBuil
     operations: filteredOps,
     actorEmail: input.actorEmail,
   })
+
+  // Concurrent SKU: fail closed — no payload, no acknowledgement (pending preserved).
+  const skuBlocked = merged.conflicts.some((c) => isWarehouseSkuConflictMessage(c.message))
+  if (skuBlocked) {
+    return {
+      allowed: true,
+      store: input.local,
+      appliedOperationIds: [],
+      conflicts: merged.conflicts,
+      changedDomains: [],
+    }
+  }
 
   const prepared = prepareCloudPayload(sanitizeStoreForExport(merged.store))
 

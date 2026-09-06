@@ -7,6 +7,13 @@ import {
   type EntityConflict,
 } from './dirtyOperations'
 import { eqJsonStable as eqJson } from './stableJsonEq'
+import type { WarehouseItem } from '@/lib/warehouse/types'
+import {
+  WarehouseItemIdentityError,
+  applyWarehouseIdentityAfterMerge,
+  CONCURRENT_SKU_CONFLICT_MESSAGE,
+  mergeNextInternalCodeCounter,
+} from '@/lib/warehouse/itemIdentity'
 
 function cloneStore(store: AppStore): AppStore {
   return JSON.parse(JSON.stringify(store)) as AppStore
@@ -468,6 +475,62 @@ export function conservativeMergeForSave(
     if (!eqJson(next, resultArr)) {
       setPath(result, domain, next)
       changedDomains.push(domain)
+    }
+  }
+
+  // R2.9E-C1B-GATE: SQL save path — shared itemIdentity (IC reconcile + concurrent SKU detect).
+  {
+    const path = 'warehouse.items'
+    const mergedItems = (asIdArray(getPath(result, path), path) ?? []) as WarehouseItem[]
+    const baseItems = (asIdArray(getPath(baseline, path), path) ?? []) as WarehouseItem[]
+    const remoteItems = (asIdArray(getPath(remote, path), path) ?? []) as WarehouseItem[]
+    const localItems = (asIdArray(getPath(local, path), path) ?? []) as WarehouseItem[]
+    const counterFloor = mergeNextInternalCodeCounter(
+      baseline.warehouse?.nextInternalCode,
+      remote.warehouse?.nextInternalCode,
+      local.warehouse?.nextInternalCode,
+      mergedItems,
+    )
+    try {
+      const identity = applyWarehouseIdentityAfterMerge({
+        baseItems,
+        remoteItems,
+        localItems,
+        mergedItems,
+        nextInternalCode: counterFloor,
+      })
+      result.warehouse = {
+        ...result.warehouse,
+        items: identity.items,
+        nextInternalCode: identity.nextInternalCode,
+      }
+      if (!eqJson(identity.items, mergedItems)) {
+        changedDomains.push(path)
+      }
+      changedDomains.push('warehouse')
+
+      for (const sc of identity.skuConflicts) {
+        conflicts.push({
+          domain: 'warehouse.items',
+          entityId: sc.localItemId,
+          reason: 'concurrent_edit',
+          message: CONCURRENT_SKU_CONFLICT_MESSAGE,
+          pendingLocal: localItems.find((i) => i.id === sc.localItemId),
+          cloudSnapshot:
+            remoteItems.find((i) => i.id === sc.conflictingItemId) ??
+            remoteItems.find((i) => i.id === sc.localItemId),
+        })
+      }
+    } catch (err) {
+      conflicts.push({
+        domain: 'warehouse.items',
+        entityId: '*',
+        reason: 'concurrent_edit',
+        message:
+          err instanceof WarehouseItemIdentityError
+            ? err.code
+            : 'warehouse.err.unsafeIdentifierReconcile',
+      })
     }
   }
 

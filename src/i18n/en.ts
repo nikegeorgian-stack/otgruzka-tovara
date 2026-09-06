@@ -6000,6 +6000,11 @@ export const en: Dict = {
   'warehouse.err.nameRequired': 'Enter item name.',
   'warehouse.err.itemRequired': 'Select item from directory.',
   'warehouse.err.qtyInvalid': 'Enter quantity greater than zero.',
+  'warehouse.err.duplicateInternalCode': 'This internal code is already used by another item.',
+  'warehouse.err.invalidInternalCode': 'Invalid internal code format.',
+  'warehouse.err.duplicateSku': 'This SKU is already used by another item.',
+  'warehouse.err.unsafeIdentifierReconcile':
+    'Could not reconcile item codes after sync. Please save again.',
   'warehouse.linkedDocShort': 'doc.',
   'warehouse.invoice.title': 'Supplier invoice',
   'warehouse.invoice.hint':

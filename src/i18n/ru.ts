@@ -6413,6 +6413,11 @@ export const ru: Dict = {
   'warehouse.err.nameRequired': 'Укажите наименование позиции.',
   'warehouse.err.itemRequired': 'Выберите позицию из справочника.',
   'warehouse.err.qtyInvalid': 'Укажите количество больше нуля.',
+  'warehouse.err.duplicateInternalCode': 'Внутренний код уже используется другой позицией.',
+  'warehouse.err.invalidInternalCode': 'Некорректный формат внутреннего кода.',
+  'warehouse.err.duplicateSku': 'Такой артикул уже используется другой позицией.',
+  'warehouse.err.unsafeIdentifierReconcile':
+    'Не удалось согласовать коды позиций после синхронизации. Повторите сохранение.',
   'warehouse.err.cannotDeleteHasHistory':
     'Нельзя удалить позицию: есть движения или строки в документах. Переведите в архив.',
   'warehouse.err.cannotDeleteLinkedMovement':

@@ -38,6 +38,7 @@ import type { WorkspaceWidgetDef } from '@/lib/ui/workspaceWidgets'
 import { WarehouseItemName } from '@/components/warehouse/WarehouseItemName'
 import { WarehouseItemThumb } from '@/components/warehouse/WarehouseItemThumb'
 import { canSetTechnicalName, isProductionNomenclature, warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
+import { WarehouseItemIdentityError } from '@/lib/warehouse/itemIdentity'
 import {
   UNITS,
   WAREHOUSE_TABS,
@@ -1381,8 +1382,16 @@ function ItemEditModal({
       return false
     }
     setError(null)
-    onSave({ ...draft, name })
-    return true
+    try {
+      onSave({ ...draft, name })
+      return true
+    } catch (err) {
+      if (err instanceof WarehouseItemIdentityError) {
+        setError(t(err.code))
+        return false
+      }
+      throw err
+    }
   }
 
   async function onPhotoFile(file: File | undefined) {

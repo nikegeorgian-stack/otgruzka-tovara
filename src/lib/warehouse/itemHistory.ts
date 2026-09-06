@@ -1,5 +1,11 @@
 import { withSuggestedLocalizedNames } from '@/lib/i18n/localizedNames'
 import { applyTechnicalNameOnUpsert } from './technicalName'
+import {
+  allocateUniqueInternalCode,
+  assertSkuAvailable,
+  nextInternalCodeNumber as nextIcNum,
+  resolveCreateInternalCode,
+} from './itemIdentity'
 import type {
   WarehouseCategory,
   WarehouseItem,
@@ -9,28 +15,16 @@ import type {
 } from './types'
 import type { AccessRoleId } from '@/lib/access/types'
 
-const CODE_PREFIX = 'FC'
-
-export function formatInternalCode(n: number): string {
-  return `${CODE_PREFIX}-${String(n).padStart(6, '0')}`
-}
-
-export function parseInternalCodeNum(code: string): number {
-  const m = code.match(/(\d+)\s*$/)
-  return m ? Number(m[1]) : 0
-}
-
-export function nextInternalCodeNumber(store: WarehouseStore): number {
-  const fromCounter = store.nextInternalCode ?? 1
-  const fromItems = store.items.reduce(
-    (max, i) => Math.max(max, parseInternalCodeNum(i.internalCode ?? '')),
-    0,
-  )
-  return Math.max(fromCounter, fromItems + 1)
-}
+export {
+  WarehouseItemIdentityError,
+  formatInternalCode,
+  parseInternalCodeNum,
+  nextInternalCodeNumber,
+  allocateUniqueInternalCode,
+} from './itemIdentity'
 
 export function allocateInternalCode(store: WarehouseStore): string {
-  return formatInternalCode(nextInternalCodeNumber(store))
+  return allocateUniqueInternalCode(store).code
 }
 
 function newHistoryId(): string {
@@ -170,8 +164,12 @@ export function upsertWarehouseItemInStore(
   let itemHistories = store.itemHistories ?? {}
 
   if (!existing) {
-    const num = nextInternalCodeNumber(store)
-    const internalCode = incoming.internalCode?.trim() || formatInternalCode(num)
+    assertSkuAvailable(store.items, incoming.sku, incoming.id)
+    const { code: internalCode, nextCounter } = resolveCreateInternalCode(
+      store,
+      incoming.internalCode,
+      incoming.id,
+    )
     const now = new Date().toISOString()
     const item: WarehouseItem = withSuggestedLocalizedNames({
       ...incoming,
@@ -187,11 +185,13 @@ export function upsertWarehouseItemInStore(
     ])
     return {
       ...store,
-      nextInternalCode: num + 1,
+      nextInternalCode: nextCounter,
       items: [...store.items, item],
       itemHistories,
     }
   }
+
+  assertSkuAvailable(store.items, incoming.sku, existing.id)
 
   const item: WarehouseItem = {
     ...incoming,
@@ -226,23 +226,30 @@ export function recordItemArchiveHistory(
 
 /** Присвоить коды существующим позициям без internalCode */
 export function assignMissingInternalCodes(store: WarehouseStore): WarehouseStore {
-  let num = nextInternalCodeNumber(store)
+  let workingItems = [...store.items]
+  let nextInternalCode = store.nextInternalCode
   let changed = false
-  const items = store.items.map((item) => {
-    if (item.internalCode?.trim()) return item
+
+  workingItems = workingItems.map((row) => {
+    if (row.internalCode?.trim()) return row
     changed = true
-    const internalCode = formatInternalCode(num++)
+    const { code, nextCounter } = allocateUniqueInternalCode(
+      { items: workingItems, nextInternalCode },
+      row.id,
+    )
+    nextInternalCode = nextCounter
     return {
-      ...item,
-      internalCode,
-      createdAt: item.createdAt ?? new Date().toISOString(),
+      ...row,
+      internalCode: code,
+      createdAt: row.createdAt ?? new Date().toISOString(),
     }
   })
+
   if (!changed && store.nextInternalCode) return store
   return {
     ...store,
-    items,
-    nextInternalCode: num,
+    items: workingItems,
+    nextInternalCode: nextIcNum({ items: workingItems, nextInternalCode }),
     itemHistories: store.itemHistories ?? {},
   }
 }

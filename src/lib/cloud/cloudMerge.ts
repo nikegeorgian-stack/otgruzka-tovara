@@ -2,7 +2,12 @@ import type { AppStore, AuditEntry, DayCode, Employee, MonthSheet, TimesheetRow 
 import type { AppUser } from '@/lib/access/types'
 import { MAX_AUDIT_ENTRIES } from '@/lib/types'
 import { ensureEmployeeNumbers } from '@/lib/hr/employeeNumber'
-import type { WarehouseStore, WarehouseAuditEntry } from '@/lib/warehouse/types'
+import type { WarehouseStore, WarehouseAuditEntry, WarehouseItem } from '@/lib/warehouse/types'
+import {
+  WarehouseItemIdentityError,
+  applyWarehouseIdentityAfterMerge,
+  mergeNextInternalCodeCounter,
+} from '@/lib/warehouse/itemIdentity'
 import type { FinanceStore } from '@/lib/finance/types'
 import type { ProductionStore } from '@/lib/production/types'
 import type { ProcurementStore } from '@/lib/procurement/types'
@@ -785,11 +790,38 @@ function mergeWarehouse(
   const r = remote
   const l = local
 
+  const mergedItems = mergeArrayById(b.items, r.items, l.items, onConflict)
+  const counterFloor = mergeNextInternalCodeCounter(
+    b.nextInternalCode,
+    r.nextInternalCode,
+    l.nextInternalCode,
+    mergedItems,
+  )
+  let items: WarehouseItem[]
+  let nextInternalCode: number
+  try {
+    const reconciled = applyWarehouseIdentityAfterMerge({
+      baseItems: b.items ?? [],
+      remoteItems: r.items ?? [],
+      localItems: l.items ?? [],
+      mergedItems,
+      nextInternalCode: counterFloor,
+    })
+    items = reconciled.items
+    nextInternalCode = reconciled.nextInternalCode
+    // SKU is never silently renamed on pull; mark conflicts for UI / later save fail-closed.
+    for (let i = 0; i < reconciled.skuConflicts.length; i++) onConflict()
+  } catch (err) {
+    onConflict()
+    if (err instanceof WarehouseItemIdentityError) throw err
+    throw new WarehouseItemIdentityError('warehouse.err.unsafeIdentifierReconcile')
+  }
+
   return {
     ...l,
     locations: mergeArrayById(b.locations, r.locations, l.locations, onConflict),
     categories: mergeArrayById(b.categories, r.categories, l.categories, onConflict),
-    items: mergeArrayById(b.items, r.items, l.items, onConflict),
+    items,
     movements: mergeArrayById(b.movements, r.movements, l.movements, onConflict),
     documents: mergeArrayById(b.documents, r.documents, l.documents, onConflict),
     invoiceRegistry: mergeArrayById(
@@ -805,7 +837,7 @@ function mergeWarehouse(
       l.dailyIssueSessions,
       onConflict,
     ),
-    nextInternalCode: pick3(b.nextInternalCode, r.nextInternalCode, l.nextInternalCode),
+    nextInternalCode,
     itemHistories: mergeRecords(b.itemHistories, r.itemHistories, l.itemHistories, onConflict),
     itemRequests: mergeArrayById(b.itemRequests, r.itemRequests, l.itemRequests, onConflict),
     itemRenameRequests: mergeArrayById(
