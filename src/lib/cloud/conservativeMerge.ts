@@ -52,7 +52,7 @@ function mergeAccessPolicyOntoRemote(
   baseAccess: AccessStore | undefined,
   localAccess: AccessStore,
 ): AccessStore {
-  const b = baseAccess ?? ({ users: [] } as AccessStore)
+  const b = baseAccess ?? ({ users: [], roleViews: {} } as unknown as AccessStore)
   return {
     ...remoteAccess,
     roleViews: mergeAccessRecords(b.roleViews, remoteAccess.roleViews, localAccess.roleViews) as AccessStore['roleViews'],
