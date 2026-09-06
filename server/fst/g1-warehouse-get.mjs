@@ -21,10 +21,10 @@ export default async function handler(req, res) {
     return
   }
 
-  const perm = await requirePrincipalCapability(auth.uid, storeId, 'canViewWarehouse')
+  const perm = await requirePrincipalCapability(auth.uid, storeId, 'canViewWarehouse', auth)
   if (!perm.ok) {
     // Allow read if can post (implicit view)
-    const post = await requirePrincipalCapability(auth.uid, storeId, 'canPostWarehouseDocument')
+    const post = await requirePrincipalCapability(auth.uid, storeId, 'canPostWarehouseDocument', auth)
     if (!post.ok) {
       jsonError(res, perm.status ?? 403, perm.error)
       return

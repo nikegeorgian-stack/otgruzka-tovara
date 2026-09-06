@@ -72,8 +72,8 @@ export function ProcurementOrdersTab({ orders, counterparties, onEdit, onRemove,
         <ReceivePurchaseOrderModal
           order={receiveOrder}
           onClose={() => setReceiveOrder(null)}
-          onConfirm={(opts) => {
-            const res = onReceive(receiveOrder.id, opts)
+          onConfirm={async (opts) => {
+            const res = await onReceive(receiveOrder.id, opts)
             if (res.ok) {
               void alert({ message: t('procurement.receive.done') })
             }

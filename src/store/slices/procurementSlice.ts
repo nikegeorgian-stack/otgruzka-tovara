@@ -1,6 +1,11 @@
 import { allocateOrderNumber } from '@/lib/procurement/codes'
 import { normalizeProcurementStore } from '@/lib/procurement/init'
-import { receivePurchaseOrderInStore, type ReceiveOrderResult } from '@/lib/procurement/receive'
+import {
+  applyPurchaseOrderReceiptAck,
+  preparePurchaseOrderReceipt,
+  receivePurchaseOrderInStore,
+  type ReceiveOrderResult,
+} from '@/lib/procurement/receive'
 import { applyStatusHistory, createStatusChange } from '@/lib/procurement/statusHistory'
 import type {
   ProcurementCategoryNode,
@@ -12,6 +17,7 @@ import type {
 import { patchStore, type StoreSliceDeps } from '../storeApi'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { isG5ProcurementActive } from '@/lib/planner/g5Activation'
+import { isG1WebAuthoritativePath } from '@/lib/warehouse/g1ServerClient'
 
 function patchProcurement(
   setStore: StoreSliceDeps['setStore'],
@@ -24,7 +30,7 @@ function patchProcurement(
 }
 
 export function createProcurementSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
-  return {
+  const api = {
     async upsertPurchaseOrder(order: PurchaseOrder, statusNote?: string) {
       if (isG5ProcurementActive(getStore())) {
         const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
@@ -151,8 +157,8 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       orderId: string,
       opts?: import('@/lib/procurement/receive').ReceiveOrderOpts,
     ): ReceiveOrderResult {
-      if (isG5ProcurementActive(getStore())) {
-        return { ok: false, error: 'g5.error.use_g5_gateway' }
+      if (isG5ProcurementActive(getStore()) || isG1WebAuthoritativePath()) {
+        return { ok: false, error: 'warehouse.g1.errUseAuthoritativePost' }
       }
       let result: ReceiveOrderResult = { ok: false, error: 'procurement.receive.errNotFound' }
       patchStore(setStore, (s) => {
@@ -161,6 +167,96 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
         return out.result.ok ? out.store : s
       })
       return result
+    },
+
+    async receivePurchaseOrderAuthoritative(
+      orderId: string,
+      opts?: import('@/lib/procurement/receive').ReceiveOrderOpts,
+    ): Promise<ReceiveOrderResult> {
+      if (isG5ProcurementActive(getStore())) {
+        const prepared = preparePurchaseOrderReceipt(getStore(), orderId, opts)
+        if (!prepared.ok) return { ok: false, error: prepared.error }
+        const lines = [...prepared.receivedAdd.entries()].map(([lineId, quantity]) => ({
+          lineId,
+          quantity,
+          warehouseId: prepared.documentInput.warehouseId,
+        }))
+        try {
+          const data = await api.receivePurchaseOrderViaG5(orderId, {
+            lines,
+            note: prepared.number,
+          })
+          const documentId = String(
+            (data as { documentId?: string })?.documentId ??
+              (data as { warehouseDocumentId?: string })?.warehouseDocumentId ??
+              '',
+          )
+          if (!documentId) return { ok: false, error: 'g5.error.use_g5_gateway' }
+          return { ok: true, documentId }
+        } catch (e) {
+          return {
+            ok: false,
+            error: e instanceof Error ? e.message : 'g5.error.use_g5_gateway',
+          }
+        }
+      }
+
+      if (!isG1WebAuthoritativePath()) {
+        return api.receivePurchaseOrder(orderId, opts)
+      }
+
+      const prepared = preparePurchaseOrderReceipt(getStore(), orderId, opts)
+      if (!prepared.ok) return { ok: false, error: prepared.error }
+
+      patchStore(setStore, (s) => ({
+        ...s,
+        warehouse: prepared.warehouseWithItems,
+      }))
+
+      const { g1PostWarehouseDocument, mirrorAuthoritativeWarehousePost } = await import(
+        '@/lib/warehouse/g1ServerClient'
+      )
+      const idempotencyKey = `po-receipt-${orderId}-${prepared.number}-${[
+        ...prepared.receivedAdd.entries(),
+      ]
+        .map(([id, q]) => `${id}:${q}`)
+        .join('|')}`
+
+      const server = await g1PostWarehouseDocument({
+        idempotencyKey,
+        command: {
+          type: 'receipt',
+          warehouseId: prepared.documentInput.warehouseId,
+          date: prepared.documentInput.date,
+          number: prepared.documentInput.number,
+          lines: prepared.documentInput.lines.map((line) => ({
+            itemId: line.itemId,
+            quantity: line.quantity,
+            inputUnit: line.inputUnit,
+          })),
+          purpose: 'purchase',
+        },
+      })
+      if (!server.ok) {
+        return { ok: false, error: server.error || 'warehouse.g1.errServer' }
+      }
+
+      setStore(
+        (s) => {
+          const withWh = {
+            ...s,
+            warehouse: mirrorAuthoritativeWarehousePost(s.warehouse, server.data.warehouse),
+          }
+          return applyPurchaseOrderReceiptAck(
+            withWh,
+            prepared,
+            server.data.documentId,
+            withWh.warehouse,
+          )
+        },
+        { origin: 'user' },
+      )
+      return { ok: true, documentId: server.data.documentId }
     },
 
     async receivePurchaseOrderViaG5(
@@ -307,4 +403,5 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       return ok
     },
   }
+  return api
 }

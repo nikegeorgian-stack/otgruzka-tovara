@@ -69,12 +69,36 @@ async function loadPrincipal(dc, storeId, uid) {
   return data?.fstPrincipalAccesses?.[0] ?? null
 }
 
-export async function requirePrincipalCapability(uid, storeId, capability) {
+export async function requirePrincipalCapability(uid, storeId, capability, actor = null) {
   const dc = getG1DataConnect()
-  const row = await loadPrincipal(dc, storeId, uid)
-  if (!row || row.active !== true) return fail('forbidden', 403)
+  let row = await loadPrincipal(dc, storeId, uid)
+  if ((!row || row.active !== true) && actor && isSysadminActor(actor)) {
+    // R2.9: sysadmin without FstPrincipalAccess row — auto-provision full warehouse caps
+    // (app role ADM ≠ G2 principal; without this WH/ADM posts return raw "forbidden").
+    const provisioned = await grantPrincipalAccess({
+      actor,
+      storeId,
+      firebaseUid: uid,
+      roleId: 'sysadmin',
+      active: true,
+      capabilities: {
+        canViewWarehouse: true,
+        canDraftEdit: true,
+        canPostWarehouseDocument: true,
+        canCancelWarehouseDocument: true,
+        [G2_CAPS.TRANSFER_POST]: true,
+        [G2_CAPS.INVENTORY_POST]: true,
+        [G2_CAPS.OPENING_ACTIVATE]: true,
+        [G2_CAPS.PERIOD_CLOSE]: true,
+        [G2_CAPS.PERIOD_REOPEN]: true,
+      },
+    })
+    if (!provisioned.ok) return fail('warehouse.g2.errForbidden', 403)
+    row = await loadPrincipal(dc, storeId, uid)
+  }
+  if (!row || row.active !== true) return fail('warehouse.g2.errForbidden', 403)
   const caps = normalizeCapabilities(parseCapabilities(row.capabilitiesJson))
-  if (!hasCapability(caps, capability)) return fail('forbidden', 403)
+  if (!hasCapability(caps, capability)) return fail('warehouse.g2.errMissingCapability', 403)
   return ok({ principal: row, capabilities: caps })
 }
 
@@ -655,7 +679,7 @@ export async function executeG2Command(input) {
   const needed = capabilityByCommand[commandType]
   if (!needed) return fail('unknown_command', 400)
 
-  const perm = await requirePrincipalCapability(actor.uid, storeId, needed)
+  const perm = await requirePrincipalCapability(actor.uid, storeId, needed, actor)
   if (!perm.ok) return perm
 
   const dc = getG1DataConnect()

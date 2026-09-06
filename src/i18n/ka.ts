@@ -6062,6 +6062,12 @@ export const ka: Dict = {
   'warehouse.g1.errUnsupportedType':
     'სერვერული G1 ჩატარება ჯერ მხოლოდ შემოსვლასა და გასვლას უჭერს მხარს.',
   'warehouse.g1.errServer': 'საწყობის სერვერული ჩატარება მიუწვდომელია. სცადეთ მოგვიანებით.',
+  'warehouse.g2.errForbidden':
+    'საწყობის ჩატარების უფლება არაა. საჭიროა სერვერული როლი «დოკუმენტების ჩატარება» (FstPrincipalAccess).',
+  'warehouse.g2.errMissingCapability':
+    'თქვენს ანგარიშს არ აქვს ამ საწყობის ოპერაციის უფლება. მიმართეთ ადმინისტრატორს.',
+  'forbidden':
+    'უფლება არაა. ადმინი/კლადოვშიკი — შეამოწმეთ საწყობის სერვერული უფლებები (principal).',
   'warehouse.g2.errServer': 'საწყობის სერვერული ბრძანება მიუწვდომელია. სცადეთ მოგვიანებით.',
   'warehouse.g2.errPeriodClosed': 'საწყობის პერიოდი დახურულია. ოპერაცია აკრძალულია.',
   'warehouse.g2.errRevisionConflict':

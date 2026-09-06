@@ -290,7 +290,7 @@ export default function App() {
     onRemoveOrder: app.removePurchaseOrder,
     onAddMilestone: app.addPurchaseOrderMilestone,
     onSetStatus: app.setPurchaseOrderStatus,
-    onReceiveOrder: app.receivePurchaseOrder,
+    onReceiveOrder: app.receivePurchaseOrderAuthoritative,
     onUpsertProcurementCategory: app.upsertProcurementCategory,
     onRemoveProcurementCategory: app.removeProcurementCategory,
     onUpsertRoutePoint: app.upsertRoutePoint,
@@ -1483,7 +1483,7 @@ export default function App() {
                 onUpsertCounterparty: app.upsertCounterparty,
               }}
               onUpsertSalesOrder={app.upsertSalesOrder}
-              onReceivePurchaseOrder={app.receivePurchaseOrder}
+              onReceivePurchaseOrder={app.receivePurchaseOrderAuthoritative}
               onCreateDisbursementFromAccrual={(accrualId, opts) =>
                 app.createDisbursementFromAccrual(accrualId, opts, financeActor)
               }

@@ -21,7 +21,7 @@ export type ProcurementActions = {
   >['setPurchaseOrderStatus']
   onReceiveOrder: ReturnType<
     typeof import('@/store/slices/procurementSlice').createProcurementSlice
-  >['receivePurchaseOrder']
+  >['receivePurchaseOrderAuthoritative']
   onUpsertProcurementCategory: ReturnType<
     typeof import('@/store/slices/procurementSlice').createProcurementSlice
   >['upsertProcurementCategory']

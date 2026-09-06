@@ -5671,6 +5671,12 @@ export const en: Dict = {
   'warehouse.doc.saveDraft': 'Save draft',
   'warehouse.doc.draftSaved': 'Draft saved — balances unchanged.',
   'warehouse.doc.postSuccess': 'Document posted, balances updated.',
+  'warehouse.g2.errForbidden':
+    'Insufficient warehouse posting rights. A server principal with document-post capability is required (FstPrincipalAccess).',
+  'warehouse.g2.errMissingCapability':
+    'Your account lacks permission for this warehouse operation. Ask an administrator.',
+  'forbidden':
+    'Insufficient permissions. Admins/warehouse keepers: check server warehouse principal grants.',
   'warehouse.doc.postConfirm': 'Post this document? After posting it cannot be edited.',
   'warehouse.doc.unpost': 'Create reversal',
   'warehouse.doc.unpostSuccess': 'Document cancelled via reversal (not returned to draft).',

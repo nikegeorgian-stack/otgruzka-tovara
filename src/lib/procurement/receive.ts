@@ -22,30 +22,75 @@ export type ReceiveOrderOpts = {
  * Принять заказ закупки: создаёт приходный документ,
  * заводит недостающие позиции номенклатуры, проставляет receivedQty/статус заказа
  * и связь с документом. Кросс-стор операция (закупки + склад) в одном патче.
+ *
+ * На web G1/G5 путь вызывающий код обязан провести склад через сервер
+ * (preparePurchaseOrderReceipt + authoritative post), иначе локальный success
+ * будет стёрт G1 overlay после reload (FST-CYCLE-003).
  */
 export function receivePurchaseOrderInStore(
   app: AppStore,
   orderId: string,
   opts: ReceiveOrderOpts = {},
 ): { store: AppStore; result: ReceiveOrderResult } {
+  const prepared = preparePurchaseOrderReceipt(app, orderId, opts)
+  if (!prepared.ok) {
+    return { store: app, result: { ok: false, error: prepared.error } }
+  }
+
+  const { store: warehouseAfter, result } = postWarehouseDocument(
+    prepared.warehouseWithItems,
+    prepared.documentInput,
+  )
+
+  if (!result.ok) {
+    return { store: app, result: { ok: false, error: result.error } }
+  }
+
+  return {
+    store: applyPurchaseOrderReceiptAck(app, prepared, result.documentId),
+    result: { ok: true, documentId: result.documentId },
+  }
+}
+
+export type PreparePurchaseOrderReceipt =
+  | {
+      ok: true
+      order: PurchaseOrder
+      warehouseWithItems: WarehouseStore
+      documentInput: Omit<
+        import('@/lib/warehouse/types').WarehouseDocument,
+        'id' | 'createdAt' | 'status' | 'movements'
+      > & { lines: WarehouseDocumentLine[] }
+      receivedAdd: Map<string, number>
+      itemByLine: Map<string, string>
+      number: string
+    }
+  | { ok: false; error: string }
+
+/** Build receipt plan without posting (for G1/G5 authoritative path). */
+export function preparePurchaseOrderReceipt(
+  app: AppStore,
+  orderId: string,
+  opts: ReceiveOrderOpts = {},
+): PreparePurchaseOrderReceipt {
   const date = opts.date ?? new Date().toISOString().slice(0, 10)
   const lineQtys = opts.lineQtys
   const proc = app.procurement
   const order = proc?.orders.find((o) => o.id === orderId)
   if (!proc || !order) {
-    return { store: app, result: { ok: false, error: 'procurement.receive.errNotFound' } }
+    return { ok: false, error: 'procurement.receive.errNotFound' }
   }
   if (order.status === 'cancelled') {
-    return { store: app, result: { ok: false, error: 'procurement.receive.errCancelled' } }
+    return { ok: false, error: 'procurement.receive.errCancelled' }
   }
   if (order.status === 'draft') {
-    return { store: app, result: { ok: false, error: 'procurement.receive.errDraft' } }
+    return { ok: false, error: 'procurement.receive.errDraft' }
   }
 
   let warehouse: WarehouseStore = app.warehouse
   const destId = order.destinationWarehouseId || warehouse.locations[0]?.id || ''
   if (!destId) {
-    return { store: app, result: { ok: false, error: 'procurement.receive.errNoWarehouse' } }
+    return { ok: false, error: 'procurement.receive.errNoWarehouse' }
   }
 
   const itemByLine = new Map<string, string>()
@@ -82,29 +127,43 @@ export function receivePurchaseOrderInStore(
   }
 
   if (docLines.length === 0) {
-    return { store: app, result: { ok: false, error: 'procurement.receive.errNothing' } }
+    return { ok: false, error: 'procurement.receive.errNothing' }
   }
 
   const number = nextDocumentNumber(warehouse.documents, 'receipt', date)
   const supplier = app.counterparties.items.find((c) => c.id === order.counterpartyId)
-  const { store: warehouseAfter, result } = postWarehouseDocument(warehouse, {
-    type: 'receipt',
+  return {
+    ok: true,
+    order,
+    warehouseWithItems: warehouse,
+    documentInput: {
+      type: 'receipt',
+      number,
+      date,
+      warehouseId: destId,
+      purpose: 'purchase',
+      counterpartyId: order.counterpartyId,
+      counterparty: supplier?.name,
+      comment: order.orderNumber,
+      purchaseOrderId: order.id,
+      lines: docLines,
+    },
+    receivedAdd,
+    itemByLine,
     number,
-    date,
-    warehouseId: destId,
-    purpose: 'purchase',
-    counterpartyId: order.counterpartyId,
-    counterparty: supplier?.name,
-    comment: order.orderNumber,
-    purchaseOrderId: order.id,
-    lines: docLines,
-  })
-
-  if (!result.ok) {
-    return { store: app, result: { ok: false, error: result.error } }
   }
+}
 
-  const documentId = result.documentId
+/** Apply PO line/status updates after a successful warehouse document id is known. */
+export function applyPurchaseOrderReceiptAck(
+  app: AppStore,
+  prepared: Extract<PreparePurchaseOrderReceipt, { ok: true }>,
+  documentId: string,
+  warehouseOverride?: WarehouseStore,
+): AppStore {
+  const proc = app.procurement
+  if (!proc) return app
+  const { order, receivedAdd, itemByLine, number } = prepared
   const updatedLines = order.lines.map((line) => {
     const add = receivedAdd.get(line.id)
     if (add == null) {
@@ -130,25 +189,17 @@ export function receivePurchaseOrderInStore(
         ? order.statusHistory
         : [
             ...order.statusHistory,
-            createStatusChange(
-              order.status,
-              nextStatus,
-              `Приход ${number}`,
-              documentId,
-            ),
+            createStatusChange(order.status, nextStatus, `Приход ${number}`, documentId),
           ],
     updatedAt: new Date().toISOString(),
   }
 
   return {
-    store: {
-      ...app,
-      warehouse: warehouseAfter,
-      procurement: {
-        ...proc,
-        orders: proc.orders.map((o) => (o.id === orderId ? updatedOrder : o)),
-      },
+    ...app,
+    warehouse: warehouseOverride ?? prepared.warehouseWithItems,
+    procurement: {
+      ...proc,
+      orders: proc.orders.map((o) => (o.id === order.id ? updatedOrder : o)),
     },
-    result: { ok: true, documentId },
   }
 }

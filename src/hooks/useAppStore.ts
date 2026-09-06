@@ -858,6 +858,7 @@ export function useAppStore() {
     addPurchaseOrderMilestone: procurement.addPurchaseOrderMilestone,
     setPurchaseOrderStatus: procurement.setPurchaseOrderStatus,
     receivePurchaseOrder: procurement.receivePurchaseOrder,
+    receivePurchaseOrderAuthoritative: procurement.receivePurchaseOrderAuthoritative,
     upsertProcurementCategory: procurement.upsertProcurementCategory,
     removeProcurementCategory: procurement.removeProcurementCategory,
     upsertRoutePoint: procurement.upsertRoutePoint,

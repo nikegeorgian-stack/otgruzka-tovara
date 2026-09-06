@@ -7,7 +7,9 @@ import type { PurchaseOrder } from '@/lib/procurement/types'
 type Props = {
   order: PurchaseOrder
   onClose: () => void
-  onConfirm: (opts: ReceiveOrderOpts) => { ok: boolean; error?: string }
+  onConfirm: (
+    opts: ReceiveOrderOpts,
+  ) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>
 }
 
 export function ReceivePurchaseOrderModal({ order, onClose, onConfirm }: Props) {
@@ -32,6 +34,7 @@ export function ReceivePurchaseOrderModal({ order, onClose, onConfirm }: Props) 
   })
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   function setAllRemaining() {
     const next: Record<string, string> = {}
@@ -41,7 +44,7 @@ export function ReceivePurchaseOrderModal({ order, onClose, onConfirm }: Props) 
     setQtys(next)
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const lineQtys: Record<string, number> = {}
     let any = false
@@ -61,12 +64,17 @@ export function ReceivePurchaseOrderModal({ order, onClose, onConfirm }: Props) 
       return
     }
     setError(null)
-    const res = onConfirm({ date, lineQtys })
-    if (!res.ok) {
-      setError(t(res.error ?? 'procurement.receive.errNothing'))
-      return
+    setBusy(true)
+    try {
+      const res = await onConfirm({ date, lineQtys })
+      if (!res.ok) {
+        setError(t(res.error ?? 'procurement.receive.errNothing'))
+        return
+      }
+      onClose()
+    } finally {
+      setBusy(false)
     }
-    onClose()
   }
 
   return (
@@ -155,7 +163,8 @@ export function ReceivePurchaseOrderModal({ order, onClose, onConfirm }: Props) 
           </button>
           <button
             type="submit"
-            className="rounded-sm bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+            disabled={busy}
+            className="rounded-sm bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
           >
             {t('procurement.receive.action')}
           </button>
