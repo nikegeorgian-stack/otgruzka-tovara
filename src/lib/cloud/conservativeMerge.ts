@@ -6,10 +6,7 @@ import {
   type DirtyOperation,
   type EntityConflict,
 } from './dirtyOperations'
-
-function eqJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
+import { eqJsonStable as eqJson } from './stableJsonEq'
 
 function cloneStore(store: AppStore): AppStore {
   return JSON.parse(JSON.stringify(store)) as AppStore

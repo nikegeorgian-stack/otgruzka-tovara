@@ -3,12 +3,9 @@ import { nextOperationId, type DirtyOperation } from './dirtyOperations'
 import type { StoreMutationOrigin } from './storeMutationOrigin'
 import { STABLE_ID_COLLECTION_PATHS, getPathValue } from './stableIdPaths'
 import { diffMonthsToOperations } from './timesheetCellOps'
+import { eqJsonStable as eqJson } from './stableJsonEq'
 
 type IdEntity = { id: string }
-
-function eqJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
 
 function asIdArray(value: unknown): IdEntity[] | null {
   if (!Array.isArray(value)) return null

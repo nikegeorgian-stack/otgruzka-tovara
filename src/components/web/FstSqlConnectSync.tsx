@@ -27,6 +27,7 @@ import {
   canCloudWriteNow,
   needsPullBeforeWrite,
 } from '@/lib/cloud/cloudSavePipeline'
+import { acceptCloudScopedMerge } from '@/lib/cloud/acceptCloudScoped'
 import { formatTimesheetConflictDetail } from '@/lib/cloud/timesheetCellOps'
 import { formatAtomicGroupConflictDetail } from '@/lib/cloud/transactionGroups'
 import {
@@ -980,8 +981,18 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
           schedulePullRemote(true)
           return
         }
+        const conflicts = cloudDirtyTracker.getConflicts()
+        // Entity-scoped accept only — empty/missing/malformed/stale scope must not replace store.
+        const scoped = acceptCloudScopedMerge(storeRef.current, remote, conflicts)
+        if (!scoped.ok) {
+          // No store mutation: empty/missing/malformed/stale scope must not replace AppStore.
+          setError(`accept_cloud_scope:${scoped.reason}`)
+          flashStatus('conflict')
+          setStatus('idle')
+          return
+        }
         const seeded = commitSyncedBaseline(
-          applyAppStoreSeeds(restoreLocalSecrets(storeRef.current, remote)),
+          applyAppStoreSeeds(restoreLocalSecrets(storeRef.current, scoped.store)),
           row ? Number(row.revision) || undefined : undefined,
         )
         // Accept cloud: drop only conflicting pending deletes/ops; keep unrelated pending.
