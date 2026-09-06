@@ -174,6 +174,35 @@ function setPath(store: AppStore, path: string, value: unknown): void {
 
 const STABLE_ARRAY_PATHS = [...STABLE_ID_COLLECTION_PATHS]
 
+/**
+ * Compare composite domains without stable-id collections (those are merged
+ * entity-by-entity). Prevents false "Domain X changed on both sides; cloud kept"
+ * when only id-array entities diverged and were already 3-way merged.
+ */
+function compositeWithoutStableArrays(domainKey: string, value: unknown): unknown {
+  if (value == null || typeof value !== 'object') return value
+  const clone = JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+  for (const path of STABLE_ARRAY_PATHS) {
+    if (path === domainKey) return []
+    if (!path.startsWith(`${domainKey}.`)) continue
+    const rel = path.slice(domainKey.length + 1)
+    const parts = rel.split('.')
+    let cur: Record<string, unknown> = clone
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i]!
+      if (cur[p] == null || typeof cur[p] !== 'object') {
+        cur = {}
+        break
+      }
+      cur = cur[p] as Record<string, unknown>
+    }
+    if (parts.length > 0 && cur && typeof cur === 'object') {
+      cur[parts[parts.length - 1]!] = []
+    }
+  }
+  return clone
+}
+
 export type ConservativeMergeResult = {
   store: AppStore
   conflicts: EntityConflict[]
@@ -273,6 +302,27 @@ export function conservativeMergeForSave(
           continue
         }
         if (!eqJson(lv, bv) && !eqJson(baseRv, bv) && !eqJson(lv, baseRv)) {
+          // Entity arrays already merged into `result`. Only conflict when
+          // non-array composite fields truly diverge (not own-write echo).
+          const localRest = compositeWithoutStableArrays(key, lv)
+          const remoteRest = compositeWithoutStableArrays(key, baseRv)
+          const baseRest = compositeWithoutStableArrays(key, bv)
+          if (eqJson(localRest, remoteRest) || eqJson(localRest, baseRest)) {
+            // Arrays merged; local non-array matches remote or baseline — no domain banner.
+            if (!eqJson(localRest, remoteRest) && eqJson(remoteRest, baseRest)) {
+              const localClone = cloneStore({ ...result, [key]: lv } as AppStore)
+              for (const path of STABLE_ARRAY_PATHS.filter(
+                (p) => p === key || p.startsWith(`${key}.`),
+              )) {
+                setPath(localClone, path, getPath(result, path))
+              }
+              ;(result as Record<string, unknown>)[key] = (localClone as Record<string, unknown>)[
+                key
+              ]
+            }
+            changedDomains.push(key)
+            continue
+          }
           conflicts.push({
             domain: key,
             entityId: '*',

@@ -36,6 +36,7 @@ export const STABLE_ID_COLLECTION_PATHS = [
   'formulations.recipes',
   'formulations.recipeVersions',
   'formulations.batchRuns',
+  'formulations.mixTasks',
   'otc.norms',
   'otc.labTests',
   'otc.alkaliSeries',
