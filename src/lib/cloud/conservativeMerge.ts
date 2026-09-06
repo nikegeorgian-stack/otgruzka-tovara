@@ -1,4 +1,5 @@
 import type { AppStore } from '@/lib/types'
+import type { AccessStore } from '@/lib/access/types'
 import { listPersistentDomainKeys } from './persistentDomains'
 import { STABLE_ID_COLLECTION_PATHS, getPathValue } from './stableIdPaths'
 import {
@@ -17,6 +18,100 @@ import {
 
 function cloneStore(store: AppStore): AppStore {
   return JSON.parse(JSON.stringify(store)) as AppStore
+}
+
+/** 3-way pick for access policy maps (same rule as cloudMerge.pick3). */
+function pick3Access<T>(base: T, remote: T, local: T): T {
+  if (!eqJson(local, base)) return local
+  if (!eqJson(remote, base)) return remote
+  return local
+}
+
+function mergeAccessRecords<V>(
+  base: Record<string, V> | undefined,
+  remote: Record<string, V> | undefined,
+  local: Record<string, V> | undefined,
+): Record<string, V> {
+  const b = base ?? {}
+  const r = remote ?? {}
+  const l = local ?? {}
+  const keys = new Set([...Object.keys(b), ...Object.keys(r), ...Object.keys(l)])
+  const out: Record<string, V> = {}
+  for (const key of keys) {
+    out[key] = pick3Access(b[key], r[key], l[key])
+  }
+  return out
+}
+
+/**
+ * When access policy maps diverge on both sides, merge field-by-field instead of
+ * raising a whole-domain `access/*` banner (users/groups/coverages already merged).
+ */
+function mergeAccessPolicyOntoRemote(
+  remoteAccess: AccessStore,
+  baseAccess: AccessStore | undefined,
+  localAccess: AccessStore,
+): AccessStore {
+  const b = baseAccess ?? ({ users: [] } as AccessStore)
+  return {
+    ...remoteAccess,
+    roleViews: mergeAccessRecords(b.roleViews, remoteAccess.roleViews, localAccess.roleViews) as AccessStore['roleViews'],
+    roleDirectorySections: mergeAccessRecords(
+      b.roleDirectorySections as Record<string, unknown> | undefined,
+      remoteAccess.roleDirectorySections as Record<string, unknown> | undefined,
+      localAccess.roleDirectorySections as Record<string, unknown> | undefined,
+    ) as AccessStore['roleDirectorySections'],
+    roleTimesheetAccess: mergeAccessRecords(
+      b.roleTimesheetAccess as Record<string, unknown> | undefined,
+      remoteAccess.roleTimesheetAccess as Record<string, unknown> | undefined,
+      localAccess.roleTimesheetAccess as Record<string, unknown> | undefined,
+    ) as AccessStore['roleTimesheetAccess'],
+    roleAllowNegativeStock: mergeAccessRecords(
+      b.roleAllowNegativeStock as Record<string, unknown> | undefined,
+      remoteAccess.roleAllowNegativeStock as Record<string, unknown> | undefined,
+      localAccess.roleAllowNegativeStock as Record<string, unknown> | undefined,
+    ) as AccessStore['roleAllowNegativeStock'],
+    roleAllowDocumentCancel: mergeAccessRecords(
+      b.roleAllowDocumentCancel as Record<string, unknown> | undefined,
+      remoteAccess.roleAllowDocumentCancel as Record<string, unknown> | undefined,
+      localAccess.roleAllowDocumentCancel as Record<string, unknown> | undefined,
+    ) as AccessStore['roleAllowDocumentCancel'],
+    roleAllowQcRelease: mergeAccessRecords(
+      b.roleAllowQcRelease as Record<string, unknown> | undefined,
+      remoteAccess.roleAllowQcRelease as Record<string, unknown> | undefined,
+      localAccess.roleAllowQcRelease as Record<string, unknown> | undefined,
+    ) as AccessStore['roleAllowQcRelease'],
+    roleAllowReservationReallocation: mergeAccessRecords(
+      b.roleAllowReservationReallocation as Record<string, unknown> | undefined,
+      remoteAccess.roleAllowReservationReallocation as Record<string, unknown> | undefined,
+      localAccess.roleAllowReservationReallocation as Record<string, unknown> | undefined,
+    ) as AccessStore['roleAllowReservationReallocation'],
+    roleAllowRecipeApproval: mergeAccessRecords(
+      b.roleAllowRecipeApproval as Record<string, unknown> | undefined,
+      remoteAccess.roleAllowRecipeApproval as Record<string, unknown> | undefined,
+      localAccess.roleAllowRecipeApproval as Record<string, unknown> | undefined,
+    ) as AccessStore['roleAllowRecipeApproval'],
+    roleTaskAccess: mergeAccessRecords(
+      b.roleTaskAccess as Record<string, unknown> | undefined,
+      remoteAccess.roleTaskAccess as Record<string, unknown> | undefined,
+      localAccess.roleTaskAccess as Record<string, unknown> | undefined,
+    ) as AccessStore['roleTaskAccess'],
+    roleTaskBoards: mergeAccessRecords(
+      b.roleTaskBoards as Record<string, unknown> | undefined,
+      remoteAccess.roleTaskBoards as Record<string, unknown> | undefined,
+      localAccess.roleTaskBoards as Record<string, unknown> | undefined,
+    ) as AccessStore['roleTaskBoards'],
+    workshopMasterProductionLines: mergeAccessRecords(
+      b.workshopMasterProductionLines,
+      remoteAccess.workshopMasterProductionLines,
+      localAccess.workshopMasterProductionLines,
+    ),
+    userAllowReservationReallocation: pick3Access(
+      b.userAllowReservationReallocation,
+      remoteAccess.userAllowReservationReallocation,
+      localAccess.userAllowReservationReallocation,
+    ),
+  }
 }
 
 type IdEntity = { id: string }
@@ -324,6 +419,24 @@ export function conservativeMergeForSave(
                 key
               ]
             }
+            changedDomains.push(key)
+            continue
+          }
+          // access: merge policy maps field-by-field — avoids sticky access/* banners
+          // when roleViews / roleAllow* diverge on both sides while users already merged.
+          if (key === 'access' && lv && typeof lv === 'object' && baseRv && typeof baseRv === 'object') {
+            const mergedUsers = (result as AppStore).access?.users
+            const mergedGroups = (result as AppStore).access?.userGroups
+            const mergedCoverages = (result as AppStore).access?.workshopMasterCoverages
+            const merged = mergeAccessPolicyOntoRemote(
+              baseRv as AccessStore,
+              bv as AccessStore | undefined,
+              lv as AccessStore,
+            )
+            if (mergedUsers) merged.users = mergedUsers
+            if (mergedGroups) merged.userGroups = mergedGroups
+            if (mergedCoverages) merged.workshopMasterCoverages = mergedCoverages
+            ;(result as Record<string, unknown>)[key] = merged
             changedDomains.push(key)
             continue
           }

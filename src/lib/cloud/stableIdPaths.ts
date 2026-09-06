@@ -4,6 +4,7 @@ export const STABLE_ID_COLLECTION_PATHS = [
   'candidates',
   'access.users',
   'access.userGroups',
+  'access.workshopMasterCoverages',
   'warehouse.items',
   'warehouse.documents',
   'warehouse.movements',

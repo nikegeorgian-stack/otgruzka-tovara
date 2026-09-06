@@ -269,16 +269,27 @@ export class DirtyOperationTracker {
   }
 
   /** Cancel pending ops that match current conflicts (e.g. accept remote).
-   * PHASE W0.6: discarding any member drops the whole atomic group. */
+   * PHASE W0.6: discarding any member drops the whole atomic group.
+   * Whole-domain conflicts (`entityId === '*'`) also drop child-path ops
+   * (e.g. `access/*` clears pending `access.users::<id>`). */
   discardConflictingPending(): string[] {
     if (!this.conflicts.length) return []
     const byOpId = new Set(
       this.conflicts.map((c) => c.operationId).filter((id): id is string => Boolean(id)),
     )
     const keys = new Set(this.conflicts.map((c) => `${c.domain}::${c.entityId}`))
+    const wholeDomainRoots = this.conflicts
+      .filter((c) => c.entityId === '*')
+      .map((c) => c.domain)
     const seedIds: string[] = []
     for (const op of this.pending) {
-      if (byOpId.has(op.operationId) || keys.has(`${op.domain}::${op.entityId}`)) {
+      const exact = byOpId.has(op.operationId) || keys.has(`${op.domain}::${op.entityId}`)
+      const underWhole =
+        !exact &&
+        wholeDomainRoots.some(
+          (root) => op.domain === root || op.domain.startsWith(`${root}.`),
+        )
+      if (exact || underWhole) {
         seedIds.push(op.operationId)
       }
     }
