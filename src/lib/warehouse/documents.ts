@@ -412,20 +412,7 @@ export function postWarehouseDocument(
   } = doc
   const skipFields = skipFieldValidation === true || skipValidation === true
 
-  if (!skipFields) {
-    const docForValidation = { ...docRest }
-    delete (docForValidation as { status?: unknown }).status
-    const validation = validateWarehouseDocumentInput(store, docForValidation)
-    if (!validation.ok) {
-      const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
-      return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
-    }
-  }
-
-  if (doc.type === 'receipt' && isInvoiceAlreadyPosted(store, doc.invoiceKey)) {
-    return { store, result: { ok: false, error: 'warehouse.invoice.alreadyPosted' } }
-  }
-
+  // Idempotent replay must win before number-uniqueness validation rejects the same key.
   const existingIdem = findIdempotentDocument(store, docRest.idempotencyKey)
   if (existingIdem) {
     if (
@@ -449,6 +436,20 @@ export function postWarehouseDocument(
       }
     }
     return { store, result: { ok: false, error: IDEMPOTENCY_CONFLICT_ERROR } }
+  }
+
+  if (!skipFields) {
+    const docForValidation = { ...docRest }
+    delete (docForValidation as { status?: unknown }).status
+    const validation = validateWarehouseDocumentInput(store, docForValidation)
+    if (!validation.ok) {
+      const first = Object.values(validation.errors)[0] ?? 'warehouse.doc.errGeneric'
+      return { store, result: { ok: false, error: first, fieldErrors: validation.errors } }
+    }
+  }
+
+  if (doc.type === 'receipt' && isInvoiceAlreadyPosted(store, doc.invoiceKey)) {
+    return { store, result: { ok: false, error: 'warehouse.invoice.alreadyPosted' } }
   }
 
   const id = crypto.randomUUID()

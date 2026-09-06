@@ -23,7 +23,9 @@ type Props = Pick<ProcurementPageProps, 'counterparties'> & {
   onReceive?: (
     id: string,
     opts?: ReceiveOrderOpts,
-  ) => { ok: boolean; error?: string }
+  ) =>
+    | { ok: boolean; error?: string; documentId?: string }
+    | Promise<{ ok: boolean; error?: string; documentId?: string }>
 }
 
 export function ProcurementOrdersTab({ orders, counterparties, onEdit, onRemove, onReceive }: Props) {

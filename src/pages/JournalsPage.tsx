@@ -62,7 +62,12 @@ type Props = {
   warehouseDocActions: OverlayWarehouse
   loadingDocActions?: OverlayLoading
   onUpsertSalesOrder?: ComponentProps<typeof JournalDocumentOverlay>['onUpsertSalesOrder']
-  onReceivePurchaseOrder?: (orderId: string) => { ok: true; documentId: string } | { ok: false; error: string }
+  onReceivePurchaseOrder?: (
+    orderId: string,
+  ) =>
+    | { ok: true; documentId: string }
+    | { ok: false; error: string }
+    | Promise<{ ok: true; documentId: string } | { ok: false; error: string }>
   onCreateDisbursementFromAccrual?: (
     accrualId: string,
     opts: { date: string; method: 'cash' | 'bank' | 'card' },
@@ -298,13 +303,13 @@ export function JournalsPage({
     [selectedEntry, store],
   )
 
-  function runBasedOn(
+  async function runBasedOn(
     entry: UnifiedJournalEntry,
     basedOn: NonNullable<Extract<JournalCommand, { id: 'basedOn' }>['basedOn']>,
   ) {
     if (!entry.link) return
     if (basedOn === 'receipt_from_po' && entry.link.kind === 'procurement_order') {
-      const result = onReceivePurchaseOrder?.(entry.link.orderId)
+      const result = await onReceivePurchaseOrder?.(entry.link.orderId)
       if (result?.ok) {
         setOverlay({ kind: 'warehouse_document', documentId: result.documentId, mode: 'edit' })
       }

@@ -686,7 +686,6 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       recipeId: string,
       opts?: { approve?: boolean; reason?: string },
     ): { ok: true; versionId: string; approved: boolean } | { ok: false; error: string } {
-      const actor = actorFromGetter(getActor)
       const s0 = getStore()
       const recipe = s0.formulations.recipes.find((r) => r.id === recipeId)
       if (!recipe) return { ok: false, error: 'formulations.recipe.errNotFound' }
@@ -694,7 +693,11 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
       const components = componentsFromLegacyRecipe(recipe, (id) => {
         const item = itemsById.get(id)
         return item
-          ? { code: item.code, name: item.name, unit: item.unit }
+          ? {
+              code: item.sku?.trim() || item.internalCode,
+              name: item.name,
+              unit: item.unit,
+            }
           : undefined
       })
       const draft = slice.createDraftFormulationRecipeVersion({

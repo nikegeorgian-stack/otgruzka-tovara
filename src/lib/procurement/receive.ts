@@ -47,7 +47,7 @@ export function receivePurchaseOrderInStore(
   }
 
   return {
-    store: applyPurchaseOrderReceiptAck(app, prepared, result.documentId),
+    store: applyPurchaseOrderReceiptAck(app, prepared, result.documentId, warehouseAfter),
     result: { ok: true, documentId: result.documentId },
   }
 }
