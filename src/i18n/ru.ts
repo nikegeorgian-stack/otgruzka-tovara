@@ -4501,6 +4501,8 @@ export const ru: Dict = {
   'production.orderLink': 'Заказ планировщика',
   'production.orderNone': 'Без заказа',
   'production.orderHint': 'Факт смены пойдёт в выбранный заказ',
+  'production.ship.errLotRequired': 'Укажите лот / партию ГП по каждой строке отгрузки',
+  'production.ship.errNotReleased': 'Отгрузка только из лотов, выпущенных ОТК',
   'production.plannerBannerTitle': 'Заявка из планировщика',
   'production.plannerBannerBody':
     'На основании плана(ов) {orders} сформирована автоматически. Проверьте объём и бригаду перед проведением.',
@@ -4805,6 +4807,8 @@ export const ru: Dict = {
   'finishedProduct.errName': 'Укажите наименование',
   'finishedProduct.errCustomer': 'Выберите клиента — карточка = клиент + изделие',
   'finishedProduct.errType': 'Выберите тип продукта (Сетка / Ратл / Мембрана)',
+  'finishedProduct.errWarehouseSku':
+    'Привяжите складской SKU (номенклатуру ГП) перед сохранением — или создайте позицию на вкладке отгрузки',
   'finishedProduct.name': 'Наименование изделия',
   'finishedProduct.namePh': 'Напр. Ратл белый 145 под Celloplex',
   'finishedProduct.nameAutoHint':

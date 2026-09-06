@@ -4468,6 +4468,8 @@ export const ka: Dict = {
   'production.orderLink': 'დაგეგმვის შეკვეთა',
   'production.orderNone': 'შეკვეთის გარეშე',
   'production.orderHint': 'ფაქტი მიბმულია შეკვეთაზე',
+  'production.ship.errLotRequired': 'მიუთითეთ ლოტი ყოველ სტრიქონზე',
+  'production.ship.errNotReleased': 'გამოშვება მხოლოდ ОТК-ის ლოტებიდან',
   'production.plannerBannerTitle': 'დაგეგმვიდან',
   'production.plannerBannerBody':
     'გეგმ(ებ)ის საფუძველზე {orders} ავტომატურად ჩამოიყალიბა. ჩაწერამდე შეამოწმეთ.',
@@ -4769,6 +4771,7 @@ export const ka: Dict = {
   'finishedProduct.errName': 'სახელი სავალდებულოა',
   'finishedProduct.errCustomer': 'აირჩიეთ კლიენტი — ერთი ბარათი = კლიენტი + ნაწარმი',
   'finishedProduct.errType': 'აირჩიეთ ტიპი',
+  'finishedProduct.errWarehouseSku': 'მიაბით საწყობის SKU შენახვამდე',
   'finishedProduct.name': 'ნაწარმის სახელი',
   'finishedProduct.namePh': 'მაგ. თეთრი რატლი 145',
   'finishedProduct.nameAutoHint':

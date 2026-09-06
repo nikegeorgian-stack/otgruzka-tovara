@@ -4174,6 +4174,8 @@ export const en: Dict = {
   'production.orderLink': 'Planner order',
   'production.orderNone': 'No order',
   'production.orderHint': 'Shift actual will go to selected order',
+  'production.ship.errLotRequired': 'Select a finished-goods lot on every shipment line',
+  'production.ship.errNotReleased': 'Only QC-released lots may ship',
   'production.plannerBannerTitle': 'Request from planner',
   'production.plannerDayTitle': 'Plan for this date',
   'production.pickFromPlanner': 'Pull from planner',
@@ -4466,6 +4468,8 @@ export const en: Dict = {
   'finishedProduct.errName': 'Enter name',
   'finishedProduct.errCustomer': 'Select a customer — one card = customer + product',
   'finishedProduct.errType': 'Select product type (Mesh / RATL / Membrane)',
+  'finishedProduct.errWarehouseSku':
+    'Link a finished-goods warehouse SKU before saving (or create one from the loading tab)',
   'finishedProduct.name': 'Product name',
   'finishedProduct.namePh': 'e.g. White ratl 145 for Celloplex',
   'finishedProduct.nameAutoHint':

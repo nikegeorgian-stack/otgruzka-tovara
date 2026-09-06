@@ -354,6 +354,10 @@ export function FinishedProductsDirectoryPanel({
       setNotice(t('finishedProduct.errCustomer'))
       return
     }
+    if (!editing.warehouseItemId) {
+      setNotice(t('finishedProduct.errWarehouseSku'))
+      return
+    }
     // Категория выработки — служебная (связь план↔факт), не ввод пользователя:
     // подставляем от граммовки при сохранении.
     const categoryFromGsm =
