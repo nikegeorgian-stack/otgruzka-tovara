@@ -2,6 +2,7 @@ import type { Locale } from '@/i18n/types'
 import { newId } from '@/lib/production/files'
 import { allocateInternalCode } from '@/lib/warehouse/itemHistory'
 import { suggestInternalBarcode } from '@/lib/warehouse/labelCodes'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import type {
   WarehouseCategory,
   WarehouseItem,
@@ -34,7 +35,7 @@ export function findChemistryWarehouseId(locations: WarehouseLocation[]): string
   return hit?.id ?? locations[0]?.id ?? newId()
 }
 
-/** Позиции склада для компонентов рецептуры (химия, пасты) */
+/** Позиции склада для компонентов рецептуры (химия, пасты, EDU-материалы цикла) */
 export function filterFormulationComponentItems(
   items: WarehouseItem[],
   categoryNames: Map<string, string>,
@@ -43,10 +44,14 @@ export function filterFormulationComponentItems(
     .filter((i) => i.active)
     .filter((i) => {
       const cat = categoryNames.get(i.categoryId) ?? ''
-      if (/хим|паст|пигмент|пропит|кле/i.test(cat)) return true
-      return /паст|пигмент|кле|дисперс|латекс|смола/i.test(i.name)
+      if (/хим|паст|пигмент|пропит|кле|^edu$/i.test(cat)) return true
+      const sku = i.sku ?? ''
+      if (/^EDU-CELLO/i.test(sku)) return true
+      return /паст|пигмент|кле|дисперс|латекс|смола|кальцит|dispex|rheovis|^вода$|ll\s*\d/i.test(
+        i.name ?? '',
+      )
     })
-    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+    .sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru'))
 }
 
 export function buildOutputWarehouseItem(
