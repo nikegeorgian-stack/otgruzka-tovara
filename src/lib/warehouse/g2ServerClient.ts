@@ -14,6 +14,7 @@ import {
   isG1WebAuthoritativePath,
   g1GetAuthoritativeWarehouse,
   g1PostWarehouseDocument,
+  unionWarehouseCatalogueItems,
 } from '@/lib/warehouse/g1ServerClient'
 
 export {
@@ -124,7 +125,7 @@ export function mirrorG2WarehouseAck(
     ...warehouse,
     documents: serverWarehouse.documents ?? warehouse.documents,
     movements: serverWarehouse.movements ?? warehouse.movements,
-    items: serverWarehouse.items?.length ? serverWarehouse.items : warehouse.items,
+    items: unionWarehouseCatalogueItems(warehouse.items, serverWarehouse.items),
     locations: serverWarehouse.locations?.length ? serverWarehouse.locations : warehouse.locations,
     categories: serverWarehouse.categories?.length
       ? serverWarehouse.categories

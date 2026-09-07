@@ -16,6 +16,29 @@ export type G1ServerResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; message: string }
 
+/**
+ * Merge warehouse catalogue items across G1 critical + SQL FstStore (legacy).
+ * Critical wins on the same id (authoritative card/stock metadata).
+ * Legacy-only ids are kept so nomenclature saved to FstStore but not yet
+ * mirrored into FstCriticalStore remains visible after hard reload (R2.9G).
+ * Documents/movements stay critical-only at the overlay layer — not here.
+ */
+export function unionWarehouseCatalogueItems<T extends { id: string }>(
+  legacyItems: T[] | null | undefined,
+  criticalItems: T[] | null | undefined,
+): T[] {
+  const legacy = Array.isArray(legacyItems) ? legacyItems : []
+  const critical = Array.isArray(criticalItems) ? criticalItems : []
+  if (!critical.length) return legacy
+  if (!legacy.length) return critical
+  const criticalIds = new Set(critical.map((i) => i.id).filter(Boolean))
+  const out = [...critical]
+  for (const item of legacy) {
+    if (item?.id && !criticalIds.has(item.id)) out.push(item)
+  }
+  return out
+}
+
 async function bearerToken(): Promise<string | null> {
   if (!isFirebaseConfigured()) return null
   const user = getFirebaseAuth().currentUser
@@ -75,9 +98,11 @@ export function resolveAuthoritativeWarehouseOverlay(input: {
         // Prefer authoritative stock truth fields from critical store:
         documents: input.criticalWarehouse.documents ?? [],
         movements: input.criticalWarehouse.movements ?? [],
-        items: input.criticalWarehouse.items?.length
-          ? input.criticalWarehouse.items
-          : input.legacyWarehouse.items,
+        // Catalogue: union — do not drop SQL-only items when critical is a shorter subset.
+        items: unionWarehouseCatalogueItems(
+          input.legacyWarehouse.items,
+          input.criticalWarehouse.items,
+        ),
         locations: input.criticalWarehouse.locations?.length
           ? input.criticalWarehouse.locations
           : input.legacyWarehouse.locations,
@@ -115,7 +140,7 @@ export function mirrorAuthoritativeWarehousePost(
     ...warehouse,
     documents: serverWarehouse.documents ?? warehouse.documents,
     movements: serverWarehouse.movements ?? warehouse.movements,
-    items: serverWarehouse.items?.length ? serverWarehouse.items : warehouse.items,
+    items: unionWarehouseCatalogueItems(warehouse.items, serverWarehouse.items),
     auditLog: serverWarehouse.auditLog ?? warehouse.auditLog,
   }
 }
