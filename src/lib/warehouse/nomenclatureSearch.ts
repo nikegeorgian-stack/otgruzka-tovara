@@ -1,4 +1,5 @@
 import type { WarehouseItem } from '@/lib/warehouse/types'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import { nextDocumentNumber } from './docNumbering'
 
 export function normSearch(s: string): string {
@@ -52,7 +53,10 @@ export function searchNomenclature(
     scored.push({ item, score })
   }
 
-  scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name, 'ru'))
+  scored.sort(
+    (a, b) =>
+      b.score - a.score || compareWarehouseItemsForSort(a.item, b.item, 'ru'),
+  )
   return scored.slice(0, limit).map((s) => s.item)
 }
 

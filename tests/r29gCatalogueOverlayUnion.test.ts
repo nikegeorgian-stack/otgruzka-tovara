@@ -94,7 +94,7 @@ describe('R2.9G G1 overlay catalogue union (SQL 15 vs critical 9)', () => {
     expect(out.warehouse.movements[0]).toMatchObject({ quantity: 1 })
   })
 
-  it('critical wins on same item id (no forged critical field loss)', () => {
+  it('critical wins on same item id when critical identity is not degraded', () => {
     const legacy = wh([
       item({ id: 'shared', name: 'Legacy name', internalCode: 'FC-000003', sku: 'LEGACY' }),
       item({ id: 'only-leg', name: 'Only legacy', internalCode: 'FC-000012' }),
@@ -112,6 +112,29 @@ describe('R2.9G G1 overlay catalogue union (SQL 15 vs critical 9)', () => {
     expect(shared?.name).toBe('Critical name')
     expect(shared?.sku).toBe('CRIT')
     expect(out.warehouse.items.some((i) => i.id === 'only-leg')).toBe(true)
+  })
+
+  it('degraded critical stub does not overwrite richer legacy identity (R2.9H)', () => {
+    const legacy = wh([
+      item({ id: 'cello', name: 'LL 106-50', internalCode: 'FC-000012', sku: 'EDU-CELLO-LL106-50' }),
+    ])
+    const critical = wh([
+      item({ id: 'cello', name: 'cello', internalCode: '', sku: undefined as unknown as string }),
+    ])
+    // name===id is degraded
+    critical.items[0].name = critical.items[0].id
+    const out = resolveAuthoritativeWarehouseOverlay({
+      legacyWarehouse: legacy,
+      criticalWarehouse: critical,
+      criticalRevision: 5,
+      warehouseActive: true,
+    })
+    expect(out.warehouse.items[0]).toMatchObject({
+      id: 'cello',
+      name: 'LL 106-50',
+      internalCode: 'FC-000012',
+      sku: 'EDU-CELLO-LL106-50',
+    })
   })
 
   it('empty critical items keeps full legacy catalogue', () => {

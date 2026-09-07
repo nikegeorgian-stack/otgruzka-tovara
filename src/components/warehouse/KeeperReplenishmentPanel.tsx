@@ -9,6 +9,7 @@ import {
   archivedReplenishmentRequests,
 } from '@/lib/warehouse/keeperReplenishment'
 import { filterConsumableItems } from '@/lib/warehouse/locationKindFilter'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import { formatQty } from '@/lib/warehouse/stock'
 import { unitLabel } from '@/lib/warehouse/units'
 import type { KeeperReplenishmentRequest, WarehouseStore } from '@/lib/warehouse/types'
@@ -342,7 +343,7 @@ function DraftEditor({
         warehouse.categories,
         warehouseId,
         warehouse.locations,
-      ).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+      ).sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru')),
     [warehouse.items, warehouse.categories, warehouse.locations, warehouseId],
   )
 

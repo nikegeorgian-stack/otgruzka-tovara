@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { FormField } from '@/components/ui/FormField'
 import { useI18n } from '@/context/I18nContext'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import { openItemRequests } from '@/lib/warehouse/itemRequests'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 
@@ -65,7 +66,7 @@ function RequestRow({
     () =>
       warehouse.items
         .filter((i) => i.active)
-        .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        .sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru')),
     [warehouse.items],
   )
 

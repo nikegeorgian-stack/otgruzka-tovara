@@ -5,6 +5,7 @@ import {
   getWarehouseAccountingState,
   isWarehouseAccountingActive,
 } from '@/lib/warehouse/accountingStatus'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import type { OpeningInventoryLineInput } from '@/lib/warehouse/openingInventory'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
 import type { WarehouseStore } from '@/lib/warehouse/types'
@@ -56,7 +57,7 @@ export function WarehouseOpeningInventoryPanel({
     () =>
       warehouse.items
         .filter((i) => i.active && (!whId || i.warehouseId === whId))
-        .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        .sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru')),
     [warehouse.items, whId],
   )
 

@@ -1,5 +1,6 @@
 import { computeAllBalances } from '@/lib/warehouse/stock'
 import { formatQty } from '@/lib/warehouse/stock'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 
 export function printWarehouseBalances(
@@ -15,7 +16,7 @@ export function printWarehouseBalances(
 
   const rows = store.items
     .filter((i) => i.active && (!warehouseId || i.warehouseId === warehouseId))
-    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+    .sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru'))
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
 <style>

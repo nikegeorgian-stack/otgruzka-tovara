@@ -5,6 +5,10 @@
 import { getFirebaseAuth, isFirebaseConfigured } from '@/lib/cloud/firebase'
 import { fstApiUrl } from '@/lib/cloud/fstApiOrigin'
 import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
+import {
+  unionWarehouseCatalogueItems as unionCatalogueIdentityAware,
+  type CatalogueIdentityFields,
+} from '@/lib/warehouse/catalogueIdentity'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 
 export const G1_LEGACY_NOT_AUTHORITATIVE = 'legacy_fst_store_not_authoritative' as const
@@ -18,25 +22,15 @@ export type G1ServerResult<T> =
 
 /**
  * Merge warehouse catalogue items across G1 critical + SQL FstStore (legacy).
- * Critical wins on the same id (authoritative card/stock metadata).
- * Legacy-only ids are kept so nomenclature saved to FstStore but not yet
- * mirrored into FstCriticalStore remains visible after hard reload (R2.9G).
+ * Same id: identity-aware merge (R2.9H) — degraded stubs (name===id) do not
+ * overwrite richer SQL/legacy cards. Legacy-only ids are kept (R2.9G).
  * Documents/movements stay critical-only at the overlay layer — not here.
  */
-export function unionWarehouseCatalogueItems<T extends { id: string }>(
+export function unionWarehouseCatalogueItems<T extends CatalogueIdentityFields>(
   legacyItems: T[] | null | undefined,
   criticalItems: T[] | null | undefined,
 ): T[] {
-  const legacy = Array.isArray(legacyItems) ? legacyItems : []
-  const critical = Array.isArray(criticalItems) ? criticalItems : []
-  if (!critical.length) return legacy
-  if (!legacy.length) return critical
-  const criticalIds = new Set(critical.map((i) => i.id).filter(Boolean))
-  const out = [...critical]
-  for (const item of legacy) {
-    if (item?.id && !criticalIds.has(item.id)) out.push(item)
-  }
-  return out
+  return unionCatalogueIdentityAware(legacyItems, criticalItems)
 }
 
 async function bearerToken(): Promise<string | null> {

@@ -341,16 +341,42 @@ function appendAudit(warehouse, entry) {
 function ensureItemCatalog(warehouse, lines) {
   const items = [...(warehouse.items ?? [])]
   for (const line of lines) {
-    if (!items.some((i) => i.id === line.itemId)) {
-      items.push({
-        id: line.itemId,
-        name: String(line.itemNameSnapshot ?? line.itemId),
-        internalCode: String(line.itemCodeSnapshot ?? ''),
-        unit: String(line.unitSnapshot ?? line.inputUnit ?? 'pcs'),
-      })
+    const itemId = String(line.itemId ?? '').trim()
+    if (!itemId) continue
+    const existing = items.find((i) => i.id === itemId)
+    if (existing) {
+      // Existing catalogue card is identity source — receipt snapshot must not mutate it.
+      continue
     }
+    const name = String(line.itemNameSnapshot ?? '').trim()
+    const unit = String(line.unitSnapshot ?? line.inputUnit ?? '').trim()
+    // Fail closed: incomplete snapshot must not invent name=itemId stubs (R2.9H).
+    if (!name || name === itemId || !unit) {
+      return {
+        ok: false,
+        error: 'unknown_item_incomplete_snapshot',
+        itemId,
+      }
+    }
+    items.push({
+      id: itemId,
+      name,
+      internalCode: String(line.itemCodeSnapshot ?? '').trim(),
+      unit,
+      sku: line.skuSnapshot != null ? String(line.skuSnapshot) : undefined,
+      categoryId: line.categoryIdSnapshot != null ? String(line.categoryIdSnapshot) : undefined,
+      barcode: line.barcodeSnapshot != null ? String(line.barcodeSnapshot) : undefined,
+      active: line.activeSnapshot === false ? false : true,
+    })
   }
-  return { ...warehouse, items }
+  return { ok: true, warehouse: { ...warehouse, items } }
+}
+
+/** Apply ensureItemCatalog or return a G2 fail payload. */
+function withEnsuredItemCatalog(warehouse, lines) {
+  const ensured = ensureItemCatalog(warehouse, lines)
+  if (!ensured.ok) return fail(ensured.error, 400, { itemId: ensured.itemId })
+  return { ok: true, warehouse: ensured.warehouse }
 }
 
 function accountingStatus(warehouse, warehouseId) {
@@ -810,8 +836,13 @@ function applyDraftSave(warehouse, command, actor, now) {
   const existing = warehouse.documents.find((d) => d.id === documentId)
   if (existing && existing.status !== 'draft') return fail('posted_immutable', 409)
 
-  warehouse = ensureItemCatalog(warehouse, linesIn.lines)
-  const number =
+  const __catalog = withEnsuredItemCatalog(warehouse, linesIn.lines)
+
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+    const number =
     existing?.number ||
     nextServerDocumentNumber(warehouse.documents, type, warehouseId, date)
 
@@ -930,8 +961,13 @@ function applyDocumentPost(warehouse, command, actor, now, { existingDraft }) {
   // PHASE G5.1 — after procurement domain activation, purchase receipts go through G5 only.
   // (Checked by callers that pass critical payload; see applyDocumentPostWithCriticalGate.)
 
-  warehouse = ensureItemCatalog(warehouse, lines)
+  const __catalog = withEnsuredItemCatalog(warehouse, lines)
 
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+  
   const allowNegative =
     command.allowNegativeEmergency === true &&
     isSysadminActor(actor) &&
@@ -1013,8 +1049,13 @@ function applyTransferPost(warehouse, command, actor, now) {
   const linesIn = sanitizeDocumentLines(command.lines ?? [])
   if (!linesIn.ok) return fail(linesIn.error, 400)
 
-  warehouse = ensureItemCatalog(warehouse, linesIn.lines)
-  const stock = checkIssueStock(warehouse, fromId, linesIn.lines)
+  const __catalog = withEnsuredItemCatalog(warehouse, linesIn.lines)
+
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+    const stock = checkIssueStock(warehouse, fromId, linesIn.lines)
   if (!stock.ok) return fail(stock.error, 400, { shortages: stock.shortages })
 
   const pairId = crypto.randomUUID()
@@ -1135,8 +1176,13 @@ function applyInventoryPost(warehouse, command, actor, now) {
     })
   }
 
-  warehouse = ensureItemCatalog(warehouse, deltaLines)
-  const number = nextServerDocumentNumber(warehouse.documents, 'inventory', warehouseId, date)
+  const __catalog = withEnsuredItemCatalog(warehouse, deltaLines)
+
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+    const number = nextServerDocumentNumber(warehouse.documents, 'inventory', warehouseId, date)
   const documentId = `wh-doc-${crypto.randomUUID()}`
   const doc = {
     id: documentId,
@@ -1203,8 +1249,13 @@ function applyOpeningPost(warehouse, command, actor, now) {
     }
   }
 
-  warehouse = ensureItemCatalog(warehouse, linesIn.lines)
-  const number = nextServerDocumentNumber(warehouse.documents, 'receipt', warehouseId, date)
+  const __catalog = withEnsuredItemCatalog(warehouse, linesIn.lines)
+
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+    const number = nextServerDocumentNumber(warehouse.documents, 'receipt', warehouseId, date)
   const documentId = `wh-doc-${crypto.randomUUID()}`
   const doc = {
     id: documentId,
@@ -1259,8 +1310,13 @@ function applyDailyIssuePost(warehouse, command, actor, now) {
   const linesIn = sanitizeDocumentLines(command.lines ?? [])
   if (!linesIn.ok) return fail(linesIn.error, 400)
 
-  warehouse = ensureItemCatalog(warehouse, linesIn.lines)
-  const stock = checkIssueStock(warehouse, warehouseId, linesIn.lines)
+  const __catalog = withEnsuredItemCatalog(warehouse, linesIn.lines)
+
+  if (!__catalog.ok) return __catalog
+
+  warehouse = __catalog.warehouse
+
+    const stock = checkIssueStock(warehouse, warehouseId, linesIn.lines)
   if (!stock.ok) return fail(stock.error, 400, { shortages: stock.shortages })
 
   const number = nextServerDocumentNumber(warehouse.documents, 'issue', warehouseId, date)
@@ -1332,8 +1388,10 @@ function applyExcelImportDrafts(warehouse, command, actor, now) {
   for (const receipt of receipts) {
     const linesIn = sanitizeDocumentLines(receipt.lines ?? [])
     if (!linesIn.ok) return fail(linesIn.error, 400)
-    next = ensureItemCatalog(next, linesIn.lines)
-    const number = nextServerDocumentNumber(next.documents, 'receipt', warehouseId, date)
+    const __catalog = withEnsuredItemCatalog(next, linesIn.lines)
+    if (!__catalog.ok) return __catalog
+    next = __catalog.warehouse
+        const number = nextServerDocumentNumber(next.documents, 'receipt', warehouseId, date)
     const documentId = `wh-doc-${crypto.randomUUID()}`
     const doc = {
       id: documentId,

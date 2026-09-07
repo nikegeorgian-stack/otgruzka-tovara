@@ -6,6 +6,7 @@ import { WarehouseInventoryRevisionModal } from '@/components/warehouse/Warehous
 import { WarehouseOpeningInventoryPanel } from '@/components/warehouse/WarehouseOpeningInventoryPanel'
 import { useI18n } from '@/context/I18nContext'
 import { isWarehouseAccountingActive } from '@/lib/warehouse/accountingStatus'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import { computeAllBalances, formatQty } from '@/lib/warehouse/stock'
 import { isDocumentLockedByOther } from '@/lib/warehouse/documentLock'
 import type { WarehouseDocument } from '@/lib/warehouse/types'
@@ -79,7 +80,7 @@ export function WarehouseInventoryTab({
     () =>
       warehouse.items
         .filter((i) => i.active && (!whId || i.warehouseId === whId))
-        .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        .sort((a, b) => compareWarehouseItemsForSort(a, b, 'ru')),
     [warehouse.items, whId],
   )
 

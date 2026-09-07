@@ -4,6 +4,7 @@ import { WarehouseRevisionRow, type RevisionRowCommit } from '@/components/wareh
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
 import { nextDocumentNumber } from '@/lib/warehouse/docNumbering'
+import { compareWarehouseItemsForSort } from '@/lib/warehouse/catalogueIdentity'
 import type { SaveDraftInput, PostDocumentResult } from '@/lib/warehouse/documents'
 import { computeAllBalances } from '@/lib/warehouse/stock'
 import type { WarehouseDocument, WarehouseItem, WarehouseStore } from '@/lib/warehouse/types'
@@ -149,7 +150,7 @@ ref,
     () =>
       warehouse.items
         .filter((i) => i.active && (!whId || i.warehouseId === whId))
-        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ru')),
+        .sort((a, b) => a.sortOrder - b.sortOrder || compareWarehouseItemsForSort(a, b, 'ru')),
     [warehouse.items, whId],
   )
 

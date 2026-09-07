@@ -118,11 +118,16 @@ export function preparePurchaseOrderReceipt(
     }
     itemByLine.set(line.id, itemId)
     receivedAdd.set(line.id, qty)
+    const catalogItem = warehouse.items.find((i) => i.id === itemId)
     docLines.push({
       itemId,
       quantity: qty,
-      inputUnit: line.unit || undefined,
+      inputUnit: line.unit || catalogItem?.unit || undefined,
       unitPrice: line.unitPrice,
+      // G1/G2 critical may lack SQL-only cards; snapshots protect identity (R2.9H).
+      itemNameSnapshot: catalogItem?.name,
+      itemCodeSnapshot: catalogItem?.internalCode,
+      unitSnapshot: catalogItem?.unit || line.unit || undefined,
     })
   }
 
