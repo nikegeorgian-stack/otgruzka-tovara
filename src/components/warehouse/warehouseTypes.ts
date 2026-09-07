@@ -214,7 +214,7 @@ export type WarehousePageProps = {
     runId: string,
     keeper?: { id?: string; name?: string },
     options?: { allowNegativeStock?: boolean },
-  ) => PostBatchMixResult
+  ) => PostBatchMixResult | Promise<PostBatchMixResult>
   onRejectFormulationBatch?: (
     runId: string,
     keeper?: { id?: string; name?: string },

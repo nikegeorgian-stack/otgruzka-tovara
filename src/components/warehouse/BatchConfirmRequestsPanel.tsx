@@ -17,7 +17,7 @@ type Props = {
     runId: string,
     keeper?: { id?: string; name?: string },
     options?: { allowNegativeStock?: boolean },
-  ) => PostBatchMixResult
+  ) => PostBatchMixResult | Promise<PostBatchMixResult>
   onReject: (
     runId: string,
     keeper?: { id?: string; name?: string },
@@ -71,7 +71,7 @@ export function BatchConfirmRequestsPanel({
     }
     const ok = await confirm({ message, danger: shortages.length > 0 })
     if (!ok) return
-    const res = onConfirm(run.id, { id: keeperId, name: keeperName }, { allowNegativeStock })
+    const res = await onConfirm(run.id, { id: keeperId, name: keeperName }, { allowNegativeStock })
     setNotice(
       res.ok
         ? t('warehouse.batchConfirm.confirmedOk')

@@ -50,6 +50,7 @@ import {
   buildBatchLotsFromMovements,
   ordinaryAvailableQty,
 } from './_g2BatchAllocation.mjs'
+import { applyBatchMixConfirmCritical } from './_g2BatchMixConfirm.mjs'
 
 function ok(data = {}) {
   return { ok: true, ...data }
@@ -701,6 +702,7 @@ export async function executeG2Command(input) {
     'warehouse.document.cancel': G2_CAPS.DOCUMENT_CANCEL,
     'warehouse.period.close': G2_CAPS.PERIOD_CLOSE,
     'warehouse.period.reopen': G2_CAPS.PERIOD_REOPEN,
+    'warehouse.batchMix.confirm': G2_CAPS.DOCUMENT_POST,
   }
   const needed = capabilityByCommand[commandType]
   if (!needed) return fail('unknown_command', 400)
@@ -777,6 +779,8 @@ export async function executeG2Command(input) {
     resultPayload = applyPeriodClose(warehouse, rawCommand, actor, now)
   } else if (commandType === 'warehouse.period.reopen') {
     resultPayload = applyPeriodReopen(warehouse, rawCommand, actor, now)
+  } else if (commandType === 'warehouse.batchMix.confirm') {
+    resultPayload = applyBatchMixConfirmCritical(warehouse, rawCommand, actor, now)
   } else {
     return fail('unknown_command', 400)
   }

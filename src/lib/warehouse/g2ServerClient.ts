@@ -91,6 +91,7 @@ export type G2CommandType =
   | 'warehouse.document.cancel'
   | 'warehouse.period.close'
   | 'warehouse.period.reopen'
+  | 'warehouse.batchMix.confirm'
 
 export async function g2WarehouseCommand<T = Record<string, unknown>>(input: {
   storeId?: string

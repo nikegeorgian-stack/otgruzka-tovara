@@ -94,9 +94,11 @@ export function planFormulationBatch(
   const stockShortages: string[] = []
 
   for (const c of recipe.components) {
-    if (isFormulationWaterComponent(c)) continue
     const baseKg = componentConsumeKg(c)
     if (baseKg <= 0) continue
+    // R2.9I: water with warehouseItemId is issued like other components;
+    // unbound process water stays off the warehouse plan.
+    if (isFormulationWaterComponent(c) && !c.warehouseItemId) continue
     const consumeKg = Math.round(baseKg * scaleFactor * 1000) / 1000
     if (!c.warehouseItemId) {
       blockingShortages.push(`${c.name}: не привязан к складу`)
@@ -121,7 +123,7 @@ export function planFormulationBatch(
   }
 
   for (const c of recipe.components) {
-    if (isFormulationWaterComponent(c)) continue
+    if (isFormulationWaterComponent(c) && !c.warehouseItemId) continue
     const consume = componentConsumeKg(c)
     if (consume > 0 && !c.warehouseItemId) {
       blockingShortages.push(`${c.name}: нет позиции склада`)
@@ -395,6 +397,137 @@ export function confirmBatchMix(
     warehouse: wh,
     result: { ok: true, run: confirmedRun },
   }
+}
+
+/** Payload for G2 `warehouse.batchMix.confirm` (critical CAS). */
+export function buildBatchMixConfirmCommand(
+  run: FormulationBatchRun,
+  recipe?: FormulationRecipe | null,
+): {
+  batchRunId: string
+  warehouseId: string
+  date: string
+  issueNumber: string
+  receiptNumber: string
+  issueLines: Array<{ itemId: string; quantity: number }>
+  receiptLines: Array<{ itemId: string; quantity: number }>
+  comment: string
+} {
+  const mixComment = [
+    `Замес куб · ${run.recipeCode}`,
+    `${run.targetVolumeL} л`,
+    run.shiftBrigade,
+    run.mixedByName,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const issueLines = run.lines.map((l) => ({
+    itemId: l.warehouseItemId,
+    quantity: l.consumeKg,
+  }))
+  // Orphan / legacy pending runs may omit linked warehouse water — append from recipe.
+  if (recipe) {
+    const scale = run.scaleFactor > 0 ? run.scaleFactor : 1
+    for (const c of recipe.components) {
+      if (!isFormulationWaterComponent(c) || !c.warehouseItemId) continue
+      if (issueLines.some((l) => l.itemId === c.warehouseItemId)) continue
+      const qty = Math.round(componentConsumeKg(c) * scale * 1000) / 1000
+      if (qty > 0) issueLines.push({ itemId: c.warehouseItemId, quantity: qty })
+    }
+  }
+  return {
+    batchRunId: run.id,
+    warehouseId: run.warehouseId,
+    date: run.mixedAt,
+    issueNumber: `${run.documentNumber}-Р`,
+    receiptNumber: `${run.documentNumber}-П`,
+    issueLines,
+    receiptLines: [{ itemId: run.outputWarehouseItemId, quantity: run.outputKg }],
+    comment: mixComment,
+  }
+}
+
+export type BatchMixWarehouseLedgerState = 'absent' | 'complete' | 'partial'
+
+/** Classify posted batch_issue / batch_receipt pair for a run (orphan recovery guard). */
+export function classifyBatchMixWarehouseState(
+  warehouse: WarehouseStore,
+  batchRunId: string,
+): {
+  state: BatchMixWarehouseLedgerState
+  issueDocumentId?: string
+  receiptDocumentId?: string
+  issueMovementCount: number
+  receiptMovementCount: number
+} {
+  const issue = (warehouse.documents ?? []).find(
+    (d) => d.batchRunId === batchRunId && d.docRole === 'batch_issue' && d.status === 'posted',
+  )
+  const receipt = (warehouse.documents ?? []).find(
+    (d) => d.batchRunId === batchRunId && d.docRole === 'batch_receipt' && d.status === 'posted',
+  )
+  const issueMovementCount = issue
+    ? (warehouse.movements ?? []).filter((m) => m.documentId === issue.id && m.type === 'issue').length
+    : 0
+  const receiptMovementCount = receipt
+    ? (warehouse.movements ?? []).filter((m) => m.documentId === receipt.id && m.type === 'receipt')
+        .length
+    : 0
+  if (issue && receipt && issueMovementCount > 0 && receiptMovementCount > 0) {
+    return {
+      state: 'complete',
+      issueDocumentId: issue.id,
+      receiptDocumentId: receipt.id,
+      issueMovementCount,
+      receiptMovementCount,
+    }
+  }
+  if (issue || receipt || issueMovementCount > 0 || receiptMovementCount > 0) {
+    return {
+      state: 'partial',
+      issueDocumentId: issue?.id,
+      receiptDocumentId: receipt?.id,
+      issueMovementCount,
+      receiptMovementCount,
+    }
+  }
+  return { state: 'absent', issueMovementCount: 0, receiptMovementCount: 0 }
+}
+
+/** Attach warehouse doc IDs after authoritative critical post (no local warehouse mutate). */
+export function attachBatchMixConfirmedDocs(
+  formulations: FormulationStore,
+  input: ConfirmBatchInput & {
+    issueDocumentId: string
+    receiptDocumentId: string
+    /** Orphan recovery: run may already be confirmed without ledger docs. */
+    allowAlreadyConfirmed?: boolean
+  },
+): { formulations: FormulationStore; result: PostBatchMixResult } {
+  const run = (formulations.batchRuns ?? []).find((r) => r.id === input.runId)
+  if (!run) {
+    return { formulations, result: { ok: false, error: 'batch_not_found' } }
+  }
+  const status = run.status ?? 'confirmed'
+  if (status === 'pending' || (input.allowAlreadyConfirmed && status === 'confirmed')) {
+    const confirmedRun: FormulationBatchRun = {
+      ...run,
+      status: 'confirmed',
+      issueDocumentId: input.issueDocumentId,
+      receiptDocumentId: input.receiptDocumentId,
+      confirmedAt: run.confirmedAt ?? new Date().toISOString(),
+      confirmedBy: input.keeperId ?? run.confirmedBy,
+      confirmedByName: input.keeperName ?? run.confirmedByName,
+    }
+    return {
+      formulations: {
+        ...formulations,
+        batchRuns: (formulations.batchRuns ?? []).map((r) => (r.id === run.id ? confirmedRun : r)),
+      },
+      result: { ok: true, run: confirmedRun },
+    }
+  }
+  return { formulations, result: { ok: false, error: 'batch_not_pending' } }
 }
 
 /** Кладовщик ОТКЛОНЯЕТ заявку на замес (склад не затрагивается). */
