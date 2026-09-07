@@ -6,6 +6,7 @@ import {
   confirmBatchMix,
   createPendingBatchMix,
   rejectBatchMix,
+  withBatchMixCatalogueSnapshots,
   type PostBatchMixInput,
   type PostBatchMixOptions,
   type PostBatchMixResult,
@@ -89,9 +90,12 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
         sourceId: runId,
         revision: 'confirm',
       })
-      const command = buildBatchMixConfirmCommand(
-        run,
-        store.formulations.recipes.find((r) => r.id === run.recipeId),
+      const command = withBatchMixCatalogueSnapshots(
+        buildBatchMixConfirmCommand(
+          run,
+          store.formulations.recipes.find((r) => r.id === run.recipeId),
+        ),
+        store.warehouse.items,
       )
       const server = await g2WarehouseCommand({
         idempotencyKey: groupId,
@@ -190,9 +194,12 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
         sourceId: runId,
         revision: 'confirm',
       })
-      const command = buildBatchMixConfirmCommand(
-        run,
-        store.formulations.recipes.find((r) => r.id === run.recipeId),
+      const command = withBatchMixCatalogueSnapshots(
+        buildBatchMixConfirmCommand(
+          run,
+          store.formulations.recipes.find((r) => r.id === run.recipeId),
+        ),
+        store.warehouse.items,
       )
       const server = await g2WarehouseCommand({
         idempotencyKey: groupId,

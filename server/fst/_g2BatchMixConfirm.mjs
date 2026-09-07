@@ -133,15 +133,34 @@ function buildReceiptMovements(doc, now, actorUid) {
   return { ok: true, movements: out }
 }
 
-function requireKnownItems(warehouse, lines) {
+function ensureItemCatalog(warehouse, lines) {
+  const items = [...(warehouse.items ?? [])]
   for (const line of lines) {
     const itemId = String(line.itemId ?? '').trim()
-    if (!itemId) return fail('invalid_lines', 400)
-    if (!(warehouse.items ?? []).some((i) => i.id === itemId)) {
-      return fail('unknown_item', 400, { itemId })
+    if (!itemId) continue
+    const existing = items.find((i) => i.id === itemId)
+    if (existing) continue
+    const name = String(line.itemNameSnapshot ?? '').trim()
+    const unit = String(line.unitSnapshot ?? line.inputUnit ?? '').trim()
+    if (!name || name === itemId || !unit) {
+      return { ok: false, error: 'unknown_item_incomplete_snapshot', itemId }
     }
+    items.push({
+      id: itemId,
+      name,
+      internalCode: String(line.itemCodeSnapshot ?? '').trim(),
+      unit,
+      sku: line.skuSnapshot != null ? String(line.skuSnapshot) : undefined,
+      categoryId: line.categoryIdSnapshot != null ? String(line.categoryIdSnapshot) : undefined,
+      barcode: line.barcodeSnapshot != null ? String(line.barcodeSnapshot) : undefined,
+      active: line.activeSnapshot === false ? false : true,
+    })
   }
-  return ok()
+  return { ok: true, warehouse: { ...warehouse, items } }
+}
+
+function requireKnownOrEnsure(warehouse, lines) {
+  return ensureItemCatalog(warehouse, lines)
 }
 
 /**
@@ -196,10 +215,12 @@ export function applyBatchMixConfirmCritical(warehouse, command, actor, now) {
     return fail('invalid_lines', 400)
   }
 
-  const knownIssue = requireKnownItems(warehouse, issueIn.lines)
-  if (!knownIssue.ok) return knownIssue
-  const knownReceipt = requireKnownItems(warehouse, receiptIn.lines)
-  if (!knownReceipt.ok) return knownReceipt
+  const knownIssue = requireKnownOrEnsure(warehouse, issueIn.lines)
+  if (!knownIssue.ok) return fail(knownIssue.error, 400, { itemId: knownIssue.itemId })
+  warehouse = knownIssue.warehouse
+  const knownReceipt = requireKnownOrEnsure(warehouse, receiptIn.lines)
+  if (!knownReceipt.ok) return fail(knownReceipt.error, 400, { itemId: knownReceipt.itemId })
+  warehouse = knownReceipt.warehouse
 
   const stock = checkIssueStock(warehouse, warehouseId, issueIn.lines)
   if (!stock.ok) return fail(stock.error, 400, { shortages: stock.shortages })

@@ -447,6 +447,42 @@ export function buildBatchMixConfirmCommand(
   }
 }
 
+/** Enrich G2 batch-mix lines with catalogue snapshots for items missing in critical. */
+export function withBatchMixCatalogueSnapshots(
+  command: ReturnType<typeof buildBatchMixConfirmCommand>,
+  warehouseItems: Array<{
+    id: string
+    name?: string
+    unit?: string
+    internalCode?: string
+    sku?: string
+    categoryId?: string
+    barcode?: string
+    active?: boolean
+  }>,
+): ReturnType<typeof buildBatchMixConfirmCommand> {
+  const byId = new Map(warehouseItems.map((i) => [i.id, i]))
+  const stamp = <T extends { itemId: string }>(line: T) => {
+    const item = byId.get(line.itemId)
+    if (!item) return line
+    return {
+      ...line,
+      itemNameSnapshot: item.name,
+      unitSnapshot: item.unit,
+      itemCodeSnapshot: item.internalCode,
+      skuSnapshot: item.sku,
+      categoryIdSnapshot: item.categoryId,
+      barcodeSnapshot: item.barcode,
+      activeSnapshot: item.active !== false,
+    }
+  }
+  return {
+    ...command,
+    issueLines: command.issueLines.map(stamp),
+    receiptLines: command.receiptLines.map(stamp),
+  }
+}
+
 export type BatchMixWarehouseLedgerState = 'absent' | 'complete' | 'partial'
 
 /** Classify posted batch_issue / batch_receipt pair for a run (orphan recovery guard). */
