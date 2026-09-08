@@ -471,9 +471,13 @@ function coerceG5SalesOrderRow(
           finishedProductId: String(
             ln.finishedProductId ?? prevLine?.finishedProductId ?? '',
           ) || undefined,
-          productName: prevLine?.productName ?? '',
+          productName:
+            String(ln.productNameSnapshot ?? ln.productName ?? prevLine?.productName ?? '') ||
+            prevLine?.productName ||
+            '',
           category: prevLine?.category ?? 'ratl1',
           qtyMp,
+          unit: String(ln.unit ?? prevLine?.unit ?? '') || undefined,
           productionOrderIds: Array.isArray(ln.linkedProductionOrderIds)
             ? (ln.linkedProductionOrderIds as string[]).filter(Boolean)
             : prevLine?.productionOrderIds ?? [],

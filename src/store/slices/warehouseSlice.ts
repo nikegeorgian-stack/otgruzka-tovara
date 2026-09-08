@@ -1401,6 +1401,15 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
             if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
             const lineShipmentId =
               usages.usages.length === 1 ? shipmentId : `${shipmentId}::${usage.lineId}`
+            const { resolveSalesShipmentLinkIds } = await import('@/lib/sales/loadingLink')
+            const link = resolveSalesShipmentLinkIds(
+              storeNow.sales.orders,
+              shipment,
+              lot.finishedProductId,
+            )
+            if (!link.salesOrderId || !link.salesLineId) {
+              return { ok: false as const, error: 'invalid_input' }
+            }
             const server = await g5SalesShipmentPost({
               idempotencyKey: `g5-ship-post-${lineShipmentId}`,
               command: {
@@ -1410,7 +1419,8 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
                 lotId: usage.lotId,
                 quantity: usage.quantity,
                 warehouseId: shipment.warehouseId || lot.warehouseId,
-                salesOrderId: shipment.salesOrderId,
+                salesOrderId: link.salesOrderId,
+                salesLineId: link.salesLineId,
                 date: shipment.date,
                 counterpartyId: shipment.counterpartyId,
                 keeperId: args?.keeperId ?? shipment.keeperId,

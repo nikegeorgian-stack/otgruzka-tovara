@@ -30,11 +30,25 @@ function buildShipmentLine(line: SalesOrderLine, fp?: FinishedProduct): LoadingS
   let areaM2 = line.qtyAreaM2 && line.qtyAreaM2 > 0 ? Number(line.qtyAreaM2) : 0
   let rolls = line.rolls && line.rolls > 0 ? Number(line.rolls) : 0
 
-  // G5-hydrated lines often carry only qtyMp + finishedProductId.
-  if (areaM2 <= 0 && line.qtyMp > 0 && width > 0) {
-    areaM2 = Math.round(line.qtyMp * width * 1000) / 1000
+  // G5-hydrated lines often carry only qtyMp + finishedProductId (+ unit).
+  if (areaM2 <= 0 && line.qtyMp > 0) {
+    const unit = (line.unit || '').toLowerCase()
+    if (unit === 'm2' || unit === 'м2' || unit === 'sqm') {
+      areaM2 = Number(line.qtyMp)
+    } else if (width > 0) {
+      areaM2 = Math.round(line.qtyMp * width * 1000) / 1000
+    } else {
+      areaM2 = Number(line.qtyMp)
+    }
   }
-  if (rolls <= 0 && line.qtyMp > 0) {
+  if (rolls <= 0 && areaM2 > 0 && width > 0) {
+    const mpr = fp?.metersPerRoll && fp.metersPerRoll > 0 ? Number(fp.metersPerRoll) : 0
+    const areaPerFullRoll = mpr > 0 ? mpr * width : 0
+    rolls =
+      areaPerFullRoll > 0
+        ? Math.max(1, Math.ceil(areaM2 / areaPerFullRoll - 1e-9))
+        : 1
+  } else if (rolls <= 0 && line.qtyMp > 0) {
     const mpr = fp?.metersPerRoll && fp.metersPerRoll > 0 ? Number(fp.metersPerRoll) : 0
     rolls = mpr > 0 ? Math.max(1, Math.ceil(line.qtyMp / mpr)) : 1
   }
@@ -182,6 +196,36 @@ export function collectOrderLoadingShipments(
     byLineId,
     all,
     allIds: [...new Set(all.map((s) => s.id))],
+  }
+}
+
+/**
+ * G5 sales.shipment.post requires salesOrderId + salesLineId.
+ * Warehouse UI may only put the order UUID into orderNo.
+ */
+export function resolveSalesShipmentLinkIds(
+  salesOrders: SalesOrder[],
+  shipment: {
+    salesOrderId?: string
+    salesLineId?: string
+    orderNo?: string
+  },
+  finishedProductId?: string,
+): { salesOrderId?: string; salesLineId?: string } {
+  let salesOrderId = (shipment.salesOrderId || '').trim()
+  const orderNo = (shipment.orderNo || '').trim()
+  if (!salesOrderId && orderNo && salesOrders.some((o) => o.id === orderNo)) {
+    salesOrderId = orderNo
+  }
+  let salesLineId = (shipment.salesLineId || '').trim()
+  if (salesOrderId && !salesLineId && finishedProductId) {
+    const order = salesOrders.find((o) => o.id === salesOrderId)
+    const line = order?.lines.find((l) => l.finishedProductId === finishedProductId)
+    salesLineId = line?.id || ''
+  }
+  return {
+    salesOrderId: salesOrderId || undefined,
+    salesLineId: salesLineId || undefined,
   }
 }
 

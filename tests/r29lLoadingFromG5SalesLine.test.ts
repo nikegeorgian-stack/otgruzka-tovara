@@ -36,6 +36,7 @@ describe('R2.9L loading from G5 sales line', () => {
       active: true,
       rollWidthM: 1.6,
       grammageGsm: 160,
+      metersPerRoll: 50,
       createdAt: '2026-09-08T00:00:00.000Z',
       updatedAt: '2026-09-08T00:00:00.000Z',
     } as FinishedProduct
@@ -57,6 +58,7 @@ describe('R2.9L loading from G5 sales line', () => {
           productName: '',
           category: 'ratl1',
           qtyMp: 12.5,
+          unit: 'm2',
           productionOrderIds: [],
           progress: emptyLineProgress(12.5),
         },
@@ -72,5 +74,8 @@ describe('R2.9L loading from G5 sales line', () => {
     expect(input!.lines[0]!.rolls).toBeGreaterThan(0)
     expect(input!.lines[0]!.rollWidthM).toBe(1.6)
     expect(input!.salesOrderId).toBe(order.id)
+    expect(input!.salesLineId).toBe(order.lines[0]!.id)
+    // unit=m2 → quantity is area, not linear meters
+    expect(input!.lines[0]!.rolls * input!.lines[0]!.areaPerRollM2).toBeCloseTo(12.5, 5)
   })
 })
