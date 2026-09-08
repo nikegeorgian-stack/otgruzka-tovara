@@ -425,11 +425,12 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
                 domainMeta: g1.data.domainMeta,
               })
               // Authoritative G5 sales hydrate — soft FstStore.sales must not shadow critical orders.
-              if (salesPlanningActive && Array.isArray(g1.data.sales?.orders)) {
+              const g1Sales = (g1.data as { sales?: { orders?: unknown[] } }).sales
+              if (salesPlanningActive && Array.isArray(g1Sales?.orders)) {
                 next = mirrorG5Ack(next, {
                   salesPlanningActive: true,
                   replaceSalesOrders: true,
-                  sales: g1.data.sales,
+                  sales: g1Sales,
                 })
               }
             }
