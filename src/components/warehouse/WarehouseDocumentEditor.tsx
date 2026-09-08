@@ -288,8 +288,22 @@ ref,
     [sortedLocations, docWarehouseId],
   )
   const pickerItems = useMemo(
-    () => filterItemsForDocumentPicker(activeItems, warehouse.categories, docWarehouseId, docLocation),
-    [activeItems, warehouse.categories, docWarehouseId, docLocation],
+    () =>
+      filterItemsForDocumentPicker(
+        activeItems,
+        warehouse.categories,
+        docWarehouseId,
+        docLocation,
+        { movements: warehouse.movements, documents: warehouse.documents },
+      ),
+    [
+      activeItems,
+      warehouse.categories,
+      warehouse.movements,
+      warehouse.documents,
+      docWarehouseId,
+      docLocation,
+    ],
   )
   const selectedCounterparty = useMemo(
     () => counterparties.find((c) => c.id === counterpartyId),

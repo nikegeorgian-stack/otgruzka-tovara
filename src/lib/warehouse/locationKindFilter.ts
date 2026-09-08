@@ -1,8 +1,10 @@
 import type {
   WarehouseCategory,
+  WarehouseDocument,
   WarehouseItem,
   WarehouseLocation,
   WarehouseLocationKind,
+  StockMovement,
 } from './types'
 
 /** Эвристика: какие названия категорий типичны для зоны склада */
@@ -37,16 +39,62 @@ export function filterItemsByLocationKind(
   })
 }
 
+/**
+ * Item ids that have authoritative G2 activity on a warehouse
+ * (movements and/or document lines) — used for legacy items with no warehouseId.
+ */
+export function collectItemIdsWithWarehouseEvidence(
+  warehouseId: string,
+  evidence: {
+    movements?: Pick<StockMovement, 'itemId' | 'warehouseId'>[]
+    documents?: Pick<WarehouseDocument, 'warehouseId' | 'lines'>[]
+  },
+): Set<string> {
+  const ids = new Set<string>()
+  for (const m of evidence.movements ?? []) {
+    if (m.warehouseId === warehouseId && m.itemId) ids.add(m.itemId)
+  }
+  for (const d of evidence.documents ?? []) {
+    if (d.warehouseId !== warehouseId) continue
+    for (const line of d.lines ?? []) {
+      if (line.itemId) ids.add(line.itemId)
+    }
+  }
+  return ids
+}
+
+/** Whether an item may appear in the document picker for the selected warehouse. */
+export function itemAllowedForDocumentWarehouse(
+  item: WarehouseItem,
+  warehouseId: string | undefined,
+  legacyAllowedIds?: Set<string>,
+): boolean {
+  if (!warehouseId) return true
+  if (item.warehouseId === warehouseId) return true
+  if (item.warehouseId) return false
+  return legacyAllowedIds?.has(item.id) === true
+}
+
+export type DocumentPickerWarehouseEvidence = {
+  movements?: Pick<StockMovement, 'itemId' | 'warehouseId'>[]
+  documents?: Pick<WarehouseDocument, 'warehouseId' | 'lines'>[]
+}
+
 export function filterItemsForDocumentPicker(
   items: WarehouseItem[],
   categories: WarehouseCategory[],
   warehouseId: string | undefined,
   location: WarehouseLocation | undefined,
+  evidence?: DocumentPickerWarehouseEvidence,
 ): WarehouseItem[] {
   // На общем складе (other / без kind) — все категории. Доп. склады с типом
   // (химия, ГП…) по-прежнему можно сужать по kind, если задан.
-  let list = items
-  if (warehouseId) list = list.filter((i) => i.warehouseId === warehouseId)
+  // Legacy warehouseId=null: only when G2 movements/docs exist on the selected WH.
+  const legacyAllowed =
+    warehouseId && evidence
+      ? collectItemIdsWithWarehouseEvidence(warehouseId, evidence)
+      : undefined
+  const list = items.filter((i) => itemAllowedForDocumentWarehouse(i, warehouseId, legacyAllowed))
   if (!location?.kind || location.kind === 'other') return list
   return filterItemsByLocationKind(list, categories, location)
 }

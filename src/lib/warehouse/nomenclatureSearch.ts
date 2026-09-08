@@ -24,8 +24,16 @@ export function searchNomenclature(
   const q = normSearch(query)
 
   if (!q) {
+    // Callers that pass a warehouseId should pre-filter eligibility
+    // (see filterItemsForDocumentPicker). Keep legacy unassigned rows that
+    // already survived that gate; never surface another warehouse's items.
     return active
-      .filter((i) => !opts?.warehouseId || i.warehouseId === opts.warehouseId)
+      .filter(
+        (i) =>
+          !opts?.warehouseId ||
+          i.warehouseId === opts.warehouseId ||
+          !i.warehouseId,
+      )
       .slice(0, limit)
   }
 

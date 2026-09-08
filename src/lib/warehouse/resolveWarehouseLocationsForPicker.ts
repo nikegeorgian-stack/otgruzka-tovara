@@ -7,7 +7,7 @@ import type { WarehouseLocation, WarehouseStore } from './types'
 export function resolveWarehouseLocationsForPicker(
   warehouse: Pick<
     WarehouseStore,
-    'locations' | 'documents' | 'movements' | 'accountingByWarehouse'
+    'locations' | 'documents' | 'movements' | 'accountingByWarehouse' | 'items'
   >,
 ): WarehouseLocation[] {
   if (warehouse.locations?.length) {
@@ -23,6 +23,9 @@ export function resolveWarehouseLocationsForPicker(
   }
   for (const a of warehouse.accountingByWarehouse ?? []) {
     if (a.warehouseId) ids.add(String(a.warehouseId))
+  }
+  for (const item of warehouse.items ?? []) {
+    if (item.warehouseId) ids.add(String(item.warehouseId))
   }
   return [...ids].map((id, i) => ({
     id,

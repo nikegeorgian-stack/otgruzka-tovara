@@ -69,6 +69,7 @@ import {
   lowStockItems,
   priceHistoryForItem,
 } from '@/lib/warehouse/stock'
+import { resolveWarehouseLocationsForPicker } from '@/lib/warehouse/resolveWarehouseLocationsForPicker'
 import type {
   StockMovementType,
   WarehouseCategory,
@@ -989,7 +990,7 @@ export function WarehousePage(props: WarehousePageProps) {
           item={editItem}
           isNew={isNew}
           categories={categories}
-          locations={warehouse.locations}
+          locations={resolveWarehouseLocationsForPicker(warehouse)}
           actorRoleId={accessPersona(currentUser)?.roleId}
           onClose={() => setEditItem(null)}
           onSave={(item) => {

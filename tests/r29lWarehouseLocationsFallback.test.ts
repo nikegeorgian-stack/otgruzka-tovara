@@ -27,6 +27,7 @@ describe('R29L resolveWarehouseLocationsForPicker', () => {
       ],
       movements: [],
       accountingByWarehouse: [],
+      items: [],
     })
     expect(locs).toHaveLength(1)
     expect(locs[0].id).toBe('1bc8f872-ded1-4ee9-8ed8-f70d3c54027c')
