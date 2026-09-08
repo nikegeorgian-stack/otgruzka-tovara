@@ -138,6 +138,11 @@ export function resolveAuthoritativeProductionOverlay(input: {
     return {
       production: {
         ...input.legacyProduction,
+        // Authoritative G3 surfaces used by packaging WIP listing / handoffs
+        shiftReports: input.criticalProduction.shiftReports ?? [],
+        wipBatches: input.criticalProduction.wipBatches ?? [],
+        wasteRecords: input.criticalProduction.wasteRecords ?? [],
+        handoffs: input.criticalProduction.handoffs ?? [],
         g3Orders: input.criticalProduction.orders ?? [],
         g3RecipeVersions: input.criticalProduction.recipeVersions ?? [],
         g3ShiftReports: input.criticalProduction.shiftReports ?? [],
