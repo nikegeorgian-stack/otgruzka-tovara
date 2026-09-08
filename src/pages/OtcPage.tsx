@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { OtcAlkaliPanel } from '@/components/otc/OtcAlkaliPanel'
@@ -86,6 +86,7 @@ type Props = {
     originalFilename: string
     mimeType: string
     sizeBytes: number
+    bytes?: ArrayBuffer | Uint8Array
     uploadedBy?: string
   }) => Promise<QcLotAttachment>
   focusTab?: Tab | null
@@ -122,6 +123,9 @@ export function OtcPage({
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>('dash')
   const [notice, setNotice] = useState<string | null>(null)
+  const [attachBusy, setAttachBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingAttachRef = useRef<{ lot: FinishedGoodsLot; kind: QcDocumentKind } | null>(null)
   const [regradeDrafts, setRegradeDrafts] = useState<
     Record<string, { targetFinishedProductId: string; quantity: string }>
   >({})
@@ -185,17 +189,49 @@ export function OtcPage({
     return { key: 'otc.qc.attachPending', attachment }
   }
 
-  async function storeAttachment(lot: FinishedGoodsLot, kind: QcDocumentKind) {
-    const fileName = `${lot.batchNo}-${kind}.pdf`
-    const attachment = await onUpsertQcAttachment({
-      lotId: lot.id,
-      documentKind: kind,
-      originalFilename: fileName,
-      mimeType: 'application/pdf',
-      sizeBytes: 1024,
-      uploadedBy: actor.name,
-    })
-    setNotice(`${lot.batchNo}: ${attachment.displayName}`)
+  function storeAttachment(lot: FinishedGoodsLot, kind: QcDocumentKind) {
+    pendingAttachRef.current = { lot, kind }
+    const input = fileInputRef.current
+    if (!input) {
+      setNotice(t('otc.qc.error'))
+      return
+    }
+    input.value = ''
+    input.click()
+  }
+
+  async function onAttachmentFileChosen(fileList: FileList | null) {
+    const pending = pendingAttachRef.current
+    pendingAttachRef.current = null
+    const file = fileList?.[0]
+    if (!pending || !file) return
+    if (file.type && file.type !== 'application/pdf') {
+      setNotice(t('production.qc.errAttachmentType'))
+      return
+    }
+    setAttachBusy(true)
+    try {
+      const bytes = await file.arrayBuffer()
+      const attachment = await onUpsertQcAttachment({
+        lotId: pending.lot.id,
+        documentKind: pending.kind,
+        originalFilename: file.name || `${pending.lot.batchNo}-${pending.kind}.pdf`,
+        mimeType: 'application/pdf',
+        sizeBytes: bytes.byteLength,
+        bytes,
+        uploadedBy: actor.name,
+      })
+      if (attachment.uploadStatus !== 'stored') {
+        setNotice(t(attachment.uploadStatus === 'failed' ? 'otc.qc.error' : 'otc.qc.attachPending'))
+        return
+      }
+      setNotice(`${pending.lot.batchNo}: ${attachment.displayName}`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'otc.qc.error'
+      setNotice(t(message) !== message ? t(message) : t('otc.qc.error'))
+    } finally {
+      setAttachBusy(false)
+    }
   }
 
   async function handleRelease(lot: FinishedGoodsLot) {
@@ -357,6 +393,15 @@ export function OtcPage({
       )}
       {tab === 'qc' && (
         <div className="space-y-4">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="sr-only"
+            aria-hidden
+            tabIndex={-1}
+            onChange={(e) => void onAttachmentFileChosen(e.target.files)}
+          />
           <section className="rounded-sm border border-grid bg-white p-4 shadow-sm">
             <h3 className="text-sm font-bold uppercase tracking-wide text-ink">
               {t('otc.qc.title')}
@@ -396,10 +441,20 @@ export function OtcPage({
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => storeAttachment(lot, 'passport')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={attachBusy}
+                        onClick={() => storeAttachment(lot, 'passport')}
+                      >
                         {t('otc.qc.storePassport')}
                       </Button>
-                      <Button size="sm" variant="secondary" onClick={() => storeAttachment(lot, 'protocol')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={attachBusy}
+                        onClick={() => storeAttachment(lot, 'protocol')}
+                      >
                         {t('otc.qc.storeProtocol')}
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => handleReview(lot)}>

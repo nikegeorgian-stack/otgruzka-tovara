@@ -4113,6 +4113,7 @@ export const en: Dict = {
   'production.qc.errRegradeQty': 'Enter a valid quantity',
   'production.qc.errAttachmentSize': 'File is too large or empty',
   'production.qc.errAttachmentType': 'Unsupported file type',
+  'production.qc.errAttachmentEmpty': 'Empty file — choose a PDF',
   'production.qc.errAttachmentDeleteState': 'Only draft files can be deleted',
   'production.empty': 'No requests this month',
   'production.monthPlan': 'Monthly plan',

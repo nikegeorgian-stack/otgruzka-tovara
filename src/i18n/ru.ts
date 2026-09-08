@@ -2423,6 +2423,7 @@ export const ru: Dict = {
   'production.qc.errRegradeQty': 'Укажите корректное количество',
   'production.qc.errAttachmentSize': 'Файл слишком большой или пустой',
   'production.qc.errAttachmentType': 'Недопустимый тип файла',
+  'production.qc.errAttachmentEmpty': 'Файл пустой — выберите PDF',
   'production.qc.errAttachmentDeleteState': 'Можно удалять только черновые файлы',
   'otc.chain.title': 'Логическая цепочка',
   'otc.chain.1': 'Партия / образец с производства',

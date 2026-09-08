@@ -212,7 +212,7 @@ export function resolveQcAttachmentAdapter(): QcAttachmentStorageAdapter {
   return createMemoryQcAttachmentAdapter()
 }
 
-function createFailClosedQcAttachmentAdapter(): QcAttachmentStorageAdapter {
+export function createFailClosedQcAttachmentAdapter(): QcAttachmentStorageAdapter {
   return {
     async upload(input) {
       const gate = assertQcAttachmentAllowed(input.documentKind, input.mimeType, input.sizeBytes)

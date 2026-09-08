@@ -2406,6 +2406,7 @@ export const ka: Dict = {
   'production.qc.errRegradeQty': 'მიუთითეთ სწორი რაოდენობა',
   'production.qc.errAttachmentSize': 'ფაილი ძალიან დიდი ან ცარიელია',
   'production.qc.errAttachmentType': 'ფაილის ტიპი დაუშვებელია',
+  'production.qc.errAttachmentEmpty': 'ფაილი ცარიელია — აირჩიეთ PDF',
   'production.qc.errAttachmentDeleteState': 'წაშლა შეიძლება მხოლოდ draft ფაილებისთვის',
   'otc.chain.title': 'ლოგიკური ჯაჭვი',
   'otc.chain.1': 'პარტია / ნიმუში წარმოებიდან',

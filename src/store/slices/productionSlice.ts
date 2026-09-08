@@ -1683,7 +1683,17 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     },
 
     async upsertQcAttachment(input: QcAttachmentUploadInput): Promise<QcLotAttachment> {
-      const attachment = await qcAttachmentAdapter.upload(input)
+      const { isWebQcServerUploadPath, uploadQcAttachmentViaServer } = await import(
+        '@/lib/production/qcServerUpload'
+      )
+      let attachment: QcLotAttachment
+      if (isWebQcServerUploadPath()) {
+        const uploaded = await uploadQcAttachmentViaServer(input)
+        if (!uploaded.ok) throw new Error(uploaded.error)
+        attachment = uploaded.attachment
+      } else {
+        attachment = await qcAttachmentAdapter.upload(input)
+      }
       setStore(
         (s) => {
           const nextAttachments = upsertReportById(s.production.qcAttachments ?? [], attachment)
