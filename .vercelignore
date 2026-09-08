@@ -1,0 +1,13 @@
+# Keep Preview/Production deploys small — local R29 evidence must not upload.
+tmp/
+**/tmp/
+**/*.mkv
+**/*.mp4
+**/*.webm
+agent-transcripts/
+.cursor/context/CHAIN_BRIEF.md
+fst-web/dataconnect/.dataconnect/
+I9CJElw3NZ1yz0p3Eebtnar4L5tRrFqk
+*.pem
+service-account*.json
+secrets/
