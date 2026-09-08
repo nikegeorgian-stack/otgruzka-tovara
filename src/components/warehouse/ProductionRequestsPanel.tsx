@@ -19,10 +19,12 @@ type Props = {
   brigadeNamesKa: Record<string, string>
   keeperName?: string
   onSaveRequest: (r: ProductionRequest) => void
-  onPostRequest: (id: string, postedBy?: string) => {
-    ok: boolean
-    messageKey?: string
-  }
+  onPostRequest: (
+    reqOrId: string | ProductionRequest,
+    postedBy?: string,
+  ) =>
+    | { ok: boolean; messageKey?: string }
+    | Promise<{ ok: boolean; messageKey?: string }>
 }
 
 export function ProductionRequestsPanel({
@@ -37,13 +39,14 @@ export function ProductionRequestsPanel({
   const { t, locale } = useI18n()
   const [editRequest, setEditRequest] = useState<ProductionRequest | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [postingId, setPostingId] = useState<string | null>(null)
 
   const today = new Date().toISOString().slice(0, 10)
 
   const queue = useMemo(
     () =>
       [...requests]
-        .filter((r) => r.status === 'saved')
+        .filter((r) => r.status === 'saved' || r.status === 'pending_post')
         .sort(
           (a, b) =>
             b.date.localeCompare(a.date) ||
@@ -57,14 +60,22 @@ export function ProductionRequestsPanel({
     return line ? (labelRuKa(locale, line.labelRu, line.labelKa)) : id
   }
 
-  function handlePost(req: ProductionRequest) {
-    onSaveRequest(req)
-    const res = onPostRequest(req.id, keeperName)
-    if (res.ok) {
-      setNotice(t('production.post.warehouseOk'))
-      setEditRequest(null)
-    } else {
-      setNotice(t(res.messageKey ?? 'production.post.unknown'))
+  async function handlePost(req: ProductionRequest) {
+    if (postingId) return
+    setPostingId(req.id)
+    setNotice(t('production.post.pending'))
+    try {
+      // Pass full request — post upserts then runs authoritative G3.
+      // Avoid save+sync-post race (false production.post.unknown).
+      const res = await onPostRequest({ ...req, status: 'saved' }, keeperName)
+      if (res.ok) {
+        setNotice(t('production.post.warehouseOk'))
+        setEditRequest(null)
+      } else {
+        setNotice(t(res.messageKey ?? 'production.post.unknown'))
+      }
+    } finally {
+      setPostingId(null)
     }
   }
 
@@ -117,22 +128,26 @@ export function ProductionRequestsPanel({
                 return (
                   <tr key={r.id} className="border-t border-grid">
                     <td className="px-3 py-2 font-mono text-xs">{r.date}</td>
-                    <td className="px-3 py-2">{lineTitle(r.lineId)}</td>
+                    <td className="px-3 py-2">
+                      {lineTitle(r.lineId)}
+                      {r.status === 'pending_post' ? (
+                        <span className="ml-2 text-[10px] font-semibold uppercase text-amber-700">
+                          {t('production.post.pendingBadge')}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-xs">
                       {r.brigadeName
                         ? brigadeLabel(r.brigadeName, brigadeNamesKa, locale)
                         : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {s.planMp}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {s.factMp}
-                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">{s.planMp}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">{s.factMp}</td>
                     <td className="px-3 py-2 text-right">
                       <button
                         type="button"
-                        className="text-xs font-semibold text-teal-700 hover:underline"
+                        className="text-xs font-semibold text-teal-700 hover:underline disabled:opacity-50"
+                        disabled={Boolean(postingId)}
                         onClick={() => setEditRequest(r)}
                       >
                         {t('warehouse.production.fill')}
@@ -157,7 +172,9 @@ export function ProductionRequestsPanel({
             setEditRequest(req)
             setNotice(t('production.savedDraft'))
           }}
-          onPost={handlePost}
+          onPost={(req) => {
+            void handlePost(req)
+          }}
         />
       )}
     </section>

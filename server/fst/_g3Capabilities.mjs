@@ -17,6 +17,8 @@ export const G3_CAPS = Object.freeze({
   SHIFT_EDIT: 'production.shift.edit',
   SHIFT_CONFIRM: 'production.shift.confirm',
   SHIFT_CORRECT: 'production.shift.correct',
+  /** R2.9L — authoritative keeper line post (WH + WIP; pack also FG QC lot). */
+  REQUEST_POST: 'production.request.post',
 })
 
 export function parseLineScope(caps) {

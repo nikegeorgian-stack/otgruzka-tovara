@@ -24,6 +24,7 @@ export type G3CommandType =
   | 'production.shift.confirm'
   | 'production.shift.createCorrection'
   | 'production.shift.confirmCorrection'
+  | 'production.request.post'
   | 'production.read'
 
 export type G3ProductionDomain = {
@@ -34,6 +35,9 @@ export type G3ProductionDomain = {
   wasteRecords?: unknown[]
   handoffs?: unknown[]
   auditLog?: unknown[]
+  packagingReports?: unknown[]
+  finishedGoodsLots?: unknown[]
+  qcDecisions?: unknown[]
 }
 
 export type G3ServerResult<T> =
@@ -141,6 +145,9 @@ export function resolveAuthoritativeProductionOverlay(input: {
         g3WasteRecords: input.criticalProduction.wasteRecords ?? [],
         g3Handoffs: input.criticalProduction.handoffs ?? [],
         g3AuditLog: input.criticalProduction.auditLog ?? [],
+        g3PackagingReports: input.criticalProduction.packagingReports ?? [],
+        finishedGoodsLots: input.criticalProduction.finishedGoodsLots ?? [],
+        g3QcDecisions: input.criticalProduction.qcDecisions ?? [],
         g3CriticalRevision: input.criticalRevision,
         g3ProductionDomainActive: true,
       },

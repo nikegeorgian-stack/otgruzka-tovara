@@ -4410,6 +4410,8 @@ export const ru: Dict = {
   'production.post.noProduct': 'Нет связи с номенклатурой ГП — укажите заказ планировщика',
   'production.post.noLocations': 'Нет складских зон выработки / ГП',
   'production.post.warehouseOk': 'Проведено на склад — остатки обновлены',
+  'production.post.pending': 'Проведение заявки…',
+  'production.post.pendingBadge': 'проводится',
   'production.packYesterdayBtn': 'Упаковка из вчера',
   'production.packYesterdayEmpty': 'Нет проведённой выработки за вчера',
   'production.packYesterdayCreated': 'Заявка упаковки создана — заполните факт и проведите',

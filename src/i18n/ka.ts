@@ -4377,6 +4377,8 @@ export const ka: Dict = {
   'production.post.noProduct': 'არ არის დაკავშირებული ნომენკლატურა',
   'production.post.noLocations': 'არ არის საწყობის ზონები',
   'production.post.warehouseOk': 'საწყობზე ჩაწერილია',
+  'production.post.pending': 'გატარება…',
+  'production.post.pendingBadge': 'მიმდინარე',
   'production.packYesterdayBtn': 'შეფუთვა გუშინდელიდან',
   'production.packYesterdayEmpty': 'გუშინდელი გამომუშავება არ არის',
   'production.packYesterdayCreated': 'შეფუთვის მოთხოვნა შექმნილია',

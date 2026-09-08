@@ -171,14 +171,27 @@ export function listAvailableWipAtPackaging(
   const rows: PackagingWipLine[] = []
 
   for (const doc of warehouse.documents) {
+    const role = String(doc.docRole ?? '')
+    const isWipReceipt =
+      doc.purpose === 'production_wip_receipt' ||
+      role === 'production_wip_receipt' ||
+      role === 'wip_receipt' ||
+      (doc.purpose === 'production_receipt' &&
+        (doc as { isWip?: boolean }).isWip === true)
     if (
       doc.status !== 'posted' ||
-      doc.purpose !== 'production_wip_receipt' ||
-      doc.warehouseId !== packagingLocationId ||
+      !isWipReceipt ||
       !doc.shiftReportId
     ) {
       continue
     }
+    // Accept docs booked on production warehouse with pack location on lines,
+    // or legacy docs where warehouseId itself is the packaging location id.
+    const lineAtPack = doc.lines.some(
+      (l) => String((l as { locationId?: string }).locationId ?? '') === packagingLocationId,
+    )
+    const warehouseIsPack = doc.warehouseId === packagingLocationId
+    if (!lineAtPack && !warehouseIsPack) continue
 
     const shiftReport = reports.get(doc.shiftReportId)
     if (!shiftReport || shiftReport.status !== 'confirmed') continue
@@ -201,7 +214,10 @@ export function listAvailableWipAtPackaging(
       rows.push({
         lineId: line.lineId ?? doc.id,
         shiftReportId: doc.shiftReportId,
-        productionOrderId: shiftReport.productionOrderId,
+        productionOrderId:
+          shiftReport.productionOrderId ||
+          (shiftReport as { orderId?: string }).orderId ||
+          '',
         semiFinishedItemId: line.itemId,
         itemId: line.itemId,
         receiptDocumentId: doc.id,

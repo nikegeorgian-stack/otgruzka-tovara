@@ -13,10 +13,9 @@ describe('R29L G3 activate capability keys', () => {
     expect(G3_CAPS.RECIPE_DRAFT_EDIT).toBe('production.recipe.draft.edit')
   })
 
-  it('alias keys used in broken R29L grant must not equal G3 confirm/edit', () => {
+  it('legacy broken aliases stay out of G3_CAPS; request.post is now real', () => {
     const brokenAliases = [
       'production.request.edit',
-      'production.request.post',
       'production.material.issueToLine',
       'planner.order.edit',
       'formulations.draft.edit',
@@ -25,5 +24,7 @@ describe('R29L G3 activate capability keys', () => {
     for (const alias of brokenAliases) {
       expect(required.has(alias)).toBe(false)
     }
+    expect(G3_CAPS.REQUEST_POST).toBe('production.request.post')
+    expect(required.has('production.request.post')).toBe(true)
   })
 })

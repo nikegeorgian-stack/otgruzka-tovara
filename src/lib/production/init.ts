@@ -260,9 +260,11 @@ export function normalizeProductionRequest(entry: ProductionRequest): Production
     status:
       entry.status === 'posted'
         ? 'posted'
-        : entry.status === 'saved'
-          ? 'saved'
-          : 'draft',
+        : entry.status === 'pending_post'
+          ? 'pending_post'
+          : entry.status === 'saved'
+            ? 'saved'
+            : 'draft',
     savedAt: entry.savedAt,
     postedAt: entry.postedAt,
     postedBy: entry.postedBy,

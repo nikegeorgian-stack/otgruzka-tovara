@@ -134,7 +134,8 @@ export type ProductionRequest = {
   factRows: ProductionFactRow[]
   /** Причины выбраковки */
   defectReasons: string
-  status: 'draft' | 'saved' | 'posted'
+  /** pending_post = in-flight authoritative post; not durable SoT */
+  status: 'draft' | 'saved' | 'pending_post' | 'posted'
   /** Когда производство сохранило в журнал */
   savedAt?: string
   /** Когда кладовщик провёл на склад */

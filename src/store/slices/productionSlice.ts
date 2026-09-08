@@ -25,6 +25,8 @@ import type { ProductionOrder } from '@/lib/planner/types'
 import { newId } from '@/lib/production/files'
 import { normalizeProductionRequest } from '@/lib/production/init'
 import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehouse'
+import { buildProductionConsumeLines } from '@/lib/production/consumeLines'
+import { summarizeRequest } from '@/lib/production/stats'
 import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
 import {
@@ -549,10 +551,217 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       }))
     },
 
-    postProductionRequest(id: string, postedBy?: string) {
+    async postProductionRequest(
+      idOrReq: string | ProductionRequest,
+      postedBy?: string,
+    ): Promise<{ ok: boolean; messageKey?: string }> {
+      const snapshot = typeof idOrReq === 'string' ? null : idOrReq
+      const id = typeof idOrReq === 'string' ? idOrReq : idOrReq.id
+
+      const setRequestStatus = (
+        status: ProductionRequest['status'],
+        extra?: Partial<ProductionRequest>,
+      ) => {
+        setStore((s) => {
+          const base =
+            snapshot && status !== 'posted'
+              ? normalizeProductionRequest({ ...snapshot, ...extra, status })
+              : null
+          const requests = s.production.requests.map((r) => {
+            if (r.id !== id) return r
+            if (base) return normalizeProductionRequest({ ...r, ...base, status, ...extra })
+            return normalizeProductionRequest({ ...r, status, ...extra })
+          })
+          const exists = requests.some((r) => r.id === id)
+          const nextRequests =
+            !exists && base
+              ? [...requests, base]
+              : requests
+          return {
+            ...s,
+            production: { ...s.production, requests: nextRequests },
+          }
+        })
+      }
+
+      const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
+        await import('@/lib/production/g3ServerClient')
+
+      if (isG3WebAuthoritativePath()) {
+        if (!isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)) {
+          const { G3_PRODUCTION_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+          return { ok: false, messageKey: G3_PRODUCTION_INACTIVE }
+        }
+
+        let priorStatus: ProductionRequest['status']
+        if (snapshot) {
+          priorStatus = snapshot.status === 'posted' ? 'posted' : 'saved'
+          setRequestStatus('pending_post', {
+            savedAt: snapshot.savedAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+        } else {
+          const cur = getStore().production.requests.find((r) => r.id === id)
+          if (!cur) return { ok: false, messageKey: 'production.post.unknown' }
+          if (cur.status !== 'saved' && cur.status !== 'pending_post' && cur.status !== 'posted') {
+            return { ok: false, messageKey: 'production.post.notSaved' }
+          }
+          priorStatus = cur.status === 'posted' ? 'posted' : 'saved'
+          setRequestStatus('pending_post')
+        }
+
+        const s = getStore()
+        const req = s.production.requests.find((r) => r.id === id)
+        if (!req) return { ok: false, messageKey: 'production.post.unknown' }
+
+        const orderIds = linkedOrderIdsFromRequest(req)
+        const orderId = orderIds[0] ?? req.orderId ?? ''
+        const order = s.production.planner.orders.find((o) => o.id === orderId)
+        const summary = summarizeRequest(req)
+        const factMp = summary.factMp - (summary.byCategory.defect?.qtyMp ?? 0)
+        const fp = order?.finishedProductId
+          ? s.finishedProducts.items.find((p) => p.id === order.finishedProductId)
+          : undefined
+        const consumeLines = buildProductionConsumeLines(
+          req,
+          s.production.planner.orders,
+          s.finishedProducts.items,
+          s.warehouse.items,
+          s.packagingRecipes,
+          s.formulations.recipes,
+          { movements: s.warehouse.movements, documents: s.warehouse.documents },
+        ).map((l) => ({
+          itemId: l.itemId,
+          quantity: l.quantity,
+          warehouseId: l.warehouseId,
+        }))
+
+        const idempotencyKey = `prod-req-post:${id}`
+        const conf = await g3ProductionCommand({
+          idempotencyKey,
+          commandType: 'production.request.post',
+          command: {
+            requestId: id,
+            lineId: req.lineId,
+            orderId,
+            shiftDate: req.date,
+            shiftSlot: req.shift,
+            outputMp: factMp,
+            outputRolls: Number(req.rawRollQty) || 0,
+            semiFinishedItemId: order?.semiFinishedItemId ?? fp?.warehouseItemId,
+            warehouseItemId: fp?.warehouseItemId ?? order?.semiFinishedItemId,
+            finishedProductId: order?.finishedProductId ?? fp?.id,
+            consumeLines,
+          },
+        })
+
+        if (!conf.ok) {
+          setRequestStatus(priorStatus)
+          return {
+            ok: false,
+            messageKey: conf.error || conf.message || 'production.post.unknown',
+          }
+        }
+
+        const now = new Date().toISOString()
+        setStore((prev) => {
+          const mirrored = mirrorG3Ack(
+            prev.warehouse,
+            prev.production as unknown as Record<string, unknown>,
+            {
+              warehouse: conf.data.warehouse as never,
+              production: conf.data.production as never,
+              criticalRevision: conf.data.criticalRevision,
+            },
+          )
+          const updated = normalizeProductionRequest({
+            ...req,
+            status: 'posted',
+            postedAt: now,
+            postedBy,
+            updatedAt: now,
+          })
+          const requests = prev.production.requests.map((r) => (r.id === id ? updated : r))
+          let orders = prev.production.planner.orders
+          const linkedIds = new Set(
+            (updated.orderId ? [updated.orderId] : []).concat(
+              updated.planSegments.map((seg) => seg.orderId).filter(Boolean) as string[],
+            ),
+          )
+          if (linkedIds.size) {
+            orders = orders.map((o) => {
+              if (!linkedIds.has(o.id) || o.recalcMode !== 'auto') return o
+              return recalculateOperationalPlans(o, requests)
+            })
+          }
+          const g3Prod = mirrored.production as Record<string, unknown>
+          const incomingReports = Array.isArray(g3Prod.g3ShiftReports)
+            ? (g3Prod.g3ShiftReports as NonNullable<typeof prev.production.shiftReports>)
+            : Array.isArray(g3Prod.shiftReports)
+              ? (g3Prod.shiftReports as NonNullable<typeof prev.production.shiftReports>)
+              : []
+          const prevReports = prev.production.shiftReports ?? []
+          const mergedReports = [
+            ...prevReports,
+            ...incomingReports.filter((sr) => !prevReports.some((x) => x.id === sr.id)),
+          ]
+          const lots =
+            (g3Prod.finishedGoodsLots as typeof prev.production.finishedGoodsLots) ??
+            prev.production.finishedGoodsLots
+          const next = {
+            ...prev,
+            warehouse: mirrored.warehouse,
+            production: {
+              ...prev.production,
+              requests,
+              planner: { ...prev.production.planner, orders },
+              shiftReports: mergedReports,
+              finishedGoodsLots: lots,
+              g3ProductionDomainActive: true,
+              g3CriticalRevision: conf.data.criticalRevision,
+              g3ShiftReports: g3Prod.g3ShiftReports ?? g3Prod.shiftReports,
+              g3WipBatches: g3Prod.g3WipBatches ?? g3Prod.wipBatches,
+            },
+          }
+          return applyProductionPostToSales(next, updated)
+        }, {
+          origin: 'user',
+          atomic: true,
+          transactionGroupId: warehouseTransactionGroupId({
+            kind: 'production_request',
+            sourceId: id,
+            revision: 'post',
+          }),
+          transactionGroupKind: 'production_request',
+          transactionGroupLabel: 'Проведение заявки производства',
+        })
+        return { ok: true, messageKey: undefined }
+      }
+
+      // Desktop / non-web: local atomic warehouse post (unchanged).
       let result = {
         ok: false as boolean,
         messageKey: 'production.post.unknown' as string | undefined,
+      }
+      if (snapshot) {
+        setStore((s) => {
+          const normalized = normalizeProductionRequest({
+            ...snapshot,
+            status: 'saved',
+            savedAt: snapshot.savedAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          const has = s.production.requests.some((r) => r.id === id)
+          return {
+            ...s,
+            production: {
+              ...s.production,
+              requests: has
+                ? s.production.requests.map((r) => (r.id === id ? normalized : r))
+                : [...s.production.requests, normalized],
+            },
+          }
+        })
       }
       setStore((s) => {
         const req = s.production.requests.find((r) => r.id === id)
@@ -561,7 +770,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           result = { ok: false, messageKey: 'production.post.already' }
           return s
         }
-        if (req.status !== 'saved') {
+        if (req.status !== 'saved' && req.status !== 'pending_post') {
           result = { ok: false, messageKey: 'production.post.notSaved' }
           return s
         }

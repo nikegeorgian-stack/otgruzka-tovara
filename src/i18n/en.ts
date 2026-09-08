@@ -4052,6 +4052,8 @@ export const en: Dict = {
   'production.post.noProduct': 'No link to finished goods — specify planner order',
   'production.post.noLocations': 'No production / FG warehouse zones',
   'production.post.warehouseOk': 'Posted to warehouse — balances updated',
+  'production.post.pending': 'Posting request…',
+  'production.post.pendingBadge': 'posting',
   'production.packYesterdayBtn': 'Packaging from yesterday',
   'production.packYesterdayEmpty': 'No posted output for yesterday',
   'production.packYesterdayCreated': 'Packaging request created — fill actual and post',

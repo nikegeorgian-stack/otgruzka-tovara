@@ -31,9 +31,11 @@ export type WarehousePageProps = {
   productionRequests?: ProductionRequest[]
   onSaveProductionRequest?: (r: ProductionRequest) => void
   onPostProductionRequest?: (
-    id: string,
+    reqOrId: string | import('@/lib/production/types').ProductionRequest,
     postedBy?: string,
-  ) => { ok: boolean; messageKey?: string }
+  ) =>
+    | { ok: boolean; messageKey?: string }
+    | Promise<{ ok: boolean; messageKey?: string }>
   /** Встроенный режим в «Справочники» — только номенклатура */
   embedded?: 'nomenclature'
   /** Облачный кабинет кладовщика — упрощённые вкладки */

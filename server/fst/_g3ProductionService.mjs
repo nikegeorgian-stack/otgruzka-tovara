@@ -38,6 +38,10 @@ import {
 import { G2_CAPS, hasCapability, normalizeCapabilities } from './_g2Capabilities.mjs'
 import { G3_CAPS, defaultProductionCapabilities, hasLineScope, parseLineScope } from './_g3Capabilities.mjs'
 import {
+  applyProductionRequestPost,
+  normalizeRequestPostIdempotencyKey,
+} from './_g3RequestPost.mjs'
+import {
   bomIsApprovedEffective,
   buildPackagingBomSnapshot,
   findById,
@@ -2243,6 +2247,7 @@ const CAP_BY_COMMAND = Object.freeze({
   'production.shift.confirm': G3_CAPS.SHIFT_CONFIRM,
   'production.shift.createCorrection': G3_CAPS.SHIFT_CORRECT,
   'production.shift.confirmCorrection': G3_CAPS.SHIFT_CORRECT,
+  'production.request.post': G3_CAPS.REQUEST_POST,
   'production.read': G3_CAPS.READ,
 })
 
@@ -2253,9 +2258,12 @@ export async function executeG3Command(input) {
   const actor = input.actor
   if (!actor?.uid) return fail('unauthorized', 401)
   const storeId = String(input.storeId ?? '').trim()
-  const idempotencyKey = String(input.idempotencyKey ?? '').trim()
+  let idempotencyKey = String(input.idempotencyKey ?? '').trim()
   const commandType = String(input.commandType ?? '').trim()
   const rawCommand = stripClientTrusted(input.command)
+  if (commandType === 'production.request.post') {
+    idempotencyKey = normalizeRequestPostIdempotencyKey(rawCommand?.requestId, idempotencyKey)
+  }
   if (!storeId || !idempotencyKey || !commandType) return fail('invalid_input', 400)
   if (input.payloadJson != null || input.warehousePatch != null || input.fullStore != null) {
     return fail('arbitrary_patch_forbidden', 400)
@@ -2269,7 +2277,8 @@ export async function executeG3Command(input) {
     commandType === 'production.shift.createCorrection' ||
     commandType === 'production.shift.confirmCorrection' ||
     commandType === 'production.material.issueToLine' ||
-    commandType === 'production.material.returnFromLine'
+    commandType === 'production.material.returnFromLine' ||
+    commandType === 'production.request.post'
   const perm = await requireG3Capability(actor.uid, storeId, needed, {
     lineId: rawCommand.lineId,
     requireLineScope: requireLineScope && Boolean(rawCommand.lineId),
@@ -2445,6 +2454,8 @@ export async function executeG3Command(input) {
     applied = applyShiftCreateCorrection(production, rawCommand, actor, now)
   } else if (commandType === 'production.shift.confirmCorrection') {
     applied = applyShiftConfirmCorrection(production, warehouse, rawCommand, actor, now)
+  } else if (commandType === 'production.request.post') {
+    applied = applyProductionRequestPost(production, warehouse, rawCommand, actor, now)
   } else if (commandType === 'production.order.packagingBomSnapshot.preview') {
     const asOf = String(rawCommand.asOfDate ?? now).slice(0, 10)
     let orders = scanConfirmedOrdersMissingPackagingBomSnapshot(
@@ -2512,6 +2523,9 @@ export async function executeG3Command(input) {
       wasteRecords: production.wasteRecords,
       handoffs: production.handoffs,
       auditLog: production.auditLog,
+      packagingReports: production.packagingReports,
+      finishedGoodsLots: production.finishedGoodsLots,
+      qcDecisions: production.qcDecisions,
     },
   }
 
