@@ -26,10 +26,20 @@ function inferContainerId(logistics?: string): string {
 function buildShipmentLine(line: SalesOrderLine, fp?: FinishedProduct): LoadingShipmentLine | null {
   const width = line.rollWidthM ?? fp?.rollWidthM ?? 0
   const gsm = line.targetGsm ?? fp?.grammageGsm ?? 0
-  const areaM2 = line.qtyAreaM2 ?? 0
-  const rolls = line.rolls ?? 0
+  const name = (line.productName || fp?.name || '').trim()
+  let areaM2 = line.qtyAreaM2 && line.qtyAreaM2 > 0 ? Number(line.qtyAreaM2) : 0
+  let rolls = line.rolls && line.rolls > 0 ? Number(line.rolls) : 0
 
-  if (!line.productName.trim() || rolls <= 0 || width <= 0 || areaM2 <= 0) {
+  // G5-hydrated lines often carry only qtyMp + finishedProductId.
+  if (areaM2 <= 0 && line.qtyMp > 0 && width > 0) {
+    areaM2 = Math.round(line.qtyMp * width * 1000) / 1000
+  }
+  if (rolls <= 0 && line.qtyMp > 0) {
+    const mpr = fp?.metersPerRoll && fp.metersPerRoll > 0 ? Number(fp.metersPerRoll) : 0
+    rolls = mpr > 0 ? Math.max(1, Math.ceil(line.qtyMp / mpr)) : 1
+  }
+
+  if (!name || rolls <= 0 || width <= 0 || areaM2 <= 0) {
     return null
   }
 
@@ -49,7 +59,7 @@ function buildShipmentLine(line: SalesOrderLine, fp?: FinishedProduct): LoadingS
   return {
     id: crypto.randomUUID(),
     finishedProductId: line.finishedProductId,
-    name: line.productName,
+    name,
     note: STACK_NOTE,
     rollLengthM,
     grammageGsm: gsm,
