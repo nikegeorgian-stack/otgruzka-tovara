@@ -125,11 +125,22 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     },
 
     upsertProductionOrder(order: ProductionOrder) {
-      const groupId = warehouseTransactionGroupId({
-        kind: 'production_reservation_adjustment',
-        sourceId: order.id,
-        revision: `upsert:${order.updatedAt || Date.now()}`,
-      })
+      // Draft create/edit only touches production.planner.orders — do not stamp a
+      // warehouse::production_reservation_adjustment atomic group (R29L: that
+      // mislabel caused domain_conflict banners on every planner Save / Activate).
+      const prevSnap = getStore().production.planner.orders.find((o) => o.id === order.id)
+      const needsReservationAdjustment =
+        Boolean(prevSnap) &&
+        (prevSnap!.status === 'active' ||
+          prevSnap!.status === 'paused' ||
+          order.status === 'cancelled')
+      const groupId = needsReservationAdjustment
+        ? warehouseTransactionGroupId({
+            kind: 'production_reservation_adjustment',
+            sourceId: order.id,
+            revision: `upsert:${order.updatedAt || Date.now()}`,
+          })
+        : undefined
       setStore(
         (s) => {
           const year = new Date().getFullYear()
@@ -161,6 +172,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             : [...s.production.planner.orders, normalized]
           let warehouse = s.warehouse
           if (
+            groupId &&
             prev &&
             (prev.status === 'active' ||
               prev.status === 'paused' ||
@@ -188,13 +200,15 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         },
-        {
-          origin: 'user',
-          atomic: true,
-          transactionGroupId: groupId,
-          transactionGroupKind: 'production_reservation_adjustment',
-          transactionGroupLabel: 'Корректировка резерва производственного заказа',
-        },
+        needsReservationAdjustment && groupId
+          ? {
+              origin: 'user',
+              atomic: true,
+              transactionGroupId: groupId,
+              transactionGroupKind: 'production_reservation_adjustment',
+              transactionGroupLabel: 'Корректировка резерва производственного заказа',
+            }
+          : { origin: 'user' },
       )
     },
 
