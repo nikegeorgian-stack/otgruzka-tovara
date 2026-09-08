@@ -1509,6 +1509,10 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         ok: false,
         error: 'warehouse.loading.errNotFound',
       }
+      if (isG4WebAuthoritativePath()) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false as const, error: G4_PACKAGING_INACTIVE }
+      }
       const groupId = warehouseTransactionGroupId({
         kind: 'finished_goods_shipment',
         sourceId: shipmentId,

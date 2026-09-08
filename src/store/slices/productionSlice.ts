@@ -879,6 +879,13 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         })
         return { ok: true, report: reportOut }
       }
+      if (
+        isG3WebAuthoritativePath() &&
+        !isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const { G3_PRODUCTION_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G3_PRODUCTION_INACTIVE }
+      }
 
       let result: ConfirmShiftReportResult = {
         ok: false,
@@ -1110,10 +1117,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     ): Promise<ReturnType<typeof confirmPackagingReportCore>['result']> {
       const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      const g4Active = isG4PackagingQcActive(
+        getStore().production as unknown as Record<string, unknown>,
+      )
+      if (isG4WebAuthoritativePath() && g4Active) {
         const report = input.report
         const conf = await g4ProductionCommand({
           idempotencyKey: input.idempotencyKey,
@@ -1174,6 +1181,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         })
         return result
       }
+      if (isG4WebAuthoritativePath() && !g4Active) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
+      }
 
       let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: false, error: 'unknown' }
       const groupId =
@@ -1221,10 +1232,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     ): Promise<ReturnType<typeof confirmPackagingReportCorrectionCore>['result']> {
       const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      const g4Active = isG4PackagingQcActive(
+        getStore().production as unknown as Record<string, unknown>,
+      )
+      if (isG4WebAuthoritativePath() && g4Active) {
         const report = input.report
         const conf = await g4ProductionCommand({
           idempotencyKey: input.idempotencyKey,
@@ -1287,6 +1298,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         })
         return result
       }
+      if (isG4WebAuthoritativePath() && !g4Active) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
+      }
 
       let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = {
         ok: false,
@@ -1347,10 +1362,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async startQcReview(lotId: string): Promise<void> {
       const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      const g4Active = isG4PackagingQcActive(
+        getStore().production as unknown as Record<string, unknown>,
+      )
+      if (isG4WebAuthoritativePath() && g4Active) {
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-review-${lotId}`,
           commandType: 'qc.review.start',
@@ -1374,6 +1389,9 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         })
+        return
+      }
+      if (isG4WebAuthoritativePath() && !g4Active) {
         return
       }
       setStore((s) => {
@@ -1430,10 +1448,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     ): Promise<ReturnType<typeof releaseFinishedGoodsLot>['result']> {
       const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      const g4Active = isG4PackagingQcActive(
+        getStore().production as unknown as Record<string, unknown>,
+      )
+      if (isG4WebAuthoritativePath() && g4Active) {
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-release-${input.lotId}`,
           commandType: 'qc.release',
@@ -1467,6 +1485,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           }
         })
         return result
+      }
+      if (isG4WebAuthoritativePath() && !g4Active) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
       }
 
       const groupId = `warehouse::qc_release::${input.lotId}::release`
@@ -1580,6 +1602,13 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           }
         })
         return result
+      }
+      if (
+        isG4WebAuthoritativePath() &&
+        !isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
+      ) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
       }
 
       const groupId = `warehouse::qc_regrade::${input.lotId}::${input.idempotencyKey}`

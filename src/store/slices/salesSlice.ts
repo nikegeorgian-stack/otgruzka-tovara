@@ -273,6 +273,12 @@ export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDep
           setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
           return
         }
+      } else {
+        const { isG5WebPath } = await import('@/lib/planner/g5ServerClient')
+        if (isG5WebPath() && (status === 'confirmed' || status === 'cancelled')) {
+          const { G5_SALES_PLANNING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+          throw new Error(G5_SALES_PLANNING_INACTIVE)
+        }
       }
 
       patchStore(setStore, (s) => {

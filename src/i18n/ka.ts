@@ -5529,6 +5529,24 @@ export const ka: Dict = {
   'g5.mrp.success.activate.masterdata': 'Master-data აქტივირებულია.',
   'g5.mrp.success.activate.sales': 'Sales/planning აქტივირებულია.',
   'g5.mrp.success.activate.procurement': 'Procurement აქტივირებულია.',
+  'g34.activation.title': 'კრიტიკული დომენები G3 / G4',
+  'g34.activation.hint':
+    'ვებში შეფუთვა, QC და გზავნილი საჭიროებს G4 packaging QC. ჯერ გაააქტიურეთ G3, შემდეგ G4. შემდეგ განაახლეთ გვერდი (Ctrl+F5).',
+  'g34.activation.active': 'აქტიური',
+  'g34.activation.inactive': 'არააქტიური',
+  'g34.activation.bothActive': 'G3 და G4 უკვე აქტიურია.',
+  'g34.activation.working': 'აქტივაცია…',
+  'g34.activation.btn.g3': 'G3 აქტივაცია (production)',
+  'g34.activation.btn.g4': 'G4 აქტივაცია (packaging/QC)',
+  'g34.activation.success.g3': 'G3 აქტივირებულია. განაახლეთ გვერდი.',
+  'g34.activation.success.g4': 'G4 აქტივირებულია. განაახლეთ გვერდი (Ctrl+F5).',
+  'g34.activation.error.generic': 'დომენის აქტივაცია ვერ მოხერხდა.',
+  'g4_packaging_inactive':
+    'შეფუთვა/QC/გზავნილი ვებში ხელმისაწვდომია მხოლოდ G4 აქტივაციის შემდეგ (დაგეგმვა → MRP).',
+  'g3_production_inactive':
+    'ცვლის ანგარიში ვებში ხელმისაწვდომია მხოლოდ G3 აქტივაციის შემდეგ (დაგეგმვა → MRP).',
+  'g5_sales_planning_inactive':
+    'კლიენტის შეკვეთის დადასტურება ვებში ხელმისაწვდომია მხოლოდ G5 sales აქტივაციის შემდეგ.',
   'g5.mrp.success.productionManual': 'წარმოების რეკომენდაცია შექმნილია.',
   'g5.mrp.success.fulfillmentSync': 'გაგზავნები სინქრონიზებულია.',
   'g5.mrp.error.noFgDemand': 'არ არის გპ მოთხოვნა ხელით რეკომენდაციისთვის.',

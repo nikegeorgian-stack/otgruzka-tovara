@@ -5,6 +5,7 @@ import { PlannerMaterialsPanel } from '@/components/planner/PlannerMaterialsPane
 import { PlannerOrderForm } from '@/components/planner/PlannerOrderForm'
 import { PlannerOrdersKanban } from '@/components/planner/PlannerOrdersKanban'
 import { G5ActivationWizard } from '@/components/planner/G5ActivationWizard'
+import { G34DomainActivationPanel } from '@/components/planner/G34DomainActivationPanel'
 import { G5MrpHorizonBanner } from '@/components/planner/G5MrpHorizonBanner'
 import { G5MrpWorkspace } from '@/components/planner/G5MrpWorkspace'
 import { MaterialStockHint } from '@/components/planner/MaterialStockHint'
@@ -1373,6 +1374,7 @@ export function PlannerPage({
 
       {tab === 'mrp' && (
         <div className="space-y-4">
+          <G34DomainActivationPanel store={store} canActivate={canActivateG5} />
           <G5ActivationWizard
             store={store}
             access={access}

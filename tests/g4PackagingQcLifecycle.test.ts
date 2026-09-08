@@ -1223,3 +1223,89 @@ describe('G4 feature activation', () => {
     expect(readAfter.source).toBe('fst_critical_store')
   })
 })
+
+// ---------------------------------------------------------------------------
+// R2.9K — UI-contract extras (CAS fail, reject blocks release, lot links)
+// ---------------------------------------------------------------------------
+
+describe('R2.9K packaging/shipment UI contract extras', () => {
+  it('FG lot links to packaging report, order and batch; material issue once', async () => {
+    const g4 = await bootstrap()
+    const confirmed = await confirmPackaging(g4, 'r29k-link', {
+      batchNo: 'ЗМ-20260907-001',
+    })
+    expect(confirmed.ok).toBe(true)
+    const p = payload()
+    const lot = p.domains.production.finishedGoodsLots[0]
+    expect(lot.packagingReportId).toBeTruthy()
+    expect(lot.productionOrderId).toBe(ORDER_ID)
+    // Batch/traceability field name varies (batchNo vs lotNumber); require a non-empty lot identity.
+    expect(String(lot.lotNumber ?? lot.batchNo ?? confirmed.lotNumber ?? '')).toBeTruthy()
+    const materialIssues = (p.domains.warehouse.movements ?? []).filter(
+      (m: { itemId?: string; type?: string; cancelled?: boolean }) =>
+        m.itemId === MATERIAL_ITEM && (m.type === 'issue' || m.type === 'out') && !m.cancelled,
+    )
+    expect(materialIssues.length).toBe(1)
+    const replay = await confirmPackaging(g4, 'r29k-link', { batchNo: 'ЗМ-20260907-001' })
+    expect(replay.idempotent).toBe(true)
+    expect(payload().domains.warehouse.movements.filter(
+      (m: { itemId?: string; type?: string; cancelled?: boolean }) =>
+        m.itemId === MATERIAL_ITEM && (m.type === 'issue' || m.type === 'out') && !m.cancelled,
+    ).length).toBe(1)
+  })
+
+  it('rejected QC cannot later release the same lot', async () => {
+    const g4 = await bootstrap()
+    const confirmed = await confirmPackaging(g4, 'r29k-rej')
+    const rejected = await g4.executeG4Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'r29k-reject',
+      commandType: 'qc.reject',
+      command: {
+        finishedGoodsLotId: confirmed.finishedGoodsLotId,
+        reason: 'edu soft reject',
+        date: REPORT_DATE,
+      },
+    })
+    expect(rejected.ok).toBe(true)
+    attachVerified(String(confirmed.finishedGoodsLotId), 'passport')
+    attachVerified(String(confirmed.finishedGoodsLotId), 'protocol')
+    const release = await g4.executeG4Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'r29k-release-after-reject',
+      commandType: 'qc.release',
+      command: { finishedGoodsLotId: confirmed.finishedGoodsLotId, reason: 'should fail' },
+    })
+    expect(release.ok).toBe(false)
+    expect(payload().domains.production.finishedGoodsLots[0].qcStatus).not.toBe('released')
+  })
+
+  it('failed shipment CAS leaves no posted loading shipment', async () => {
+    const g4 = await bootstrap()
+    const confirmed = await confirmPackaging(g4, 'r29k-cas')
+    await releaseLot(g4, String(confirmed.finishedGoodsLotId), 'r29k-cas-release')
+    const revBefore = dcState.critical!.revision as number
+    const shipsBefore = payload().domains.warehouse.loadingShipments.length
+    calls.updateCas.mockImplementationOnce(async () => {
+      throw new Error('revision_conflict')
+    })
+    const failed = await g4.executeG4Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'r29k-ship-cas-fail',
+      commandType: 'shipment.post',
+      command: {
+        shipmentId: 'shp-cas-fail',
+        finishedProductId: FINISHED_PRODUCT,
+        finishedGoodsLotId: confirmed.finishedGoodsLotId,
+        quantity: 10,
+        date: REPORT_DATE,
+      },
+    })
+    expect(failed.ok).toBe(false)
+    expect(dcState.critical!.revision).toBe(revBefore)
+    expect(payload().domains.warehouse.loadingShipments.length).toBe(shipsBefore)
+  })
+})

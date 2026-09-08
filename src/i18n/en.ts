@@ -5163,6 +5163,24 @@ export const en: Dict = {
   'g5.mrp.success.activate.masterdata': 'Master-data activated.',
   'g5.mrp.success.activate.sales': 'Sales/planning activated.',
   'g5.mrp.success.activate.procurement': 'Procurement activated.',
+  'g34.activation.title': 'Critical domains G3 / G4',
+  'g34.activation.hint':
+    'On web, packaging, lot QC and FG shipment require active packaging QC (G4). Activate production (G3) first, then packaging (G4). Then hard-reload (Ctrl+F5).',
+  'g34.activation.active': 'active',
+  'g34.activation.inactive': 'inactive',
+  'g34.activation.bothActive': 'G3 and G4 are already active.',
+  'g34.activation.working': 'Activating…',
+  'g34.activation.btn.g3': 'Activate G3 (production)',
+  'g34.activation.btn.g4': 'Activate G4 (packaging/QC)',
+  'g34.activation.success.g3': 'G3 production activated. Reload the page.',
+  'g34.activation.success.g4': 'G4 packaging/QC activated. Hard-reload (Ctrl+F5).',
+  'g34.activation.error.generic': 'Could not activate domain.',
+  'g4_packaging_inactive':
+    'Packaging/QC/shipment on web require G4 activation (Planner → MRP).',
+  'g3_production_inactive':
+    'Shift report on web requires G3 activation (Planner → MRP).',
+  'g5_sales_planning_inactive':
+    'Sales order confirmation on web requires G5 sales activation (Planner → MRP).',
   'g5.mrp.success.productionManual': 'Production recommendation created.',
   'g5.mrp.success.fulfillmentSync': 'Fulfillment synced from shipments.',
   'g5.mrp.error.noFgDemand': 'No FG demand for manual recommendation.',

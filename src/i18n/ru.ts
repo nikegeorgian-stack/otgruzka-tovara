@@ -5543,6 +5543,24 @@ export const ru: Dict = {
   'g5.mrp.success.activate.masterdata': 'Master-data активирован.',
   'g5.mrp.success.activate.sales': 'Sales/planning активирован.',
   'g5.mrp.success.activate.procurement': 'Procurement активирован.',
+  'g34.activation.title': 'Критические домены G3 / G4',
+  'g34.activation.hint':
+    'На web упаковка, QC лотов и отгрузка ГП требуют активного packaging QC (G4). Сначала активируйте production (G3), затем packaging (G4). После активации обновите страницу (Ctrl+F5).',
+  'g34.activation.active': 'активен',
+  'g34.activation.inactive': 'не активен',
+  'g34.activation.bothActive': 'G3 и G4 уже активны.',
+  'g34.activation.working': 'Активация…',
+  'g34.activation.btn.g3': 'Активировать G3 (production)',
+  'g34.activation.btn.g4': 'Активировать G4 (packaging/QC)',
+  'g34.activation.success.g3': 'G3 production активирован. Обновите страницу.',
+  'g34.activation.success.g4': 'G4 packaging/QC активирован. Обновите страницу (Ctrl+F5).',
+  'g34.activation.error.generic': 'Не удалось активировать домен.',
+  'g4_packaging_inactive':
+    'Упаковка/QC/отгрузка на web доступны только после активации G4 (Планировщик → MRP).',
+  'g3_production_inactive':
+    'Сменный отчёт на web доступен только после активации G3 (Планировщик → MRP).',
+  'g5_sales_planning_inactive':
+    'Подтверждение заказа клиента на web доступно только после активации G5 sales (Планировщик → MRP).',
   'g5.mrp.success.productionManual': 'Рекомендация производства создана.',
   'g5.mrp.success.fulfillmentSync': 'Отгрузки синхронизированы.',
   'g5.mrp.error.noFgDemand': 'Нет спроса ГП для ручной рекомендации.',
