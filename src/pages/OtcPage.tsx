@@ -228,34 +228,40 @@ export function OtcPage({
       setNotice(`${pending.lot.batchNo}: ${attachment.displayName}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'otc.qc.error'
-      setNotice(t(message) !== message ? t(message) : t('otc.qc.error'))
+      const translated = t(message)
+      setNotice(translated !== message ? translated : `${t('otc.qc.error')}: ${message}`)
     } finally {
       setAttachBusy(false)
     }
   }
 
   async function handleRelease(lot: FinishedGoodsLot) {
-    const preview = previewReleaseFinishedGoodsLot(productionStore, {
-      lotId: lot.id,
-      access,
-      actor,
-      attachments: {
-        passportAttachmentId: lot.passportAttachmentId,
-        protocolAttachmentId: lot.protocolAttachmentId,
-      },
-    }).result
-    if (!preview.ok) {
-      setNotice(t(preview.error ?? 'otc.qc.error'))
-      return
-    }
-
     const { isG4WebAuthoritativePath, isG4PackagingQcActive } = await import(
       '@/lib/production/g4ServerClient'
     )
-    if (
+    const g4Active =
       isG4WebAuthoritativePath() &&
       isG4PackagingQcActive(productionStore as unknown as Record<string, unknown>)
-    ) {
+
+    // G4 release re-verifies SQL qcAttachmentRecords + Storage; soft preview must not
+    // block when packagingQc is authoritative (soft qcAttachments are projection only).
+    if (!g4Active) {
+      const preview = previewReleaseFinishedGoodsLot(productionStore, {
+        lotId: lot.id,
+        access,
+        actor,
+        attachments: {
+          passportAttachmentId: lot.passportAttachmentId,
+          protocolAttachmentId: lot.protocolAttachmentId,
+        },
+      }).result
+      if (!preview.ok) {
+        setNotice(t(preview.error ?? 'otc.qc.error'))
+        return
+      }
+    }
+
+    if (g4Active) {
       const result = await onReleaseFinishedGoodsLot({
         lotId: lot.id,
         access,
