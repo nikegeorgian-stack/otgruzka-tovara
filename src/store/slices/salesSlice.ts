@@ -177,8 +177,38 @@ export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDep
           if (!conf.ok) {
             throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
           }
-          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
-          return getStore().sales.orders.find((o) => o.id === order.id) ?? order
+          const ackId = String(
+            (conf.data as { id?: string } | undefined)?.id || order.id,
+          )
+          setStore(
+            (s) => {
+              let next = mirrorG5Ack(s, conf.data)
+              if (!next.sales.orders.some((o) => o.id === ackId)) {
+                const draft = {
+                  ...order,
+                  id: ackId,
+                  status: (isDraft ? 'draft' : order.status) as typeof order.status,
+                  commercialStatus: (isDraft
+                    ? 'draft'
+                    : (order.commercialStatus ?? order.status)) as typeof order.commercialStatus,
+                  updatedAt: new Date().toISOString(),
+                }
+                next = {
+                  ...next,
+                  sales: {
+                    ...next.sales,
+                    orders: [
+                      ...next.sales.orders.filter((o) => o.id !== order.id),
+                      draft,
+                    ],
+                  },
+                }
+              }
+              return next
+            },
+            { origin: 'system' },
+          )
+          return getStore().sales.orders.find((o) => o.id === ackId) ?? order
         }
       }
 

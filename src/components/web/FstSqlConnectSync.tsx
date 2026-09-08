@@ -412,17 +412,26 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
             }
             // PHASE G5.1 — persist activation flags from critical domainMeta (fail-closed gates).
             {
-              const { withG5ActivationOnStore, readG5Activation } = await import(
+              const { withG5ActivationOnStore, readG5Activation, mirrorG5Ack } = await import(
                 '@/lib/planner/g5ServerClient'
               )
               const fromMeta = readG5Activation(g1.data.domainMeta)
+              const salesPlanningActive =
+                g1.data.salesPlanningActive === true || fromMeta.salesPlanningActive
               next = withG5ActivationOnStore(next, {
                 masterDataActive: g1.data.masterDataActive === true || fromMeta.masterDataActive,
-                salesPlanningActive:
-                  g1.data.salesPlanningActive === true || fromMeta.salesPlanningActive,
+                salesPlanningActive,
                 procurementActive: g1.data.procurementActive === true || fromMeta.procurementActive,
                 domainMeta: g1.data.domainMeta,
               })
+              // Authoritative G5 sales hydrate — soft FstStore.sales must not shadow critical orders.
+              if (salesPlanningActive && Array.isArray(g1.data.sales?.orders)) {
+                next = mirrorG5Ack(next, {
+                  salesPlanningActive: true,
+                  replaceSalesOrders: true,
+                  sales: g1.data.sales,
+                })
+              }
             }
             // PHASE G6 — capacity planning feature flag from domainMeta.production.features.
             {

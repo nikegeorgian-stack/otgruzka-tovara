@@ -6,6 +6,8 @@ import { fstApiUrl } from '@/lib/cloud/fstApiOrigin'
 import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
 import type { AppStore } from '@/lib/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
+import { emptyLineProgress } from '@/lib/sales/progress'
+import type { SalesOrder, SalesOrderLine, SalesOrderStatus } from '@/lib/sales/types'
 import {
   g5FlagsFromStore,
   withG5ActivationOnStore,
@@ -57,6 +59,10 @@ export type G5ServerResult<T> =
   | { ok: false; error: string; message: string }
 
 export type G5AckPayload = {
+  /** Present on many command acks; unused by mirror except optional replace hydrate. */
+  ok?: boolean
+  id?: string
+  status?: string
   criticalRevision?: number
   masterDataActive?: boolean
   salesPlanningActive?: boolean
@@ -64,6 +70,8 @@ export type G5AckPayload = {
   packagingQcActive?: boolean
   productionActive?: boolean
   warehouseActive?: boolean
+  /** When true with sales.orders, replace local sales.orders (G1 hydrate). */
+  replaceSalesOrders?: boolean
   masterData?: {
     items?: unknown[]
     finishedProducts?: unknown[]
@@ -419,6 +427,101 @@ export const G5_UI_GATEWAY_MATRIX: ReadonlyArray<{ wrapper: string; commandType:
  * Conservatively merge G5 server ack into AppStore shapes.
  * Prefer server sales/procurement/masterData when present; warehouse/production only when returned.
  */
+function coerceG5SalesOrderRow(
+  row: Record<string, unknown>,
+  prev?: SalesOrder,
+): SalesOrder {
+  const id = String(row.id ?? prev?.id ?? '')
+  const now = new Date().toISOString()
+  const rawStatus = String(row.status ?? prev?.status ?? 'draft')
+  const status = (
+    ['draft', 'confirmed', 'in_production', 'shipped', 'completed', 'cancelled'].includes(rawStatus)
+      ? rawStatus
+      : 'draft'
+  ) as SalesOrderStatus
+  const commercial =
+    status === 'confirmed' || status === 'in_production' || status === 'shipped'
+      ? 'confirmed'
+      : status === 'completed'
+        ? 'completed'
+        : status === 'cancelled'
+          ? 'cancelled'
+          : 'draft'
+  const fulfillment =
+    status === 'shipped' || status === 'completed'
+      ? 'shipped'
+      : status === 'in_production'
+        ? 'in_production'
+        : 'unplanned'
+  const priorityRaw = row.priority
+  const priority =
+    priorityRaw === 'urgent' ||
+    (typeof priorityRaw === 'number' && priorityRaw >= 10) ||
+    prev?.priority === 'urgent'
+      ? 'urgent'
+      : 'normal'
+  const linesRaw = Array.isArray(row.lines) ? (row.lines as Array<Record<string, unknown>>) : null
+  const lines: SalesOrderLine[] = linesRaw
+    ? linesRaw.map((ln) => {
+        const lineId = String(ln.lineId ?? ln.id ?? '')
+        const prevLine = prev?.lines.find((l) => l.id === lineId)
+        const qtyMp = Number(ln.qtyMp ?? ln.quantity) || 0
+        return {
+          id: lineId || crypto.randomUUID(),
+          finishedProductId: String(
+            ln.finishedProductId ?? prevLine?.finishedProductId ?? '',
+          ) || undefined,
+          productName: prevLine?.productName ?? '',
+          category: prevLine?.category ?? 'ratl1',
+          qtyMp,
+          productionOrderIds: Array.isArray(ln.linkedProductionOrderIds)
+            ? (ln.linkedProductionOrderIds as string[]).filter(Boolean)
+            : prevLine?.productionOrderIds ?? [],
+          progress: prevLine?.progress ?? emptyLineProgress(qtyMp),
+          qtyAreaM2: prevLine?.qtyAreaM2,
+          rollWidthM: prevLine?.rollWidthM,
+          targetGsm: prevLine?.targetGsm,
+          labelType: prevLine?.labelType,
+          preferredLineId: prevLine?.preferredLineId,
+          note: prevLine?.note,
+        }
+      })
+    : prev?.lines ?? []
+
+  return {
+    ...(prev ?? {
+      id,
+      orderNumber: '',
+      customer: '',
+      history: [],
+      createdAt: String(row.createdAt ?? now),
+    }),
+    id,
+    orderNumber: String(row.orderNumber ?? prev?.orderNumber ?? ''),
+    counterpartyId:
+      String(row.customerId ?? row.counterpartyId ?? prev?.counterpartyId ?? '') || undefined,
+    customer: String(row.customer ?? prev?.customer ?? ''),
+    status,
+    commercialStatus: commercial,
+    fulfillmentStatus: fulfillment,
+    priority,
+    orderDate: String(row.orderDate ?? prev?.orderDate ?? row.createdAt ?? now).slice(0, 10),
+    dueDate: row.requestedShipDate
+      ? String(row.requestedShipDate).slice(0, 10)
+      : prev?.dueDate,
+    lines,
+    note:
+      row.note != null
+        ? String(row.note)
+        : row.notes != null
+          ? String(row.notes)
+          : prev?.note,
+    history: prev?.history ?? [],
+    createdAt: String(row.createdAt ?? prev?.createdAt ?? now),
+    updatedAt: String(row.updatedAt ?? prev?.updatedAt ?? now),
+  }
+}
+
 export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
   let next = withG5ActivationOnStore(store, {
     masterDataActive: server.masterDataActive,
@@ -580,20 +683,14 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
 
   if (server.sales?.orders) {
     const serverOrders = server.sales.orders as Array<Record<string, unknown>>
-    const byId = new Map(next.sales.orders.map((o) => [o.id, o] as const))
+    const byId = new Map(
+      server.replaceSalesOrders ? [] : next.sales.orders.map((o) => [o.id, o] as const),
+    )
     for (const row of serverOrders) {
       const id = String(row.id ?? '')
       if (!id) continue
       const prev = byId.get(id)
-      if (prev) {
-        byId.set(id, {
-          ...prev,
-          ...row,
-          id,
-          lines: Array.isArray(row.lines) ? (row.lines as typeof prev.lines) : prev.lines,
-          updatedAt: String(row.updatedAt ?? prev.updatedAt),
-        } as typeof prev)
-      }
+      byId.set(id, coerceG5SalesOrderRow(row, prev))
     }
     next = {
       ...next,
@@ -619,6 +716,12 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
           lines: Array.isArray(row.lines) ? (row.lines as typeof prev.lines) : prev.lines,
           updatedAt: String(row.updatedAt ?? prev.updatedAt),
         } as typeof prev)
+      } else {
+        byId.set(id, {
+          ...(row as (typeof next.procurement.orders)[number]),
+          id,
+          updatedAt: String(row.updatedAt ?? new Date().toISOString()),
+        } as (typeof next.procurement.orders)[number])
       }
     }
     next = {
