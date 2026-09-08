@@ -391,6 +391,16 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
               } else if (g4Overlay.authoritativeBlocked) {
                 console.warn('FST G4 packaging overlay blocked — not treating legacy as truth')
               }
+            } else if (packagingQcActive) {
+              // Feature active in SQL even if production slice briefly empty — keep soft flag true.
+              next = {
+                ...next,
+                production: {
+                  ...next.production,
+                  g4PackagingQcActive: true,
+                  g4CriticalRevision: g1.data.revision,
+                } as typeof next.production,
+              }
             } else {
               next = {
                 ...next,

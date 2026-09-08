@@ -1735,7 +1735,9 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       const g4Active = isG4PackagingQcActive(
         getStore().production as unknown as Record<string, unknown>,
       )
-      if (isG4WebAuthoritativePath() && g4Active) {
+      // Web: always ask G4. Soft g4PackagingQcActive can lag behind SQL feature flag.
+      if (isG4WebAuthoritativePath()) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-release-${input.lotId}`,
           commandType: 'qc.release',
@@ -1746,7 +1748,14 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             protocolAttachmentId: input.attachments?.protocolAttachmentId,
           },
         })
-        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        if (!conf.ok) {
+          if (conf.error === 'packaging_qc_inactive' || conf.error === G4_PACKAGING_INACTIVE) {
+            return { ok: false, error: G4_PACKAGING_INACTIVE }
+          }
+          // Soft inactive + no successful server ack → fail closed (do not soft-release).
+          if (!g4Active) return { ok: false, error: G4_PACKAGING_INACTIVE }
+          return { ok: false, error: conf.error || conf.message }
+        }
         let result: ReturnType<typeof releaseFinishedGoodsLot>['result'] = { ok: true }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
@@ -1769,10 +1778,6 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           }
         })
         return result
-      }
-      if (isG4WebAuthoritativePath() && !g4Active) {
-        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
-        return { ok: false, error: G4_PACKAGING_INACTIVE }
       }
 
       const groupId = `warehouse::qc_release::${input.lotId}::release`
