@@ -27,8 +27,6 @@ import type { ProductionStore } from '@/lib/production/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import type { QcDocumentKind, QcLotAttachment } from '@/lib/production/qcAttachments'
 import { releaseFinishedGoodsLot as previewReleaseFinishedGoodsLot } from '@/lib/production/qcRelease'
-import { qcReleaseLot } from '@/lib/production/qcServerClient'
-import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
 
 type Tab = 'dash' | 'lab' | 'alkali' | 'sorting' | 'defects' | 'norms' | 'qc'
 
@@ -113,7 +111,6 @@ export function OtcPage({
   currentUser,
   onStartQcReview,
   onReleaseFinishedGoodsLot,
-  onMirrorServerQcRelease,
   onRequestRegrade,
   onRejectFinishedGoodsLot,
   onUpsertQcAttachment,
