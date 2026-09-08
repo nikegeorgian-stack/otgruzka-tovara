@@ -19,6 +19,7 @@ import { WarehouseIssuePrintPreview } from '@/components/warehouse/WarehouseIssu
 import { WarehouseReceiptPrintPreview } from '@/components/warehouse/WarehouseReceiptPrintPreview'
 import { G5DocumentPrintModal, type G5DocumentPrintModel } from '@/components/print/G5DocumentPrintModal'
 import { isInvoiceAlreadyPosted } from '@/lib/warehouse/documents'
+import { resolveWarehouseLocationsForPicker } from '@/lib/warehouse/resolveWarehouseLocationsForPicker'
 import { g5FlagsFromStore } from '@/lib/planner/g5Activation'
 import {
   isG5WarehousePrintDoc,
@@ -209,7 +210,8 @@ ref,
 ) {
   const { t, locale } = useI18n()
   const { confirm } = useConfirm()
-  const defaultWhId = warehouseId || warehouse.locations[0]?.id || ''
+  const defaultWhId =
+    warehouseId || resolveWarehouseLocationsForPicker(warehouse)[0]?.id || ''
   const seeded = existingDocument ? stateFromDocument(existingDocument) : null
 
   const [type, setType] = useState<'receipt' | 'issue'>(seeded?.type ?? initialType)
@@ -278,8 +280,8 @@ ref,
     [warehouse, docWarehouseId],
   )
   const sortedLocations = useMemo(
-    () => [...warehouse.locations].sort((a, b) => a.sortOrder - b.sortOrder),
-    [warehouse.locations],
+    () => resolveWarehouseLocationsForPicker(warehouse),
+    [warehouse],
   )
   const docLocation = useMemo(
     () => sortedLocations.find((l) => l.id === docWarehouseId),
