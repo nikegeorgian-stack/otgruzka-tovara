@@ -652,6 +652,27 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             warehouseItemId: fp?.warehouseItemId ?? order?.semiFinishedItemId,
             finishedProductId: order?.finishedProductId ?? fp?.id,
             consumeLines,
+            productionWarehouseId:
+              s.warehouse.productionLineBindings?.find(
+                (b) => b.lineId === req.lineId || b.id === req.lineId,
+              )?.productionWarehouseId ??
+              s.warehouse.locations?.[0]?.id ??
+              s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
+            productionLocationId:
+              s.warehouse.productionLineBindings?.find(
+                (b) => b.lineId === req.lineId || b.id === req.lineId,
+              )?.productionLocationId ??
+              s.warehouse.locations?.find((l) => l.kind === 'wip' || l.kind === 'packaging')?.id ??
+              s.warehouse.locations?.[0]?.id ??
+              s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
+            orderSnapshot: order
+              ? {
+                  id: order.id,
+                  lineId: order.lineId,
+                  finishedProductId: order.finishedProductId,
+                  semiFinishedItemId: order.semiFinishedItemId,
+                }
+              : undefined,
           },
         })
 

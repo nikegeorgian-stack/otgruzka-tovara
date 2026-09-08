@@ -290,6 +290,36 @@ describe('R2.9L pack request.post G4 QC entry', () => {
   })
 })
 
+describe('R2.9L request.post binding/order snapshot fallback', () => {
+  it('accepts explicit warehouse binding + orderSnapshot when critical empty', () => {
+    const prod = { orders: [], shiftReports: [], wipBatches: [], finishedGoodsLots: [], auditLog: [] }
+    const wh = emptyWh()
+    wh.productionLineBindings = []
+    const out = applyProductionRequestPost(
+      prod,
+      wh,
+      impregnationCmd({
+        consumeLines: [],
+        productionWarehouseId: WH,
+        productionLocationId: LOC,
+        orderSnapshot: {
+          id: ORDER,
+          lineId: 'line1',
+          finishedProductId: 'fp-1',
+          semiFinishedItemId: 'i-sf',
+        },
+      }),
+      ACTOR,
+      NOW,
+    )
+    expect(out.ok).toBe(true)
+    expect(out.production.wipBatches).toHaveLength(1)
+    expect(
+      out.warehouse.documents.some((d) => d.productionRequestId === REQ && d.type === 'receipt'),
+    ).toBe(true)
+  })
+})
+
 describe('R2.9L false completed state guards', () => {
   it('G2-equivalent failure leaves production without posted request effects', () => {
     const out = applyProductionRequestPost(
@@ -300,7 +330,6 @@ describe('R2.9L false completed state guards', () => {
       NOW,
     )
     expect(out.ok).toBe(false)
-    // caller must not flip soft status — apply returns no mutated domains on fail
     expect(out.production).toBeUndefined()
     expect(out.warehouse).toBeUndefined()
   })

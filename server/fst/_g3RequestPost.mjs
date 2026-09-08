@@ -105,12 +105,23 @@ export function applyProductionRequestPost(production, warehouse, command, actor
   if (!Number.isFinite(outputMp) || outputMp <= 0) return fail('invalid_output', 400)
   if (isPeriodClosed(warehouse, date)) return fail('period_closed', 403)
 
-  const order = (production.orders ?? []).find((o) => o.id === orderId)
+  const orderFromCritical = (production.orders ?? []).find((o) => o.id === orderId)
+  const orderSnap =
+    command.orderSnapshot && String(command.orderSnapshot.id ?? '') === orderId
+      ? command.orderSnapshot
+      : null
+  const order = orderFromCritical || orderSnap
   if (!order) return fail('order_not_found', 404)
 
-  const binding = resolveLineBinding(warehouse, lineId === 'pack' ? lineId : lineId)
-  // Pack may bind as 'pack'; impregnation needs line1/line2 binding
-  if (!binding.ok) return fail(binding.error, 400)
+  let binding = resolveLineBinding(warehouse, lineId)
+  if (!binding.ok) {
+    const whId = String(command.productionWarehouseId ?? '').trim()
+    const locId = String(command.productionLocationId ?? whId).trim()
+    if (whId && locId) {
+      binding = { ok: true, productionWarehouseId: whId, productionLocationId: locId }
+    }
+  }
+  if (!binding.ok) return fail(binding.error || 'line_location_not_configured', 400)
 
   const packLocationId = String(
     command.packLocationId ?? binding.productionLocationId,
