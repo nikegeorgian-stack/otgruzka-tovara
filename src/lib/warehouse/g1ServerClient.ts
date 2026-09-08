@@ -103,6 +103,10 @@ export function resolveAuthoritativeWarehouseOverlay(input: {
         categories: input.criticalWarehouse.categories?.length
           ? input.criticalWarehouse.categories
           : input.legacyWarehouse.categories,
+        // Empty critical bindings must not wipe soft line→location config (same as locations).
+        productionLineBindings: input.criticalWarehouse.productionLineBindings?.length
+          ? input.criticalWarehouse.productionLineBindings
+          : input.legacyWarehouse.productionLineBindings,
         auditLog: input.criticalWarehouse.auditLog ?? input.legacyWarehouse.auditLog,
         closedMonths:
           input.criticalWarehouse.closedMonths ?? input.legacyWarehouse.closedMonths,

@@ -34,13 +34,63 @@ function resolveLineBinding(warehouse, lineId) {
   const b = (warehouse.productionLineBindings ?? []).find(
     (x) => x.lineId === lineId || x.id === lineId,
   )
-  if (!b?.productionWarehouseId || !b?.productionLocationId) {
+  const productionWarehouseId = String(
+    b?.productionWarehouseId ?? b?.sourceWarehouseId ?? '',
+  ).trim()
+  const productionLocationId = String(b?.productionLocationId ?? '').trim()
+  if (!productionWarehouseId || !productionLocationId) {
     return { ok: false, error: 'line_location_not_configured' }
   }
   return {
     ok: true,
-    productionWarehouseId: b.productionWarehouseId,
-    productionLocationId: b.productionLocationId,
+    productionWarehouseId,
+    productionLocationId,
+  }
+}
+
+function realignWipPackLocation(warehouse, production, {
+  requestId,
+  receiptDocId,
+  wipBatchId,
+  reportId,
+  packLocationId,
+}) {
+  const target = String(packLocationId ?? '').trim()
+  if (!target) return { warehouse, production, realigned: false }
+
+  let changed = false
+  const documents = (warehouse.documents ?? []).map((d) => {
+    if (d.id !== receiptDocId) return d
+    const lines = (d.lines ?? []).map((l) => {
+      if (String(l.locationId ?? '') === target) return l
+      changed = true
+      return { ...l, locationId: target }
+    })
+    return { ...d, lines }
+  })
+  const movements = (warehouse.movements ?? []).map((m) => {
+    if (m.documentId !== receiptDocId) return m
+    if (String(m.locationId ?? '') === target) return m
+    changed = true
+    return { ...m, locationId: target }
+  })
+  const wipBatches = (production.wipBatches ?? []).map((b) => {
+    if (b.id !== wipBatchId && b.productionRequestId !== requestId) return b
+    if (String(b.locationId ?? '') === target) return b
+    changed = true
+    return { ...b, locationId: target }
+  })
+  const shiftReports = (production.shiftReports ?? []).map((r) => {
+    if (r.id !== reportId && r.productionRequestId !== requestId) return r
+    if (String(r.packLocationId ?? '') === target) return r
+    changed = true
+    return { ...r, packLocationId: target }
+  })
+  if (!changed) return { warehouse, production, realigned: false }
+  return {
+    warehouse: { ...warehouse, documents, movements },
+    production: { ...production, wipBatches, shiftReports },
+    realigned: true,
   }
 }
 
@@ -123,8 +173,16 @@ export function applyProductionRequestPost(production, warehouse, command, actor
   }
   if (!binding.ok) return fail(binding.error || 'line_location_not_configured', 400)
 
+  const packBinding = resolveLineBinding(warehouse, 'pack')
   const packLocationId = String(
-    command.packLocationId ?? binding.productionLocationId,
+    command.packLocationId ??
+      (packBinding.ok ? packBinding.productionLocationId : '') ??
+      binding.productionLocationId,
+  ).trim()
+  const packWarehouseId = String(
+    command.packWarehouseId ??
+      (packBinding.ok ? packBinding.productionWarehouseId : '') ??
+      binding.productionWarehouseId,
   ).trim()
   const semiFinishedItemId = String(
     command.semiFinishedItemId ?? order.semiFinishedItemId ?? order.finishedProductId ?? '',
@@ -171,17 +229,30 @@ export function applyProductionRequestPost(production, warehouse, command, actor
   const fgOk = !isPack || Boolean(existingLot) || hasFgReceipt(existingDocs)
 
   if (wipOk && consumeOk && fgOk && existingReport && existingWip && (!isPack || existingLot)) {
+    const targetPack = String(command.packLocationId ?? packLocationId ?? '').trim()
+    const aligned = targetPack
+      ? realignWipPackLocation(warehouse, production, {
+          requestId,
+          receiptDocId,
+          wipBatchId,
+          reportId,
+          packLocationId: targetPack,
+        })
+      : { warehouse, production, realigned: false }
     return ok({
-      production,
-      warehouse,
+      production: aligned.production,
+      warehouse: aligned.warehouse,
       result: {
         requestId,
         status: 'posted',
-        idempotent: true,
+        idempotent: !aligned.realigned,
+        realignedPackLocation: aligned.realigned || undefined,
         reportId: existingReport.id,
         wipBatchId: existingWip.id,
         documentIds: existingDocs.map((d) => d.id),
         finishedGoodsLotId: existingLot?.id,
+        packLocationId: targetPack || undefined,
+        packWarehouseId: packWarehouseId || undefined,
       },
     })
   }

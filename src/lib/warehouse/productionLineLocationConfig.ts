@@ -13,11 +13,33 @@ export function knownProductionLineIds(): string[] {
   return PRODUCTION_LINES.map((l) => l.id)
 }
 
+/** Soft/legacy rows may use sourceWarehouseId; canonical field is productionWarehouseId. */
+export function bindingProductionWarehouseId(
+  binding: Pick<ProductionLineLocationBinding, 'productionWarehouseId'> & {
+    sourceWarehouseId?: string
+  },
+): string {
+  return (
+    String(binding.productionWarehouseId ?? '').trim() ||
+    String(binding.sourceWarehouseId ?? '').trim()
+  )
+}
+
 export function getProductionLineBinding(
   store: Pick<WarehouseStore, 'productionLineBindings'>,
   lineId: string,
 ): ProductionLineLocationBinding | undefined {
-  return (store.productionLineBindings ?? []).find((b) => b.lineId === lineId || b.id === lineId)
+  const raw = (store.productionLineBindings ?? []).find((b) => b.lineId === lineId || b.id === lineId)
+  if (!raw) return undefined
+  const productionWarehouseId = bindingProductionWarehouseId(raw)
+  const productionLocationId = String(raw.productionLocationId ?? '').trim()
+  if (!productionWarehouseId || !productionLocationId) return raw
+  return {
+    ...raw,
+    id: raw.id || raw.lineId,
+    productionWarehouseId,
+    productionLocationId,
+  }
 }
 
 export function resolveProductionLineLocation(
@@ -32,18 +54,26 @@ export function resolveProductionLineLocation(
     }
   | { ok: false; error: typeof LINE_LOCATION_NOT_CONFIGURED | typeof LINE_LOCATION_MISSING } {
   const binding = getProductionLineBinding(store, lineId)
-  if (!binding?.productionWarehouseId?.trim() || !binding.productionLocationId?.trim()) {
+  const productionWarehouseId = binding ? bindingProductionWarehouseId(binding) : ''
+  const productionLocationId = String(binding?.productionLocationId ?? '').trim()
+  if (!productionWarehouseId || !productionLocationId) {
     return { ok: false, error: LINE_LOCATION_NOT_CONFIGURED }
   }
   const locIds = new Set(store.locations.map((l) => l.id))
-  if (!locIds.has(binding.productionWarehouseId) || !locIds.has(binding.productionLocationId)) {
+  if (!locIds.has(productionWarehouseId) || !locIds.has(productionLocationId)) {
     return { ok: false, error: LINE_LOCATION_MISSING }
+  }
+  const normalized: ProductionLineLocationBinding = {
+    ...binding!,
+    id: binding!.id || binding!.lineId,
+    productionWarehouseId,
+    productionLocationId,
   }
   return {
     ok: true,
-    binding,
-    productionWarehouseId: binding.productionWarehouseId,
-    productionLocationId: binding.productionLocationId,
+    binding: normalized,
+    productionWarehouseId,
+    productionLocationId,
   }
 }
 

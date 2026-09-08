@@ -654,6 +654,8 @@ export type ProductionLineLocationBinding = {
   lineId: string
   productionWarehouseId: string
   productionLocationId: string
+  /** Legacy soft alias — prefer productionWarehouseId */
+  sourceWarehouseId?: string
   note?: string
 }
 

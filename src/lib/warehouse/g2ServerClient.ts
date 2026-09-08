@@ -131,6 +131,9 @@ export function mirrorG2WarehouseAck(
     categories: serverWarehouse.categories?.length
       ? serverWarehouse.categories
       : warehouse.categories,
+    productionLineBindings: serverWarehouse.productionLineBindings?.length
+      ? serverWarehouse.productionLineBindings
+      : warehouse.productionLineBindings,
     auditLog: serverWarehouse.auditLog ?? warehouse.auditLog,
     closedMonths: serverWarehouse.closedMonths ?? warehouse.closedMonths,
     periodHistory: serverWarehouse.periodHistory ?? warehouse.periodHistory,

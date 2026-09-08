@@ -447,8 +447,8 @@ function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyB
 }
 
 /**
- * Pack location is owned by warehouse.productionLineBindings. A client hint is only
- * accepted when it equals the binding; a missing binding is a hard stop.
+ * Pack location is owned by warehouse.productionLineBindings. When critical bindings
+ * are empty (staging null-WH), accept explicit command warehouse/location from soft.
  */
 function resolvePackBinding(warehouse, command) {
   const binding = (warehouse.productionLineBindings ?? []).find((b) => {
@@ -456,40 +456,58 @@ function resolvePackBinding(warehouse, command) {
     const byId = normalizePackLineId(b.id)
     return byLine === PACK_LINE_ID || byId === PACK_LINE_ID
   })
-  if (!binding) return { ok: false, error: 'pack_location_not_configured' }
+  if (binding) {
+    const packagingWarehouseId = str(
+      binding.packagingWarehouseId ?? binding.productionWarehouseId ?? binding.sourceWarehouseId,
+    )
+    const packagingLocationId = str(binding.packagingLocationId ?? binding.productionLocationId)
+    if (!packagingWarehouseId || !packagingLocationId) {
+      return { ok: false, error: 'pack_location_not_configured' }
+    }
+    const fgWarehouseId =
+      str(binding.finishedGoodsWarehouseId ?? binding.fgWarehouseId) || packagingWarehouseId
+    const fgLocationId =
+      str(binding.finishedGoodsLocationId ?? binding.fgLocationId) || packagingLocationId
 
-  const packagingWarehouseId = str(binding.packagingWarehouseId ?? binding.productionWarehouseId)
-  const packagingLocationId = str(binding.packagingLocationId ?? binding.productionLocationId)
+    const claimedWarehouse = str(command.packagingWarehouseId ?? command.warehouseId)
+    if (claimedWarehouse && claimedWarehouse !== packagingWarehouseId) {
+      return { ok: false, error: 'pack_location_mismatch' }
+    }
+    const claimedLocation = str(command.packagingLocationId ?? command.locationId)
+    if (claimedLocation && claimedLocation !== packagingLocationId) {
+      return { ok: false, error: 'pack_location_mismatch' }
+    }
+    const claimedFgWarehouse = str(command.finishedGoodsWarehouseId)
+    if (claimedFgWarehouse && claimedFgWarehouse !== fgWarehouseId) {
+      return { ok: false, error: 'pack_location_mismatch' }
+    }
+    const claimedFgLocation = str(command.finishedGoodsLocationId)
+    if (claimedFgLocation && claimedFgLocation !== fgLocationId) {
+      return { ok: false, error: 'pack_location_mismatch' }
+    }
+    return {
+      ok: true,
+      packagingWarehouseId,
+      packagingLocationId,
+      fgWarehouseId,
+      fgLocationId,
+    }
+  }
+
+  const packagingWarehouseId = str(command.packagingWarehouseId ?? command.warehouseId)
+  const packagingLocationId = str(command.packagingLocationId ?? command.locationId)
   if (!packagingWarehouseId || !packagingLocationId) {
     return { ok: false, error: 'pack_location_not_configured' }
   }
-  const fgWarehouseId =
-    str(binding.finishedGoodsWarehouseId ?? binding.fgWarehouseId) || packagingWarehouseId
-  const fgLocationId =
-    str(binding.finishedGoodsLocationId ?? binding.fgLocationId) || packagingLocationId
-
-  const claimedWarehouse = str(command.packagingWarehouseId ?? command.warehouseId)
-  if (claimedWarehouse && claimedWarehouse !== packagingWarehouseId) {
-    return { ok: false, error: 'pack_location_mismatch' }
-  }
-  const claimedLocation = str(command.packagingLocationId ?? command.locationId)
-  if (claimedLocation && claimedLocation !== packagingLocationId) {
-    return { ok: false, error: 'pack_location_mismatch' }
-  }
-  const claimedFgWarehouse = str(command.finishedGoodsWarehouseId)
-  if (claimedFgWarehouse && claimedFgWarehouse !== fgWarehouseId) {
-    return { ok: false, error: 'pack_location_mismatch' }
-  }
-  const claimedFgLocation = str(command.finishedGoodsLocationId)
-  if (claimedFgLocation && claimedFgLocation !== fgLocationId) {
-    return { ok: false, error: 'pack_location_mismatch' }
-  }
+  const fgWarehouseId = str(command.finishedGoodsWarehouseId) || packagingWarehouseId
+  const fgLocationId = str(command.finishedGoodsLocationId) || packagingLocationId
   return {
     ok: true,
     packagingWarehouseId,
     packagingLocationId,
     fgWarehouseId,
     fgLocationId,
+    fromCommand: true,
   }
 }
 
@@ -581,7 +599,12 @@ function sanitizePackagingLines(rawLines, { itemKey }) {
       itemId,
       quantity: roundQty(quantity),
       unitSnapshot: raw?.unitSnapshot != null ? String(raw.unitSnapshot) : undefined,
-      wipBatchId: raw?.wipBatchId != null ? str(raw.wipBatchId) : undefined,
+      wipBatchId:
+        raw?.wipBatchId != null
+          ? str(raw.wipBatchId)
+          : raw?.batchNo != null
+            ? str(raw.batchNo)
+            : undefined,
       note: raw?.note != null ? String(raw.note) : undefined,
     })
   }
@@ -684,13 +707,62 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
   if (!orderId) return fail('invalid_input', 400)
   if (lineId !== PACK_LINE_ID) return fail('invalid_pack_line', 400)
 
-  const order = (production.orders ?? []).find((o) => o.id === orderId)
+  const orderSnap =
+    command.orderSnapshot && str(command.orderSnapshot.id) === orderId
+      ? command.orderSnapshot
+      : null
+  let order = (production.orders ?? []).find((o) => o.id === orderId) ?? null
+  let productionWithOrder = production
+  if (!order && orderSnap) {
+    const status = str(orderSnap.status) || 'active'
+    order = {
+      id: orderId,
+      status: status === 'paused' ? 'active' : status,
+      finishedProductId: str(orderSnap.finishedProductId),
+      warehouseItemId: str(orderSnap.warehouseItemId || orderSnap.finishedProductId),
+      semiFinishedItemId: str(orderSnap.semiFinishedItemId) || undefined,
+      lineId: str(orderSnap.lineId) || PACK_LINE_ID,
+      orderNumber: str(orderSnap.orderNumber) || orderId,
+      packagingBomSnapshot: orderSnap.packagingBomSnapshot ?? undefined,
+    }
+    productionWithOrder = {
+      ...production,
+      orders: [...(production.orders ?? []), order],
+    }
+  }
   if (!order) return fail('not_found', 404)
   if (order.status !== 'active') return fail('order_not_active', 409)
   if (isPeriodClosed(warehouse, reportDate)) return fail('period_closed', 403)
 
   const binding = resolvePackBinding(warehouse, command)
   if (!binding.ok) return fail(binding.error, 400)
+
+  // Prefer productionWithOrder for the rest of confirm so soft orderSnapshot persists.
+  production = productionWithOrder
+
+  let whSeed = warehouse
+  if (binding.fromCommand) {
+    const hasPack = (whSeed.productionLineBindings ?? []).some((b) => {
+      const byLine = normalizePackLineId(b.lineId)
+      const byId = normalizePackLineId(b.id)
+      return byLine === PACK_LINE_ID || byId === PACK_LINE_ID
+    })
+    if (!hasPack) {
+      whSeed = {
+        ...whSeed,
+        productionLineBindings: [
+          ...(whSeed.productionLineBindings ?? []),
+          {
+            id: PACK_LINE_ID,
+            lineId: PACK_LINE_ID,
+            productionWarehouseId: binding.packagingWarehouseId,
+            productionLocationId: binding.packagingLocationId,
+          },
+        ],
+      }
+    }
+  }
+  warehouse = whSeed
 
   const finishedProductId = str(command.finishedProductId)
   if (!finishedProductId) return fail('finished_product_required', 400)

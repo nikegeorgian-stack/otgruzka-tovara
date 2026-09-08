@@ -318,6 +318,45 @@ describe('R2.9L request.post binding/order snapshot fallback', () => {
       out.warehouse.documents.some((d) => d.productionRequestId === REQ && d.type === 'receipt'),
     ).toBe(true)
   })
+
+  it('replay with packLocationId realigns existing WIP location without duplicating docs', () => {
+    const first = applyProductionRequestPost(
+      emptyProd(),
+      emptyWh(),
+      impregnationCmd({
+        consumeLines: [],
+        productionWarehouseId: WH,
+        productionLocationId: LOC,
+      }),
+      ACTOR,
+      NOW,
+    )
+    expect(first.ok).toBe(true)
+    const packLoc = 'edu-loc-pack'
+    const replay = applyProductionRequestPost(
+      first.production,
+      first.warehouse,
+      impregnationCmd({
+        consumeLines: [],
+        productionWarehouseId: WH,
+        productionLocationId: LOC,
+        packLocationId: packLoc,
+      }),
+      ACTOR,
+      NOW,
+    )
+    expect(replay.ok).toBe(true)
+    expect(replay.result.realignedPackLocation).toBe(true)
+    const wipDocs = replay.warehouse.documents.filter(
+      (d) => d.productionRequestId === REQ && d.type === 'receipt',
+    )
+    expect(wipDocs).toHaveLength(1)
+    expect(wipDocs[0].lines[0].locationId).toBe(packLoc)
+    expect(replay.production.wipBatches[0].locationId).toBe(packLoc)
+    expect(
+      replay.warehouse.movements.filter((m) => m.productionRequestId === REQ && m.type === 'receipt'),
+    ).toHaveLength(1)
+  })
 })
 
 describe('R2.9L false completed state guards', () => {

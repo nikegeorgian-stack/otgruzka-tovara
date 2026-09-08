@@ -37,6 +37,7 @@ import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { listAvailableWipAtPackaging } from '@/lib/production/packagingReports'
 import type { ProductionPackagingReport } from '@/lib/production/packagingReports'
 import { buildPackagingReportPrintModel } from '@/lib/production/packagingReportPrint'
+import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 import { shortContentHash } from '@/lib/planner/g5PackagingBom'
 import {
   formatNum,
@@ -278,9 +279,17 @@ export function ProductionPage({
     () => orders.filter((o) => o.status === 'active' || o.status === 'paused'),
     [orders],
   )
+  const packLocationResolve = useMemo(
+    () => resolveProductionLineLocation(warehouse, 'pack'),
+    [warehouse],
+  )
+  const packagingLocationId = packLocationResolve.ok
+    ? packLocationResolve.productionLocationId
+    : warehouse.locations.find((loc) => loc.id === 'pack' || loc.kind === 'packaging')?.id ??
+      'pack'
   const packagingWip = useMemo(
-    () => listAvailableWipAtPackaging(productionStore, warehouse, 'pack'),
-    [productionStore, warehouse],
+    () => listAvailableWipAtPackaging(productionStore, warehouse, packagingLocationId),
+    [productionStore, warehouse, packagingLocationId],
   )
   const activePackagingOrder = useMemo(
     () => activeOrders.find((o) => o.lineId === 'pack') ?? activeOrders[0] ?? null,
@@ -365,7 +374,10 @@ export function ProductionPage({
       lineId: 'pack' as const,
       shiftDate: form.date,
       shift: form.shift,
-      packagingLocationId: warehouse.locations.find((loc) => loc.id === 'pack')?.id ?? 'pack',
+      packagingLocationId,
+      packagingWarehouseId: packLocationResolve.ok
+        ? packLocationResolve.productionWarehouseId
+        : warehouse.locations[0]?.id ?? packagingLocationId,
       finishedProductId:
         activePackagingOrder.finishedProductId ||
         activePackagingOrder.warehouseItemId ||
@@ -376,7 +388,11 @@ export function ProductionPage({
         activePackagingOrder.finishedProductId ||
         activePackagingOrder.semiFinishedItemId ||
         '',
-      semiFinishedItemId: activePackagingOrder.semiFinishedItemId || '',
+      semiFinishedItemId:
+        activePackagingOrder.semiFinishedItemId ||
+        packagingWip[0]?.semiFinishedItemId ||
+        packagingWip[0]?.itemId ||
+        '',
       materialLines: [],
       wipLines: packagingWip.map((line) => ({
         lineId: line.lineId,

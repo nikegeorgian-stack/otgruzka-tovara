@@ -176,4 +176,24 @@ describe('R2.9G G1 overlay catalogue union (SQL 15 vs critical 9)', () => {
     expect(forWh).toHaveLength(forPrc.length)
     expect(forWh.length).toBeGreaterThanOrEqual(14)
   })
+
+  it('empty critical productionLineBindings preserve soft bindings (R2.9L pack)', () => {
+    const softBindings = [
+      {
+        id: 'pack',
+        lineId: 'pack',
+        productionWarehouseId: 'w-main',
+        productionLocationId: 'edu-loc-pack',
+      },
+    ]
+    const legacy = wh(sharedBase, { productionLineBindings: softBindings })
+    const critical = wh(sharedBase, { productionLineBindings: [] })
+    const overlay = resolveAuthoritativeWarehouseOverlay({
+      legacyWarehouse: legacy,
+      criticalWarehouse: critical,
+      criticalRevision: 19,
+      warehouseActive: true,
+    })
+    expect(overlay.warehouse.productionLineBindings).toEqual(softBindings)
+  })
 })

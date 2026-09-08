@@ -26,6 +26,7 @@ import { newId } from '@/lib/production/files'
 import { normalizeProductionRequest } from '@/lib/production/init'
 import { postProductionRequestToWarehouse } from '@/lib/production/postToWarehouse'
 import { buildProductionConsumeLines } from '@/lib/production/consumeLines'
+import { bindingProductionWarehouseId } from '@/lib/warehouse/productionLineLocationConfig'
 import { summarizeRequest } from '@/lib/production/stats'
 import { applyProductionPostToSales } from '@/lib/sales/productionSync'
 import type { ProductionRequest } from '@/lib/production/types'
@@ -653,10 +654,12 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             finishedProductId: order?.finishedProductId ?? fp?.id,
             consumeLines,
             productionWarehouseId:
-              s.warehouse.productionLineBindings?.find(
-                (b) => b.lineId === req.lineId || b.id === req.lineId,
-              )?.productionWarehouseId ??
-              s.warehouse.locations?.[0]?.id ??
+              bindingProductionWarehouseId(
+                s.warehouse.productionLineBindings?.find(
+                  (b) => b.lineId === req.lineId || b.id === req.lineId,
+                ) ?? { productionWarehouseId: '' },
+              ) ||
+              s.warehouse.locations?.[0]?.id ||
               s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
             productionLocationId:
               s.warehouse.productionLineBindings?.find(
@@ -665,6 +668,17 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
               s.warehouse.locations?.find((l) => l.kind === 'wip' || l.kind === 'packaging')?.id ??
               s.warehouse.locations?.[0]?.id ??
               s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
+            packLocationId:
+              s.warehouse.productionLineBindings?.find(
+                (b) => b.lineId === 'pack' || b.id === 'pack',
+              )?.productionLocationId ??
+              s.warehouse.locations?.find((l) => l.kind === 'packaging')?.id,
+            packWarehouseId:
+              bindingProductionWarehouseId(
+                s.warehouse.productionLineBindings?.find(
+                  (b) => b.lineId === 'pack' || b.id === 'pack',
+                ) ?? { productionWarehouseId: '' },
+              ) || undefined,
             orderSnapshot: order
               ? {
                   id: order.id,
@@ -1379,6 +1393,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             finishedProductId: report.finishedProductId,
             warehouseItemId: report.warehouseItemId,
             packagingLocationId: report.packagingLocationId,
+            packagingWarehouseId: report.packagingWarehouseId,
             outputM2: report.outputM2,
             outputMp: report.outputM2,
             outputRolls: report.rollCount ?? 0,
@@ -1387,6 +1402,21 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             batchNo: report.batchNo,
             reportKey: input.idempotencyKey,
             emergencyReason: input.emergencyReason,
+            orderSnapshot: (() => {
+              const order = getStore().production.planner.orders.find(
+                (o) => o.id === report.productionOrderId,
+              )
+              if (!order) return undefined
+              return {
+                id: order.id,
+                status: order.status === 'paused' ? 'active' : order.status,
+                finishedProductId: order.finishedProductId,
+                warehouseItemId: order.warehouseItemId ?? order.finishedProductId,
+                semiFinishedItemId: order.semiFinishedItemId,
+                lineId: order.lineId,
+                orderNumber: order.orderNumber,
+              }
+            })(),
           },
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }

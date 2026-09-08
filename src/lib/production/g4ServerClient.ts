@@ -177,6 +177,12 @@ export function resolveAuthoritativePackagingOverlay(input: {
         documents: input.criticalWarehouse.documents ?? input.legacyWarehouse.documents,
         movements: input.criticalWarehouse.movements ?? input.legacyWarehouse.movements,
         loadingShipments: criticalLoading ?? input.legacyWarehouse.loadingShipments,
+        locations: input.criticalWarehouse.locations?.length
+          ? input.criticalWarehouse.locations
+          : input.legacyWarehouse.locations,
+        productionLineBindings: input.criticalWarehouse.productionLineBindings?.length
+          ? input.criticalWarehouse.productionLineBindings
+          : input.legacyWarehouse.productionLineBindings,
         auditLog: input.criticalWarehouse.auditLog ?? input.legacyWarehouse.auditLog,
       }
     }

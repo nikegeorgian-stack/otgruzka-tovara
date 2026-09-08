@@ -60,6 +60,8 @@ export type ProductionPackagingReport = {
   shiftDate: string
   shift: ProductionShift
   packagingLocationId: string
+  /** Soft/G4 hint — warehouse that owns the pack location (when bindings empty in critical). */
+  packagingWarehouseId?: string
   finishedProductId: string
   warehouseItemId: string
   semiFinishedItemId: string
