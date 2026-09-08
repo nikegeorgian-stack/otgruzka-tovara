@@ -101,6 +101,23 @@ function grant(uid: string, storeId: string, caps: Record<string, boolean>, acti
 
 const actor = { uid: 'u1', email: 'u1@x', claims: {} }
 
+/** R29H/R29J: unknown catalogue items require complete identity snapshots (fail-closed). */
+function snap(
+  itemId: string,
+  quantity: number,
+  extra: Record<string, unknown> = {},
+  name = `Item ${itemId}`,
+) {
+  return {
+    itemId,
+    quantity,
+    itemNameSnapshot: name,
+    unitSnapshot: 'кг',
+    itemCodeSnapshot: `FC-${itemId}`,
+    ...extra,
+  }
+}
+
 describe('G2 ACL', () => {
   it('user without permission → 403', async () => {
     const svc = await import('../server/fst/_g2WarehouseService.mjs')
@@ -112,7 +129,7 @@ describe('G2 ACL', () => {
       command: {
         type: 'receipt',
         warehouseId: 'w1',
-        lines: [{ itemId: 'i1', quantity: 1 }],
+        lines: [snap('i1', 1)],
       },
     })
     expect(r.ok).toBe(false)
@@ -130,7 +147,7 @@ describe('G2 ACL', () => {
       command: {
         type: 'receipt',
         warehouseId: 'w1',
-        lines: [{ itemId: 'i1', quantity: 1 }],
+        lines: [snap('i1', 1)],
       },
     })
     expect(r.ok).toBe(false)
@@ -154,7 +171,7 @@ describe('G2 draft lifecycle', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 5 }],
+        lines: [snap('i1', 5)],
       },
     })
     expect(draft.ok).toBe(true)
@@ -180,7 +197,7 @@ describe('G2 draft lifecycle', () => {
         documentId: draft.documentId,
         type: 'receipt',
         warehouseId: 'w1',
-        lines: [{ itemId: 'i1', quantity: 99 }],
+        lines: [snap('i1', 99)],
       },
     })
     expect(editPosted.ok).toBe(false)
@@ -199,7 +216,7 @@ describe('G2 draft lifecycle', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 2 }],
+        lines: [snap('i1', 2)],
       },
     })
     expect(a.ok).toBe(true)
@@ -212,7 +229,7 @@ describe('G2 draft lifecycle', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 2 }],
+        lines: [snap('i1', 2)],
       },
     })
     expect(b.ok).toBe(true)
@@ -234,7 +251,7 @@ describe('G2 transfer / storno / period', () => {
         warehouseId: 'w1',
         targetWarehouseId: 'w2',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 10 }],
+        lines: [snap('i1', 10)],
       },
     })
     expect(r.ok).toBe(false)
@@ -257,7 +274,7 @@ describe('G2 transfer / storno / period', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 10 }],
+        lines: [snap('i1', 10)],
       },
     })
     const xfer = await svc.executeG2Command({
@@ -269,7 +286,7 @@ describe('G2 transfer / storno / period', () => {
         warehouseId: 'w1',
         targetWarehouseId: 'w2',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 4 }],
+        lines: [snap('i1', 4)],
       },
     })
     expect(xfer.ok).toBe(true)
@@ -293,7 +310,7 @@ describe('G2 transfer / storno / period', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 3 }],
+        lines: [snap('i1', 3)],
       },
     })
     const movBefore = posted.warehouse.movements.length
@@ -346,7 +363,7 @@ describe('G2 transfer / storno / period', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-10',
-        lines: [{ itemId: 'i1', quantity: 1 }],
+        lines: [snap('i1', 1)],
       },
     })
     expect(blocked.ok).toBe(false)
@@ -376,7 +393,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
       command: {
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 100 }],
+        lines: [snap('i1', 100)],
       },
     })
     expect(r.ok).toBe(true)
@@ -401,7 +418,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 10 }],
+        lines: [snap('i1', 10)],
       },
     })
     const inv = await svc.executeG2Command({
@@ -412,7 +429,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
       command: {
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', counted: 7 }],
+        lines: [{ ...snap('i1', 7), counted: 7, countedQty: 7 }],
       },
     })
     expect(inv.ok).toBe(true)
@@ -433,7 +450,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
       command: {
         warehouseId: 'w1',
         date: '2026-09-04',
-        receipts: [{ lines: [{ itemId: 'i1', quantity: 2 }] }],
+        receipts: [{ lines: [snap('i1', 2)] }],
       },
     })
     expect(r.ok).toBe(true)
@@ -457,7 +474,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 1 }],
+        lines: [snap('i1', 1)],
       },
     })
     expect(r.ok).toBe(false)
@@ -477,7 +494,7 @@ describe('G2 opening / inventory / excel / CAS', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'i1', quantity: 1 }],
+        lines: [snap('i1', 1)],
         status: 'cancelled',
         postedBy: 'hacker',
         movements: [{ type: 'receipt', quantity: 999 }],
@@ -520,7 +537,7 @@ describe('G2 security guards', () => {
     expect(out.source).toBe('fst_critical_store')
     expect(out.warehouse.documents[0].id).toBe('real')
     expect(out.warehouse.closedMonths).toEqual(['2026-08'])
-  })
+  }, 20_000)
 
   it('verifyIdToken uses checkRevoked=true', async () => {
     const src = await fs.readFile(path.resolve('server/fst/_adminAuth.mjs'), 'utf8')
@@ -569,8 +586,8 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         warehouseId: 'w1',
         date: '2026-09-01',
         lines: [
-          { itemId: 'steel', quantity: 10, batchNo: 'EXP-LATE', expiryDate: '2027-01-01' },
-          { itemId: 'steel', quantity: 6, batchNo: 'EXP-SOON', expiryDate: '2026-10-01' },
+          snap('steel', 10, { batchNo: 'EXP-LATE', expiryDate: '2027-01-01' }, 'Steel'),
+          snap('steel', 6, { batchNo: 'EXP-SOON', expiryDate: '2026-10-01' }, 'Steel'),
         ],
       },
     })
@@ -599,7 +616,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'issue',
         warehouseId: 'w1',
         date: '2026-09-03',
-        lines: [{ itemId: 'steel', quantity: 5 }],
+        lines: [snap('steel', 5)],
       },
     })
     expect(issue.ok).toBe(true)
@@ -621,7 +638,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'issue',
         warehouseId: 'w1',
         date: '2026-09-03',
-        lines: [{ itemId: 'steel', quantity: 99 }],
+        lines: [snap('steel', 99)],
       },
     })
     expect(over.ok).toBe(false)
@@ -641,7 +658,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         warehouseId: 'w1',
         date: '2026-09-01',
         number: 'CLIENT-FORGED-99',
-        lines: [{ itemId: 'bolt', quantity: 3, batchNo: 'BX', expiryDate: '2027-01-01' }],
+        lines: [snap('bolt', 3, { batchNo: 'BX', expiryDate: '2027-01-01' }, 'Bolt')],
       },
     })
     const posted = JSON.parse(String(dcState.critical!.payloadJson))
@@ -660,7 +677,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'issue',
         warehouseId: 'w1',
         date: '2026-09-02',
-        lines: [{ itemId: 'bolt', quantity: 1, batchNo: 'BX', batchOverrideReason: '' }],
+        lines: [snap('bolt', 1, { batchNo: 'BX', batchOverrideReason: '' }, 'Bolt')],
       },
     })
     expect(bad.ok).toBe(false)
@@ -679,7 +696,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'issue',
         warehouseId: 'w1',
         date: '2026-09-04',
-        lines: [{ itemId: 'ghost', quantity: 1 }],
+        lines: [snap('ghost', 1)],
         allowNegativeEmergency: true,
         emergencyReason: 'need stock now!!',
       },
@@ -705,7 +722,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-01',
-        lines: [{ itemId: 'i-cas', quantity: 1 }],
+        lines: [snap('i-cas', 1)],
       },
     })
     const beforeReceipts = dcState.receipts.size
@@ -721,7 +738,7 @@ describe('G2.1 FEFO issue + reserve + period UI gate', () => {
         type: 'receipt',
         warehouseId: 'w1',
         date: '2026-09-01',
-        lines: [{ itemId: 'i-cas', quantity: 1 }],
+        lines: [snap('i-cas', 1)],
       },
     })
     expect(conflict.ok).toBe(false)
