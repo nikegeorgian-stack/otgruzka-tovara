@@ -89,6 +89,7 @@ export function useAppStore() {
   const [store, setStoreInner] = useState<AppStore>(() =>
     applyAppStoreSeeds(purgeExpiredTrash(initialLoad.current.store)),
   )
+  const storeRef = useRef(store)
   const setStore = useCallback<SetStore>((action, meta) => {
     const resolvedMeta = meta ?? { origin: 'user' as const }
     const origin = resolvedMeta.origin
@@ -99,6 +100,9 @@ export function useAppStore() {
       }
       const next = typeof action === 'function' ? action(prev) : action
       applyTrackedStoreUpdate(prev, next, resolvedMeta)
+      // Eager: getStore() must see this before the next React render
+      // (e.g. upsertLoadingShipment → postLoadingShipment in the same click).
+      storeRef.current = next
       return next
     })
   }, [])
@@ -129,8 +133,6 @@ export function useAppStore() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
 
-  const storeRef = useRef(store)
-  storeRef.current = store
   const activeMonthRef = useRef(activeMonth)
   activeMonthRef.current = activeMonth
 

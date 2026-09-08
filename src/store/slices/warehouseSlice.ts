@@ -1377,8 +1377,9 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       shipmentId: string,
       args?: { keeperId?: string; keeperName?: string },
     ) {
-      const storeNow = getStore()
       const { isG5SalesPlanningActive } = await import('@/lib/planner/g5Activation')
+      // Re-read after await so upsert in the same click is visible via storeRef.
+      const storeNow = getStore()
       if (isG5SalesPlanningActive(storeNow)) {
         const { isG5WebPath, g5SalesShipmentPost, mirrorG5Ack } = await import(
           '@/lib/planner/g5ServerClient'
