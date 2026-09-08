@@ -18,7 +18,7 @@ type Props = {
   order: SalesOrder
   counterparties: Counterparty[]
   finishedProducts: FinishedProduct[]
-  onSave: (order: SalesOrder) => void
+  onSave: (order: SalesOrder) => void | Promise<void>
   onClose: () => void
   onUpsertCounterparty?: (c: Counterparty) => void
   onOpenCounterpartiesJournal?: () => void
@@ -187,7 +187,7 @@ export function SalesOrderModal({
     setDraft((d) => ({ ...d, lines: d.lines.filter((l) => l.id !== id) }))
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!draft.customer.trim() && !draft.counterpartyId) {
       setError(t('sales.modal.noCustomer'))
       return
@@ -198,7 +198,13 @@ export function SalesOrderModal({
       return
     }
     setDirty(false)
-    onSave({ ...draft, lines: validLines })
+    setError(null)
+    try {
+      await onSave({ ...draft, lines: validLines })
+    } catch (err) {
+      setDirty(true)
+      setError(err instanceof Error ? err.message : String(err || t('sales.modal.noLines')))
+    }
   }
 
   return (

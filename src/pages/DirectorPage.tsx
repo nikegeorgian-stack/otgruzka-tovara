@@ -1119,8 +1119,8 @@ export function DirectorPage({
               }),
             )
           }}
-          onSave={(o) => {
-            void onUpsertSalesOrder(o)
+          onSave={async (o) => {
+            await onUpsertSalesOrder(o)
             setEditing(null)
           }}
           onClose={() => setEditing(null)}
