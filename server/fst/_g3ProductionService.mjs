@@ -2289,13 +2289,18 @@ export async function executeG3Command(input) {
   const receipt = await loadReceipt(dc, idempotencyKey, storeId)
   if (receipt?.conflict) return fail('not_found', 404)
   if (receipt?.corrupt) return fail('receipt_corrupt', 500)
-  if (receipt?.result) return ok({ ...receipt.result, idempotent: true })
+  const requestPostRealign =
+    commandType === 'production.request.post' &&
+    Boolean(String(rawCommand.packLocationId ?? '').trim())
+  if (receipt?.result && !requestPostRealign) {
+    return ok({ ...receipt.result, idempotent: true })
+  }
 
   const critical = await loadOrInitCritical(dc, storeId, actor.uid)
   if (!critical.ok) return critical
 
   const embedded = embeddedReceipt(critical.payload, idempotencyKey)
-  if (embedded?.result) {
+  if (embedded?.result && !requestPostRealign) {
     await saveReceipt(
       dc,
       idempotencyKey,
@@ -2502,6 +2507,28 @@ export async function executeG3Command(input) {
   if (!applied.ok) return applied
   production = applied.production ?? production
   warehouse = applied.warehouse ?? warehouse
+
+  // request.post replay with packLocationId: skip CAS when already aligned
+  if (
+    commandType === 'production.request.post' &&
+    applied.result?.idempotent === true &&
+    !applied.result?.realignedPackLocation
+  ) {
+    return ok({
+      ...applied.result,
+      criticalRevision: critical.revision,
+      idempotent: true,
+      warehouse: {
+        documents: warehouse.documents,
+        movements: warehouse.movements,
+      },
+      production: {
+        shiftReports: production.shiftReports,
+        wipBatches: production.wipBatches,
+        finishedGoodsLots: production.finishedGoodsLots,
+      },
+    })
+  }
 
   const touchesWarehouse = warehouseBeforeHash !== stableDomainHash(warehouse)
   const resultPreview = {
