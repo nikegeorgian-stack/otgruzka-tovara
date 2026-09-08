@@ -191,6 +191,7 @@ export function canReleaseFinishedGoodsQc(
   access?: AccessStore | null,
 ): boolean {
   if (!user?.active) return false
+  if (user.roleId === 'sysadmin') return true
   if (user.roleId === 'otc') return true
   if (user.roleId === 'operations_director') {
     return access?.roleAllowQcRelease?.operations_director === true
