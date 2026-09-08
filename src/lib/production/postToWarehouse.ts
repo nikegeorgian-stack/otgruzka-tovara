@@ -64,6 +64,10 @@ function buildConsumeSteps(
   formulationRecipes: FormulationRecipe[],
 ): PostWarehouseDocumentInput[] {
   const orderIds = linkedOrderIdsFromRequest(request)
+  const evidence = {
+    movements: warehouse.movements,
+    documents: warehouse.documents,
+  }
   const grouped = groupConsumeByWarehouse(
     buildProductionConsumeLines(
       request,
@@ -72,11 +76,13 @@ function buildConsumeSteps(
       warehouse.items,
       packStore,
       formulationRecipes,
+      evidence,
     ),
   )
   const day = request.date.replace(/-/g, '')
   const steps: PostWarehouseDocumentInput[] = []
   for (const [warehouseId, lines] of grouped) {
+    if (!warehouseId) continue
     const number = suggestDocNumber(warehouse.documents, 'issue', request.date) || `ПР-РХ-${day}`
     steps.push({
       type: 'issue',

@@ -6,6 +6,10 @@ import type { PackagingRecipeStore } from '@/lib/packaging/types'
 import { linkedOrderIdsFromRequest } from '@/lib/planner/generateRequests'
 import { estimatedOrderedRolls } from '@/lib/planner/rolls'
 import type { ProductionOrder } from '@/lib/planner/types'
+import {
+  resolveWarehouseIdForItem,
+  type DocumentPickerWarehouseEvidence,
+} from '@/lib/warehouse/locationKindFilter'
 import type { WarehouseItem } from '@/lib/warehouse/types'
 import {
   estimateImpregnationConsumeKg,
@@ -42,9 +46,12 @@ function pushLine(
   out: ProductionConsumeLine[],
   item: WarehouseItem | undefined,
   quantity: number,
+  evidence?: DocumentPickerWarehouseEvidence,
 ) {
   if (!item || !(quantity > 0)) return
-  out.push({ itemId: item.id, quantity, warehouseId: item.warehouseId })
+  const warehouseId = resolveWarehouseIdForItem(item.id, item.warehouseId, evidence)
+  if (!warehouseId) return
+  out.push({ itemId: item.id, quantity, warehouseId })
 }
 
 function sumFact(rows: { factQty?: number }[] | undefined): number {
@@ -62,6 +69,7 @@ export function buildProductionConsumeLines(
   warehouseItems: WarehouseItem[],
   packStore: PackagingRecipeStore,
   formulationRecipes: FormulationRecipe[] = [],
+  evidence?: DocumentPickerWarehouseEvidence,
 ): ProductionConsumeLine[] {
   const order = firstOrder(request, orders)
   const fp = order?.finishedProductId
@@ -93,11 +101,13 @@ export function buildProductionConsumeLines(
       lines,
       boxItem,
       boxFact > 0 ? boxFact : rollsPerBox > 0 ? Math.ceil(rolls / rollsPerBox) : 0,
+      evidence,
     )
     pushLine(
       lines,
       palletItem,
       palletFact > 0 ? palletFact : rollsPerPallet > 0 ? Math.ceil(rolls / rollsPerPallet) : 0,
+      evidence,
     )
     return lines
   }
@@ -111,7 +121,7 @@ export function buildProductionConsumeLines(
     request.rawRollQty && request.rawRollQty > 0
       ? request.rawRollQty
       : estimatedOrderedRolls(goodMp, order?.metersPerRoll ?? fp?.metersPerRoll) ?? 0
-  pushLine(lines, rawItem, rawQty)
+  pushLine(lines, rawItem, rawQty, evidence)
 
   const recipe = resolveFormulationRecipe(order, fp, formulationRecipes)
   const impregnationItem = itemById(warehouseItems, recipe?.outputWarehouseItemId)
@@ -120,7 +130,7 @@ export function buildProductionConsumeLines(
     rollWidthM: resolveRollWidthM(fp),
     grammageGsm: resolveImpregnationGrammage(recipe, fp),
   })
-  pushLine(lines, impregnationItem, impregnationKg)
+  pushLine(lines, impregnationItem, impregnationKg, evidence)
 
   return lines
 }
@@ -130,6 +140,7 @@ export function groupConsumeByWarehouse(
 ): Map<string, ProductionConsumeLine[]> {
   const map = new Map<string, ProductionConsumeLine[]>()
   for (const line of lines) {
+    if (!line.warehouseId) continue
     const cur = map.get(line.warehouseId) ?? []
     cur.push(line)
     map.set(line.warehouseId, cur)

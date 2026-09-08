@@ -3,7 +3,14 @@ import {
   collectItemIdsWithWarehouseEvidence,
   filterItemsForDocumentPicker,
   itemAllowedForDocumentWarehouse,
+  resolveWarehouseIdForItem,
 } from '@/lib/warehouse/locationKindFilter'
+import { buildProductionConsumeLines } from '@/lib/production/consumeLines'
+import { emptyProductionRequest } from '@/lib/production/init'
+import { emptyProductionOrder } from '@/lib/planner/init'
+import type { FinishedProduct } from '@/lib/finishedProducts/types'
+import type { FormulationRecipe } from '@/lib/formulations/types'
+import type { PackagingRecipeStore } from '@/lib/packaging/types'
 import { resolveWarehouseLocationsForPicker } from '@/lib/warehouse/resolveWarehouseLocationsForPicker'
 import { searchNomenclature } from '@/lib/warehouse/nomenclatureSearch'
 import type { WarehouseItem, WarehouseLocation, WarehouseStore } from '@/lib/warehouse/types'
@@ -148,5 +155,104 @@ describe('R29L document picker: locations=[] + legacy warehouseId=null', () => {
     expect(list[0]).toBe(mesh)
     expect(list[0].id).toBe('edu-cello-mesh-160-10-20260908')
     expect(list[0].internalCode).toBe('FC-000027')
+  })
+
+  it('resolveWarehouseIdForItem uses card id or G2 evidence, never other WH alone', () => {
+    expect(resolveWarehouseIdForItem('x', WH)).toBe(WH)
+    expect(resolveWarehouseIdForItem('x', null)).toBeUndefined()
+    expect(
+      resolveWarehouseIdForItem('mesh', null, {
+        movements: [{ itemId: 'mesh', warehouseId: WH }],
+      }),
+    ).toBe(WH)
+    expect(
+      resolveWarehouseIdForItem('mesh', '', {
+        movements: [{ itemId: 'mesh', warehouseId: OTHER }],
+        documents: [{ warehouseId: WH, lines: [{ itemId: 'mesh' }] }],
+      }, WH),
+    ).toBe(WH)
+  })
+
+  it('consume lines resolve legacy null warehouseId via G2 evidence (no crash key)', () => {
+    const mesh = item({
+      id: 'edu-cello-mesh-160-10-20260908',
+      name: 'EDU сетка',
+      warehouseId: undefined as unknown as string,
+      unit: 'рул',
+    })
+    const impreg = item({
+      id: '19344ded-ed41-4dd6-9494-db443ee8335f',
+      name: 'РП-0003',
+      warehouseId: undefined as unknown as string,
+      unit: 'кг',
+    })
+    const fp = {
+      id: 'fp1',
+      name: 'EDU Celloplex',
+      active: true,
+      warehouseItemId: 'fg1',
+      defaultRawMaterialItemId: mesh.id,
+      metersPerRoll: 50,
+      rollWidthM: 1.6,
+    } as FinishedProduct
+    const order = {
+      ...emptyProductionOrder(),
+      id: 'edu-cello-planner-order-20260908',
+      finishedProductId: fp.id,
+      rawMaterialItemId: mesh.id,
+      metersPerRoll: 50,
+    }
+    const recipe = {
+      id: 'r1',
+      active: true,
+      outputWarehouseItemId: impreg.id,
+      finishedProductId: fp.id,
+    } as FormulationRecipe
+    const req = {
+      ...emptyProductionRequest(),
+      lineId: '1' as const,
+      orderId: order.id,
+      rawRollQty: 2,
+      planSegments: [{ id: 's1', orderId: order.id, plannedQtyMp: 12.5 }],
+      factRows: [
+        {
+          ...emptyProductionRequest().factRows[0],
+          ratl1: { qtyMp: 12.5 },
+        },
+      ],
+    }
+    const pack: PackagingRecipeStore = { items: [], nextCode: 1, boxes: [], nextBoxCode: 1 }
+    const evidence = {
+      movements: [
+        { itemId: mesh.id, warehouseId: WH },
+        { itemId: impreg.id, warehouseId: WH },
+      ],
+      documents: [] as { warehouseId?: string; lines: { itemId: string }[] }[],
+    }
+    const lines = buildProductionConsumeLines(
+      req,
+      [order],
+      [fp],
+      [mesh, impreg],
+      pack,
+      [recipe],
+      evidence,
+    )
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) {
+      expect(line.warehouseId).toBe(WH)
+      expect(typeof line.warehouseId.slice(0, 4)).toBe('string')
+    }
+    // Without evidence: legacy null must not emit undefined warehouseId keys
+    const noEvidence = buildProductionConsumeLines(
+      req,
+      [order],
+      [fp],
+      [mesh, impreg],
+      pack,
+      [recipe],
+    )
+    expect(noEvidence.every((l) => Boolean(l.warehouseId))).toBe(true)
+    expect(noEvidence).toEqual([])
   })
 })

@@ -80,6 +80,34 @@ export type DocumentPickerWarehouseEvidence = {
   documents?: Pick<WarehouseDocument, 'warehouseId' | 'lines'>[]
 }
 
+/**
+ * Resolve warehouse for an item: card warehouseId if set, else unique G2
+ * warehouse from movements/document lines (legacy null-warehouse items).
+ */
+export function resolveWarehouseIdForItem(
+  itemId: string,
+  itemWarehouseId: string | null | undefined,
+  evidence?: DocumentPickerWarehouseEvidence,
+  preferredWarehouseId?: string,
+): string | undefined {
+  const card = typeof itemWarehouseId === 'string' ? itemWarehouseId.trim() : ''
+  if (card) return card
+  if (!evidence) return undefined
+  const candidates = new Set<string>()
+  for (const m of evidence.movements ?? []) {
+    if (m.itemId === itemId && m.warehouseId) candidates.add(m.warehouseId)
+  }
+  for (const d of evidence.documents ?? []) {
+    if (!d.warehouseId) continue
+    if ((d.lines ?? []).some((l) => l.itemId === itemId)) candidates.add(d.warehouseId)
+  }
+  if (preferredWarehouseId && candidates.has(preferredWarehouseId)) {
+    return preferredWarehouseId
+  }
+  if (candidates.size === 0) return undefined
+  return [...candidates].sort()[0]
+}
+
 export function filterItemsForDocumentPicker(
   items: WarehouseItem[],
   categories: WarehouseCategory[],
