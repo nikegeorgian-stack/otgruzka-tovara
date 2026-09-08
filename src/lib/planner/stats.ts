@@ -61,6 +61,10 @@ export type CalendarCell = {
   }[]
 }
 
+function dateStartsWithMonth(value: unknown, month: string): boolean {
+  return typeof value === 'string' && value.length > 0 && value.startsWith(month)
+}
+
 export function buildCalendarMonth(
   planner: PlannerStore,
   requests: ProductionRequest[],
@@ -69,17 +73,17 @@ export function buildCalendarMonth(
 ): CalendarCell[] {
   const daysInMonth = new Set<string>()
   for (const order of planner.orders) {
-    for (const dp of order.dayPlans) {
-      if (dp.date.startsWith(month)) daysInMonth.add(dp.date)
+    for (const dp of order.dayPlans ?? []) {
+      if (dateStartsWithMonth(dp?.date, month)) daysInMonth.add(dp.date)
     }
   }
   const sorted = [...daysInMonth].sort()
   return sorted.map((date) => ({
     date,
     orders: planner.orders
-      .filter((o) => o.dayPlans.some((p) => p.date === date))
+      .filter((o) => (o.dayPlans ?? []).some((p) => p?.date === date))
       .map((o) => {
-        const dp = o.dayPlans.find((p) => p.date === date)!
+        const dp = (o.dayPlans ?? []).find((p) => p?.date === date)!
         return {
           orderId: o.id,
           orderNumber: o.orderNumber,
@@ -108,9 +112,9 @@ export function buildMonthReport(
 ): PlannerReport {
   const inMonth = planner.orders.filter(
     (o) =>
-      o.startDate.startsWith(month) ||
-      o.endDate.startsWith(month) ||
-      o.dayPlans.some((p) => p.date.startsWith(month)),
+      dateStartsWithMonth(o.startDate, month) ||
+      dateStartsWithMonth(o.endDate, month) ||
+      (o.dayPlans ?? []).some((p) => dateStartsWithMonth(p?.date, month)),
   )
   const orders = inMonth.map((o) => summarizeOrder(o, requests))
   return {
