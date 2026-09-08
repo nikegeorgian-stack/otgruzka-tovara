@@ -209,7 +209,10 @@ export function isG4WebAuthoritativePath(): boolean {
 }
 
 export function isG4PackagingQcActive(production: Record<string, unknown> | null | undefined): boolean {
-  return production?.g4PackagingQcActive === true
+  if (!production) return false
+  if (production.g4PackagingQcActive === true) return true
+  // Critical packaging overlay stamps revision even if boolean is briefly missing.
+  return production.g4CriticalRevision != null && Number(production.g4CriticalRevision) > 0
 }
 
 export function mirrorG4Ack(

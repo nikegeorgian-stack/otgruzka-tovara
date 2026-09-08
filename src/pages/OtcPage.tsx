@@ -236,32 +236,10 @@ export function OtcPage({
   }
 
   async function handleRelease(lot: FinishedGoodsLot) {
-    const { isG4WebAuthoritativePath, isG4PackagingQcActive } = await import(
-      '@/lib/production/g4ServerClient'
-    )
-    const g4Active =
-      isG4WebAuthoritativePath() &&
-      isG4PackagingQcActive(productionStore as unknown as Record<string, unknown>)
-
-    // G4 release re-verifies SQL qcAttachmentRecords + Storage; soft preview must not
-    // block when packagingQc is authoritative (soft qcAttachments are projection only).
-    if (!g4Active) {
-      const preview = previewReleaseFinishedGoodsLot(productionStore, {
-        lotId: lot.id,
-        access,
-        actor,
-        attachments: {
-          passportAttachmentId: lot.passportAttachmentId,
-          protocolAttachmentId: lot.protocolAttachmentId,
-        },
-      }).result
-      if (!preview.ok) {
-        setNotice(t(preview.error ?? 'otc.qc.error'))
-        return
-      }
-    }
-
-    if (g4Active) {
+    const { isG4WebAuthoritativePath } = await import('@/lib/production/g4ServerClient')
+    // Web packagingQc: productionSlice.releaseFinishedGoodsLot already chooses G4 vs
+    // inactive gate. Soft attachment preview must not block — G4 verifies SQL+Storage.
+    if (isG4WebAuthoritativePath()) {
       const result = await onReleaseFinishedGoodsLot({
         lotId: lot.id,
         access,
@@ -275,31 +253,17 @@ export function OtcPage({
       return
     }
 
-    if (import.meta.env.VITE_FST_WEB === 'true') {
-      void qcReleaseLot({
-        storeId: FST_SHARED_STORE_DOC_ID,
-        lotId: lot.id,
-        idempotencyKey: `qc-release::${lot.id}`,
-      }).then((result) => {
-        if (!result.ok) {
-          setNotice(result.message)
-          return
-        }
-        const decision = (result.data as { decision?: { id?: string; revision?: number; decidedByUid?: string; decidedAt?: string } })
-          ?.decision
-        if (!decision?.id) {
-          setNotice('QC-сервер не вернул decision id')
-          return
-        }
-        onMirrorServerQcRelease({
-          lotId: lot.id,
-          decisionId: decision.id,
-          decisionRevision: decision.revision,
-          decidedByUid: decision.decidedByUid,
-          decidedAt: decision.decidedAt,
-        })
-        setNotice(t('otc.qc.released'))
-      })
+    const preview = previewReleaseFinishedGoodsLot(productionStore, {
+      lotId: lot.id,
+      access,
+      actor,
+      attachments: {
+        passportAttachmentId: lot.passportAttachmentId,
+        protocolAttachmentId: lot.protocolAttachmentId,
+      },
+    }).result
+    if (!preview.ok) {
+      setNotice(t(preview.error ?? 'otc.qc.error'))
       return
     }
 
