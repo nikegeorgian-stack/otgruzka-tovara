@@ -23,7 +23,7 @@ import { KanbanViewToggle, type KanbanViewMode } from '@/components/kanban'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { canActivateProductionOrder } from '@/lib/planner/activateGate'
-import { addDaysIso, todayIso } from '@/lib/planner/dates'
+import { addDaysIso } from '@/lib/planner/dates'
 import { emptyProductionOrder } from '@/lib/planner/init'
 import {
   extractSolidsPct,
@@ -206,10 +206,13 @@ export function PlannerPage({
   const [editing, setEditing] = useState(false)
   const [ordersView, setOrdersView] = useState<KanbanViewMode>('list')
 
-  const today = todayIso()
+  // Inline date — avoid cross-chunk export aliasing issues on web bundles.
+  const today = new Date().toISOString().slice(0, 10)
   /** Default window for a new order — not the whole month filter range. */
   function defaultNewOrderDates(monthYm: string): { start: string; end: string } {
-    const start = today.startsWith(monthYm) ? today : `${monthYm}-01`
+    const ym =
+      typeof monthYm === 'string' && monthYm.length >= 7 ? monthYm.slice(0, 7) : today.slice(0, 7)
+    const start = today.startsWith(ym) ? today : `${ym}-01`
     return { start, end: addDaysIso(start, 7) }
   }
 
@@ -575,7 +578,7 @@ export function PlannerPage({
             ] as const
           ).map(([id, key]) => ({
             id,
-            label: key.startsWith('planner.') ? t(key) : key,
+            label: typeof key === 'string' && key.startsWith('planner.') ? t(key) : String(key ?? id),
           }))}
           value={tab}
           onChange={setTab}
