@@ -7,6 +7,7 @@ import type {
   EadZoneKey,
   GravimetricTriple,
   ImpregnationQcComputed,
+  ImpregnationQcRecord,
   IncomingControlComputed,
   IncomingMaterialKind,
   QcPassStatus,
@@ -208,6 +209,18 @@ export function computeImpregnationQc(args: {
   }
 
   return { nvPct, absDeviationPp, relDeviation, status }
+}
+
+/** Safe display/read for partial cloud rows missing `computed`. */
+export function resolveImpregnationQcComputed(
+  row: Pick<ImpregnationQcRecord, 'computed' | 'gravimetric' | 'theoreticalNvPct' | 'nvTolerancePp'>,
+): ImpregnationQcComputed {
+  if (row.computed && typeof row.computed === 'object') return row.computed
+  return computeImpregnationQc({
+    gravimetric: row.gravimetric ?? {},
+    theoreticalNvPct: row.theoreticalNvPct,
+    nvTolerancePp: row.nvTolerancePp ?? 5,
+  })
 }
 
 import type { Locale } from '@/i18n/types'

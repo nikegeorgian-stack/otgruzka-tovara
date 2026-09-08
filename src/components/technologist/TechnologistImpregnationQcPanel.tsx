@@ -5,7 +5,12 @@ import { FormField } from '@/components/ui/FormField'
 import { Input } from '@/components/ui/Input'
 import { useConfirm } from '@/context/ConfirmContext'
 import { useI18n } from '@/context/I18nContext'
-import { computeImpregnationQc, qcStatusLabel, theoreticalNvFromRecipe } from '@/lib/technologist/calc'
+import {
+  computeImpregnationQc,
+  qcStatusLabel,
+  resolveImpregnationQcComputed,
+  theoreticalNvFromRecipe,
+} from '@/lib/technologist/calc'
 import type { FormulationRecipe, FormulationStore } from '@/lib/formulations/types'
 import type { ImpregnationQcRecord, TechnologistQcStore } from '@/lib/technologist/types'
 import { QcStatusBadge } from './QcStatusBadge'
@@ -217,15 +222,18 @@ export function TechnologistImpregnationQcPanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {rows.map((r) => {
+                  // Legacy/partial cloud rows may omit computed — never crash the QC tab.
+                  const computed = resolveImpregnationQcComputed(r)
+                  return (
                   <tr key={r.id}>
                     <td>{r.recipeCode || '—'}</td>
                     <td>{r.controlledAt || r.manufacturedAt || '—'}</td>
-                    <td className="text-right font-mono">{r.computed.nvPct ?? '—'}%</td>
+                    <td className="text-right font-mono">{computed.nvPct ?? '—'}%</td>
                     <td>
                       <QcStatusBadge
-                        status={r.computed.status}
-                        label={qcStatusLabel(r.computed.status, locale)}
+                        status={computed.status}
+                        label={qcStatusLabel(computed.status, locale)}
                       />
                     </td>
                     <td className="text-right">
@@ -247,7 +255,8 @@ export function TechnologistImpregnationQcPanel({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
