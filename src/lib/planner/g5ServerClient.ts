@@ -434,9 +434,13 @@ function coerceG5SalesOrderRow(
   const id = String(row.id ?? prev?.id ?? '')
   const now = new Date().toISOString()
   const rawStatus = String(row.status ?? prev?.status ?? 'draft')
+  // G5 authoritative terminal state is `fulfilled`; soft UI uses `completed`.
+  const normalizedStatus = rawStatus === 'fulfilled' ? 'completed' : rawStatus
   const status = (
-    ['draft', 'confirmed', 'in_production', 'shipped', 'completed', 'cancelled'].includes(rawStatus)
-      ? rawStatus
+    ['draft', 'confirmed', 'in_production', 'shipped', 'completed', 'cancelled'].includes(
+      normalizedStatus,
+    )
+      ? normalizedStatus
       : 'draft'
   ) as SalesOrderStatus
   const commercial =
