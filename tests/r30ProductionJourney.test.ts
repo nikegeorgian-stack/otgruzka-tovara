@@ -15,6 +15,8 @@ import {
   clearProductionCycleContext,
   deriveProductionJourney,
   displayCycleRef,
+  formatProductionCycleOrderOptionLabel,
+  listProductionCycleSalesOrderOptions,
   loadProductionCycleContext,
   mergeProductionCycleContext,
   roleCanReachStageView,
@@ -435,5 +437,274 @@ describe('R3.0 ProductionJourneyPanel / App wiring smoke', () => {
     const src = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
     expect(src).toContain('ProductionJourneyPanel')
     expect(src).toContain("from '@/components/productionCycle'")
+  })
+})
+
+describe('R3.0 sales order selector (soft + G5 anchors)', () => {
+  function completedCycleStore(soId: string, opts?: { soft?: boolean; fulfilled?: boolean }): AppStore {
+    let store = baseStore()
+    const status = opts?.fulfilled ? ('fulfilled' as SalesOrder['status']) : 'completed'
+    const softOrder = salesOrder({
+      id: soId,
+      orderNumber: 'ЗК-2026-0099',
+      customer: 'Celloplex',
+      status,
+      commercialStatus: opts?.fulfilled ? ('completed' as SalesOrder['commercialStatus']) : 'completed',
+      fulfillmentStatus: 'shipped',
+      lines: [
+        {
+          id: 'line-1',
+          finishedProductId: 'fp-1',
+          productName: 'EDU Celloplex 160/10',
+          category: 'ratl1',
+          qtyMp: 12.5,
+          productionOrderIds: ['po-sel'],
+        },
+      ],
+    })
+    store = {
+      ...store,
+      sales: {
+        ...store.sales,
+        orders: opts?.soft === false ? [] : [softOrder],
+      },
+      production: {
+        ...store.production,
+        planner: {
+          ...store.production.planner,
+          orders: [
+            productionOrder({
+              id: 'po-sel',
+              orderNumber: 'ЗП-0099',
+              salesOrderId: soId,
+              productName: 'EDU Celloplex 160/10',
+              customer: 'Celloplex',
+            }),
+          ],
+        },
+        packagingReports: [
+          {
+            id: 'pr-sel',
+            number: 'УП-SEL',
+            status: 'confirmed',
+            productionOrderId: 'po-sel',
+            lineId: 'pack',
+            shiftDate: '2026-09-08',
+            shift: 'day',
+            packagingLocationId: 'loc',
+            finishedProductId: 'fp-1',
+            warehouseItemId: 'wh',
+            semiFinishedItemId: 'wip',
+            materialLines: [],
+            wipLines: [],
+            outputM2: 1,
+            rollCount: 1,
+            palletCount: 1,
+            batchNo: 'B-SEL',
+            createdAt: '2026-09-08T10:00:00.000Z',
+            updatedAt: '2026-09-08T10:00:00.000Z',
+            idempotencyKey: 'ik-sel',
+          },
+        ],
+        finishedGoodsLots: [
+          {
+            id: 'lot-sel',
+            warehouseItemId: 'wh',
+            finishedProductId: 'fp-1',
+            batchNo: 'B-SEL',
+            productionOrderId: 'po-sel',
+            packagingReportId: 'pr-sel',
+            sourceShiftReportIds: [],
+            outputM2: 1,
+            rollCount: 1,
+            palletCount: 1,
+            packagingDate: '2026-09-08',
+            warehouseId: 'w1',
+            locationId: 'l1',
+            qcStatus: 'released',
+            serverQcDecisionStatus: 'released',
+            quantityProduced: 1,
+            quantityQcReleased: 1,
+            quantityShipped: 1,
+            quantityRemaining: 0,
+            createdAt: '2026-09-08T10:00:00.000Z',
+            updatedAt: '2026-09-08T10:00:00.000Z',
+            transactionGroupId: 'tg-sel',
+          },
+        ],
+        shiftReports: [
+          {
+            id: 'sr-sel',
+            number: 'СМ-SEL',
+            status: 'confirmed',
+            productionOrderId: 'po-sel',
+            lineId: 'line1',
+            shiftDate: '2026-09-08',
+            shift: 'day',
+            recipeNormSnapshot: {} as never,
+            productionLocationId: 'p',
+            packagingLocationId: 'pk',
+            scrapLocationId: 's',
+            materialLines: [],
+            wasteLines: [],
+            outputM2: 1,
+            rollCount: 1,
+            semiFinishedItemId: 'wip',
+            createdAt: '2026-09-08T10:00:00.000Z',
+            updatedAt: '2026-09-08T10:00:00.000Z',
+            idempotencyKey: 'ik-sr-sel',
+          },
+        ],
+      },
+      warehouse: {
+        ...store.warehouse,
+        loadingShipments: [
+          {
+            id: 'ls-sel',
+            number: 'ПГ-SEL',
+            date: '2026-09-08',
+            warehouseId: 'w1',
+            containerId: 'c45',
+            payloadKg: 1,
+            palletPlacesLimit: 1,
+            counterpartyName: 'Celloplex',
+            orderNo: 'ЗК-2026-0099',
+            salesOrderId: soId,
+            lines: [],
+            totalsRolls: 0,
+            totalsNetKg: 0,
+            totalsGrossKg: 0,
+            totalsAreaM2: 0,
+            status: 'posted',
+            createdAt: '2026-09-08T10:00:00.000Z',
+            updatedAt: '2026-09-08T10:00:00.000Z',
+          },
+        ],
+      },
+    }
+    return store
+  }
+
+  it('1. cleared sessionStorage + completed G5 order → selectable', () => {
+    clearProductionCycleContext()
+    expect(loadProductionCycleContext()).toBeNull()
+    const store = completedCycleStore('so-g5-done')
+    const opts = listProductionCycleSalesOrderOptions(store)
+    expect(opts.some((o) => o.id === 'so-g5-done')).toBe(true)
+    expect(opts.find((o) => o.id === 'so-g5-done')!.label).toContain('ЗК-2026-0099')
+    expect(opts.find((o) => o.id === 'so-g5-done')!.label).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i,
+    )
+  })
+
+  it('1b. soft sales empty, planner/loading anchors still list the order', () => {
+    clearProductionCycleContext()
+    const store = completedCycleStore('so-anchor-only', { soft: false })
+    expect(store.sales.orders).toHaveLength(0)
+    const opts = listProductionCycleSalesOrderOptions(store)
+    expect(opts).toHaveLength(1)
+    expect(opts[0]!.id).toBe('so-anchor-only')
+    expect(opts[0]!.sources).toContain('g5_anchor')
+    expect(opts[0]!.label).toMatch(/Celloplex|ЗК-2026-0099|ЗП-0099/)
+  })
+
+  it('2. fulfilled order → cycle outcome completed', () => {
+    const store = completedCycleStore('so-ful', { fulfilled: true })
+    const before = JSON.stringify(store.sales.orders[0])
+    const snap = deriveProductionJourney(store, { salesOrderId: 'so-ful' })!
+    expect(snap.outcome).toBe('completed')
+    expect(JSON.stringify(store.sales.orders[0])).toBe(before)
+  })
+
+  it('3. active order appears in selector', () => {
+    let store = baseStore()
+    store = {
+      ...store,
+      sales: {
+        ...store.sales,
+        orders: [salesOrder({ id: 'so-active', orderNumber: 'ЗК-ACT', status: 'confirmed' })],
+      },
+    }
+    const opts = listProductionCycleSalesOrderOptions(store)
+    expect(opts.some((o) => o.id === 'so-active' && o.label.includes('ЗК-ACT'))).toBe(true)
+  })
+
+  it('4. soft + G5 duplicate → one row', () => {
+    const store = completedCycleStore('so-dup')
+    const opts = listProductionCycleSalesOrderOptions(store)
+    expect(opts.filter((o) => o.id === 'so-dup')).toHaveLength(1)
+    expect(opts.find((o) => o.id === 'so-dup')!.sources.sort()).toEqual(['g5_anchor', 'soft'].sort())
+  })
+
+  it('5. unknown UUID → safe human fallback label', () => {
+    const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    expect(formatProductionCycleOrderOptionLabel({ id })).toBe('aaaaaaaa…')
+    expect(formatProductionCycleOrderOptionLabel({ id })).not.toBe(id)
+    const store = baseStore()
+    const snap = deriveProductionJourney(store, { salesOrderId: id })!
+    expect(snap.subject.title).toBe('aaaaaaaa…')
+  })
+
+  it('6. inaccessible role → actions not navigable / options empty when no cycle views', () => {
+    const store = completedCycleStore('so-role')
+    store.access = { ...store.access, roleViews: { ...DEFAULT_ROLE_VIEWS } }
+    const cook: AppUser = {
+      id: 'cook',
+      login: 'cook',
+      displayName: 'Cook',
+      roleId: 'cook',
+      active: true,
+      passwordHash: 'x',
+      passwordSalt: 'y',
+    }
+    const access = store.access as AccessStore
+    expect(listProductionCycleSalesOrderOptions(store, { access, user: cook })).toEqual([])
+    const mixer: AppUser = {
+      id: 'm',
+      login: 'm',
+      displayName: 'M',
+      roleId: 'mixer',
+      active: true,
+      passwordHash: 'x',
+      passwordSalt: 'y',
+    }
+    const snap = deriveProductionJourney(store, { salesOrderId: 'so-role' }, { access, user: mixer })!
+    expect(snap.nextAction).toBeNull() // completed
+    // in-progress path: mixer cannot navigate director/procurement etc.
+    const open = deriveProductionJourney(
+      {
+        ...baseStore(),
+        sales: {
+          ...baseStore().sales,
+          orders: [salesOrder({ id: 'so-open', orderNumber: 'ЗК-O' })],
+        },
+        access,
+      },
+      { salesOrderId: 'so-open' },
+      { access, user: mixer },
+    )!
+    expect(open.nextAction?.canNavigate).toBe(false)
+  })
+
+  it('7. select after cleared context restores 13 stages (new tab)', () => {
+    clearProductionCycleContext()
+    const store = completedCycleStore('so-tab')
+    const picked = listProductionCycleSalesOrderOptions(store).find((o) => o.id === 'so-tab')
+    expect(picked).toBeTruthy()
+    saveProductionCycleContext({ salesOrderId: picked!.id })
+    const ctx = loadProductionCycleContext()
+    const snap = deriveProductionJourney(store, ctx!)!
+    expect(snap.stages).toHaveLength(PRODUCTION_CYCLE_STAGE_IDS.length)
+    expect(snap.outcome).toBe('completed')
+    expect(snap.stages.every((s) => s.state === 'done')).toBe(true)
+    clearProductionCycleContext()
+  })
+
+  it('8. list + derive do not mutate store', () => {
+    const store = completedCycleStore('so-pure')
+    const before = JSON.stringify(store)
+    listProductionCycleSalesOrderOptions(store)
+    deriveProductionJourney(store, { salesOrderId: 'so-pure' })
+    expect(JSON.stringify(store)).toBe(before)
   })
 })

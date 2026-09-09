@@ -30,6 +30,11 @@ export {
   resolveCurrentProductionCycleStage,
   type DeriveProductionCycleOptions,
 } from './deriveProductionCycle'
+export {
+  formatProductionCycleOrderOptionLabel,
+  listProductionCycleSalesOrderOptions,
+  type ProductionCycleSalesOrderOption,
+} from './salesOrderOptions'
 
 /** Alias for R3.0 journey naming (same pure derivation). */
 export {

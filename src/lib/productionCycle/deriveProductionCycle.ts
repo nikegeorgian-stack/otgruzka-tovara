@@ -48,6 +48,15 @@ function resolveCycle(store: AppStore, input: ProductionCycleContext): ResolvedC
   let salesOrder = input.salesOrderId
     ? salesOrders.find((o) => o.id === input.salesOrderId)
     : undefined
+  if (salesOrder && (salesOrder.status as string) === 'fulfilled') {
+    // G5 terminal `fulfilled` — soft UI / cycle read-model uses `completed` (no store write).
+    salesOrder = {
+      ...salesOrder,
+      status: 'completed',
+      commercialStatus: 'completed',
+      fulfillmentStatus: 'shipped',
+    }
+  }
   let primaryLot = input.lotId ? lots.find((l) => l.id === input.lotId) : undefined
   let primaryPo = input.productionOrderId
     ? plannerOrders.find((o) => o.id === input.productionOrderId)
@@ -58,6 +67,12 @@ function resolveCycle(store: AppStore, input: ProductionCycleContext): ResolvedC
   }
   if (primaryPo && !salesOrder && primaryPo.salesOrderId) {
     salesOrder = salesOrders.find((o) => o.id === primaryPo!.salesOrderId)
+  }
+  // Soft list may be empty while G5/cycle anchors (planner/loading) still carry salesOrderId.
+  if (!salesOrder && input.salesOrderId && !primaryPo) {
+    const linkedBySo = plannerOrders.filter((o) => o.salesOrderId === input.salesOrderId)
+    primaryPo =
+      linkedBySo.find((o) => o.status !== 'cancelled') ?? linkedBySo[0] ?? undefined
   }
   if (salesOrder && !primaryPo) {
     const linked = plannerOrders.filter((o) => o.salesOrderId === salesOrder!.id)
@@ -94,6 +109,10 @@ function resolveCycle(store: AppStore, input: ProductionCycleContext): ResolvedC
       const linked = plannerOrders.filter((o) => o.salesOrderId === salesOrder.id)
       if (linked.length) return linked
     }
+    if (input.salesOrderId) {
+      const linked = plannerOrders.filter((o) => o.salesOrderId === input.salesOrderId)
+      if (linked.length) return linked
+    }
     if (primaryPo) return [primaryPo]
     return []
   })()
@@ -113,8 +132,9 @@ function resolveCycle(store: AppStore, input: ProductionCycleContext): ResolvedC
     (r) => poIds.has(r.productionOrderId) || (primaryPo && r.productionOrderId === primaryPo.id),
   )
 
-  const loadingShipments = salesOrder
-    ? collectOrderLoadingShipments(allLoading, salesOrder.id).all
+  const salesOrderKey = salesOrder?.id ?? input.salesOrderId
+  const loadingShipments = salesOrderKey
+    ? collectOrderLoadingShipments(allLoading, salesOrderKey).all
     : []
 
   const fp = finishedProductId

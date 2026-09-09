@@ -8,6 +8,7 @@ import type { AdminCabinetId } from '@/lib/access/adminCabinet'
 import {
   clearProductionCycleContext,
   deriveProductionCycle,
+  listProductionCycleSalesOrderOptions,
   loadProductionCycleContext,
   mergeProductionCycleContext,
   saveProductionCycleContext,
@@ -73,13 +74,16 @@ export function ProductionCyclePanel({
     return deriveProductionCycle(store, activeContext, { access, user, adminCabinet })
   }, [store, activeContext, access, user, adminCabinet])
 
-  const salesOptions = useMemo(() => {
-    return (store.sales?.orders ?? [])
-      .filter((o) => o.status !== 'cancelled')
-      .slice()
-      .sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.orderNumber.localeCompare(a.orderNumber))
-      .slice(0, 40)
-  }, [store.sales?.orders])
+  const salesOptions = useMemo(
+    () =>
+      listProductionCycleSalesOrderOptions(store, {
+        access,
+        user,
+        adminCabinet,
+        limit: 40,
+      }),
+    [store, access, user, adminCabinet],
+  )
 
   const selectSalesOrder = (salesOrderId: string) => {
     if (!salesOrderId) {
@@ -138,7 +142,7 @@ export function ProductionCyclePanel({
             <option value="">{t('productionCycle.pickOrderPlaceholder')}</option>
             {salesOptions.map((o) => (
               <option key={o.id} value={o.id}>
-                {o.orderNumber} · {o.customer}
+                {o.label}
               </option>
             ))}
           </select>
