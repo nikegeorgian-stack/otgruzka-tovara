@@ -315,11 +315,20 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         const parsed = parsePayloadJson(row.payloadJson)
         if (!parsed) throw new Error('invalid_payload')
 
-        // R3.1B: soft merge + critical overlays in ONE applyCloud — never paint soft
-        // warehouse `posted` and then lose the race to a later startTransition.
+        // R3.1B: soft FstStore must not inject warehouse documents/movements into the
+        // merge — those are critical-only. Soft posted was overwriting critical draft
+        // between G1 polls (UI oscillated Проведён ↔ Черновик).
         const base = lastSyncedStore.current ?? storeRef.current
         const localBefore = storeRef.current
-        const remote = applyAppStoreSeeds(parsed)
+        const remoteFull = applyAppStoreSeeds(parsed)
+        const remote = {
+          ...remoteFull,
+          warehouse: {
+            ...remoteFull.warehouse,
+            documents: localBefore.warehouse?.documents ?? [],
+            movements: localBefore.warehouse?.movements ?? [],
+          },
+        }
         const localDirty = cloudDirtyTracker.hasPendingUserOperations()
         let softMerged = localBefore
         if (force || !localDirty) {
@@ -338,6 +347,10 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
               ...g1.data,
               revision: g1.data.revision,
             })
+          } else if (!localDirty || force) {
+            // No critical snapshot — fall back to full soft including documents.
+            const { store: mergedSoft } = mergeCloudStores(base, remoteFull, localBefore)
+            next = applyAppStoreSeeds(restoreLocalSecrets(localBefore, mergedSoft))
           }
           if (!localDirty || force) {
             applyCloud(next)
@@ -707,23 +720,34 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
 
         setSyncLifecyclePhase('stabilizing')
         const local = storeRef.current
-        const seeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
-        let next = seeded
+        const softSeeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
+        // Do not paint soft warehouse documents before critical overlay (R3.1B).
+        const seededWithoutWhTruth = {
+          ...softSeeded,
+          warehouse: {
+            ...softSeeded.warehouse,
+            documents: local.warehouse?.documents ?? [],
+            movements: local.warehouse?.movements ?? [],
+          },
+        }
+        let next = seededWithoutWhTruth
         try {
           const g1 = await g1GetAuthoritativeWarehouse(storeId)
           if (!cancelled && g1.ok && g1.data) {
-            next = await applyCriticalDomainOverlays(seeded, {
+            next = await applyCriticalDomainOverlays(seededWithoutWhTruth, {
               ...g1.data,
               revision: g1.data.revision,
             })
+          } else if (!cancelled) {
+            next = softSeeded
           }
         } catch (g1Err) {
           console.warn('FST G1 critical overlay on initial load skipped', g1Err)
+          next = softSeeded
         }
         if (cancelled) return
         storeRef.current = next
         const committed = commitSyncedBaseline(next, Number(row.revision) || 1)
-        // Soft+critical in one cloud apply — do not paint soft warehouse before overlay.
         applyCloud(committed)
         noteCloudPullCompleted(Number(row.revision) || 1)
 
