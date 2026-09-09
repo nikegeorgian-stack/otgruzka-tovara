@@ -57,12 +57,8 @@ import { hasPendingOutboxWork } from '@/lib/cloud/externalEffects/outbox'
 import { resolveRoleTaskAccessLevel } from '@/lib/tasks/access'
 import type { AppStore } from '@/lib/types'
 import type { FstCloudSyncProps } from './fstCloudTypes'
-import {
-  G1_CRITICAL_SOURCE,
-  g1GetAuthoritativeWarehouse,
-  resolveAuthoritativeWarehouseOverlay,
-} from '@/lib/warehouse/g1ServerClient'
-import { resolveAuthoritativeProductionOverlay } from '@/lib/production/g3ServerClient'
+import { g1GetAuthoritativeWarehouse } from '@/lib/warehouse/g1ServerClient'
+import { applyCriticalDomainOverlays } from '@/lib/cloud/applyCriticalDomainOverlays'
 
 const SAVE_DEBOUNCE_MS = 2500
 const LOAD_TIMEOUT_MS = 45_000
@@ -318,150 +314,45 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         }
         const parsed = parsePayloadJson(row.payloadJson)
         if (!parsed) throw new Error('invalid_payload')
-        applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
-            // PHASE G1 — overlay warehouse when warehouse domain active (or soft-upgrade rev>0).
-            try {
+
+        // R3.1B: soft merge + critical overlays in ONE applyCloud — never paint soft
+        // warehouse `posted` and then lose the race to a later startTransition.
+        const base = lastSyncedStore.current ?? storeRef.current
+        const localBefore = storeRef.current
+        const remote = applyAppStoreSeeds(parsed)
+        const localDirty = cloudDirtyTracker.hasPendingUserOperations()
+        let softMerged = localBefore
+        if (force || !localDirty) {
+          const { store: merged } = mergeCloudStores(base, remote, localBefore)
+          softMerged = applyAppStoreSeeds(restoreLocalSecrets(localBefore, merged))
+        } else {
+          applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
+          softMerged = storeRef.current
+        }
+
+        try {
           const g1 = await g1GetAuthoritativeWarehouse(storeId)
-          if (g1.ok && g1.data.warehouse) {
-            const warehouseActive =
-              g1.data.warehouseActive === true ||
-              (g1.data.warehouseActive !== false && g1.data.revision > 0)
-            const local = storeRef.current
-            let next = local
-            if (warehouseActive) {
-              const overlay = resolveAuthoritativeWarehouseOverlay({
-                legacyWarehouse: local.warehouse,
-                criticalWarehouse: g1.data.warehouse,
-                criticalRevision: g1.data.revision,
-                warehouseActive: true,
-              })
-              if (overlay.source === G1_CRITICAL_SOURCE) {
-                next = { ...next, warehouse: overlay.warehouse }
-              }
+          let next = softMerged
+          if (g1.ok && g1.data) {
+            next = await applyCriticalDomainOverlays(softMerged, {
+              ...g1.data,
+              revision: g1.data.revision,
+            })
+          }
+          if (!localDirty || force) {
+            applyCloud(next)
+            if (!cloudDirtyTracker.hasPendingUserOperations()) {
+              commitSyncedBaseline(next, row.revision)
+              noteCloudPullCompleted(row.revision)
             }
-            // PHASE G3.1 — production overlay ONLY when production domain explicitly active
-            const productionActive = g1.data.productionActive === true
-            if (productionActive && g1.data.production) {
-              const prodOverlay = resolveAuthoritativeProductionOverlay({
-                legacyProduction: next.production as unknown as Record<string, unknown>,
-                criticalProduction: g1.data.production,
-                criticalRevision: g1.data.revision,
-                productionActive: true,
-              })
-              if (prodOverlay.source === 'fst_critical_store') {
-                next = {
-                  ...next,
-                  production: prodOverlay.production as typeof next.production,
-                }
-              } else if (prodOverlay.authoritativeBlocked) {
-                console.warn('FST G3 production overlay blocked — not treating legacy as truth')
-              }
-            } else {
-              // Ensure flag stays false so legacy production remains visible
-              next = {
-                ...next,
-                production: {
-                  ...next.production,
-                  g3ProductionDomainActive: false,
-                } as typeof next.production,
-              }
-            }
-            // PHASE G4 — packaging/QC/FG overlay ONLY when packagingQc feature explicitly active.
-            // Production core active alone must NOT hide legacy packaging/FG data.
-            const packagingQcActive = g1.data.packagingQcActive === true
-            if (packagingQcActive && g1.data.production) {
-              const { resolveAuthoritativePackagingOverlay } = await import(
-                '@/lib/production/g4ServerClient'
-              )
-              const g4Overlay = resolveAuthoritativePackagingOverlay({
-                legacyProduction: next.production as unknown as Record<string, unknown>,
-                criticalProduction: g1.data.production,
-                criticalWarehouse: g1.data.warehouse,
-                legacyWarehouse: next.warehouse,
-                criticalRevision: g1.data.revision,
-                packagingQcActive: true,
-                productionActive,
-              })
-              if (g4Overlay.source === 'fst_critical_store') {
-                next = {
-                  ...next,
-                  production: g4Overlay.production as typeof next.production,
-                  warehouse: g4Overlay.warehouse ?? next.warehouse,
-                }
-              } else if (g4Overlay.authoritativeBlocked) {
-                console.warn('FST G4 packaging overlay blocked — not treating legacy as truth')
-              }
-            } else if (packagingQcActive) {
-              // Feature active in SQL even if production slice briefly empty — keep soft flag true.
-              next = {
-                ...next,
-                production: {
-                  ...next.production,
-                  g4PackagingQcActive: true,
-                  g4CriticalRevision: g1.data.revision,
-                } as typeof next.production,
-              }
-            } else {
-              next = {
-                ...next,
-                production: {
-                  ...next.production,
-                  g4PackagingQcActive: false,
-                } as typeof next.production,
-              }
-            }
-            // PHASE G5.1 — persist activation flags from critical domainMeta (fail-closed gates).
-            {
-              const { withG5ActivationOnStore, readG5Activation, mirrorG5Ack } = await import(
-                '@/lib/planner/g5ServerClient'
-              )
-              const fromMeta = readG5Activation(g1.data.domainMeta)
-              const salesPlanningActive =
-                g1.data.salesPlanningActive === true || fromMeta.salesPlanningActive
-              next = withG5ActivationOnStore(next, {
-                masterDataActive: g1.data.masterDataActive === true || fromMeta.masterDataActive,
-                salesPlanningActive,
-                procurementActive: g1.data.procurementActive === true || fromMeta.procurementActive,
-                domainMeta: g1.data.domainMeta,
-              })
-              // Authoritative G5 sales hydrate — soft FstStore.sales must not shadow critical orders.
-              const g1Sales = (g1.data as { sales?: { orders?: unknown[] } }).sales
-              if (salesPlanningActive && Array.isArray(g1Sales?.orders)) {
-                next = mirrorG5Ack(next, {
-                  salesPlanningActive: true,
-                  replaceSalesOrders: true,
-                  sales: g1Sales,
-                })
-              }
-            }
-            // PHASE G6 — capacity planning feature flag from domainMeta.production.features.
-            {
-              const { withG6ActivationOnStore, readG6Activation } = await import(
-                '@/lib/planner/g6ServerClient'
-              )
-              const fromMeta = readG6Activation(g1.data.domainMeta)
-              const capacityPlanningActive =
-                (g1.data as { capacityPlanningActive?: boolean }).capacityPlanningActive ===
-                  true || fromMeta.capacityPlanningActive
-              next = withG6ActivationOnStore(next, {
-                capacityPlanningActive,
-                domainMeta: g1.data.domainMeta,
-              })
-              const capacity = (g1.data as { capacity?: unknown }).capacity
-              if (capacity && typeof capacity === 'object') {
-                const { withCapacityOnStore } = await import('@/lib/cloud/g6AuthoritativeStrip')
-                next = withCapacityOnStore(next, capacity as Parameters<typeof withCapacityOnStore>[1])
-              }
-            }
-            if (next !== local) {
-              applyCloud(next)
-              if (!cloudDirtyTracker.hasPendingUserOperations()) {
-                commitSyncedBaseline(next, row.revision)
-              }
-            }
+          } else if (g1.ok && g1.data) {
+            applyCloud(next)
           }
         } catch (g1Err) {
           console.warn('FST G1/G3 critical overlay skipped', g1Err)
+          if (!localDirty || force) {
+            applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
+          }
         }
         if (force) setError(null)
       } catch (err) {
@@ -817,9 +708,22 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         setSyncLifecyclePhase('stabilizing')
         const local = storeRef.current
         const seeded = applyAppStoreSeeds(restoreLocalSecrets(local, parsed))
-        storeRef.current = seeded
-        const committed = commitSyncedBaseline(seeded, Number(row.revision) || 1)
-        // Pure cloud first — journal recovery must not auto SQL-write.
+        let next = seeded
+        try {
+          const g1 = await g1GetAuthoritativeWarehouse(storeId)
+          if (!cancelled && g1.ok && g1.data) {
+            next = await applyCriticalDomainOverlays(seeded, {
+              ...g1.data,
+              revision: g1.data.revision,
+            })
+          }
+        } catch (g1Err) {
+          console.warn('FST G1 critical overlay on initial load skipped', g1Err)
+        }
+        if (cancelled) return
+        storeRef.current = next
+        const committed = commitSyncedBaseline(next, Number(row.revision) || 1)
+        // Soft+critical in one cloud apply — do not paint soft warehouse before overlay.
         applyCloud(committed)
         noteCloudPullCompleted(Number(row.revision) || 1)
 

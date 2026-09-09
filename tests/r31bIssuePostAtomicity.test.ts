@@ -389,3 +389,34 @@ describe('R3.1B unrelated draft receipt ПР-010 must stay untouched by overlay 
     expect(kept?.number).toBe('ПР-1BC8F872-2026-010')
   })
 })
+
+describe('R3.1B soft posted must not beat critical draft after overlay apply', () => {
+  it('applyCriticalDomainOverlays keeps draft when soft snapshot is posted', async () => {
+    const { applyCriticalDomainOverlays } = await import('@/lib/cloud/applyCriticalDomainOverlays')
+    const softPosted = baseWh([
+      {
+        ...draftIssue(),
+        status: 'posted',
+        postedAt: '2026-09-09T10:00:00.000Z',
+      },
+    ])
+    const criticalDraft = {
+      ...softPosted,
+      documents: [draftIssue()],
+      movements: [],
+    }
+    const fakeLocal = {
+      warehouse: softPosted,
+      production: {},
+    } as unknown as import('@/lib/types').AppStore
+    const next = await applyCriticalDomainOverlays(fakeLocal, {
+      warehouse: criticalDraft,
+      revision: 32,
+      warehouseActive: true,
+      productionActive: false,
+      packagingQcActive: false,
+    })
+    const doc = next.warehouse.documents.find((d) => d.id === draftIssue().id)
+    expect(doc?.status).toBe('draft')
+  })
+})
