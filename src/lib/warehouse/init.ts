@@ -150,7 +150,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
 
   const mainWh = locations[0]!.id
 
-  let categories = (raw.categories ?? []).map((c, i) => ({
+  const categories = (raw.categories ?? []).map((c, i) => ({
     id: c.id || newId(),
     name: c.name?.trim() || 'Прочее',
     sortOrder: c.sortOrder ?? i,
@@ -200,7 +200,12 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     ...d,
     warehouseId: locIds.has(d.warehouseId) ? d.warehouseId : mainWh,
     lines: d.lines.filter((l) => itemIds.has(l.itemId)),
-    status: (d.status === 'cancelled' ? 'cancelled' : 'posted') as WarehouseDocumentStatus,
+    // Preserve draft/cancelled. Legacy rows without status stay posted.
+    status: (d.status === 'draft'
+      ? 'draft'
+      : d.status === 'cancelled'
+        ? 'cancelled'
+        : 'posted') as WarehouseDocumentStatus,
   }))
 
   let store: WarehouseStore = {
