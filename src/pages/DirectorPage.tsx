@@ -33,6 +33,7 @@ import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { emptySalesOrder } from '@/lib/sales/init'
 import { collectOrderLoadingShipments } from '@/lib/sales/loadingLink'
+import { saveProductionCycleContext } from '@/lib/productionCycle'
 import {
   salesStatusLabel,
   salesFulfillmentLabel,
@@ -395,6 +396,7 @@ export function DirectorPage({
   }, [openForPlanning, planningOnlyAction])
 
   function openOrder(order: SalesOrder) {
+    saveProductionCycleContext({ salesOrderId: order.id })
     setEditing(order)
     setTab('orders')
     setOrdersView('list')

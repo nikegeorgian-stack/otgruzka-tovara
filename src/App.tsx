@@ -9,6 +9,7 @@ import { EmployeeEditorProvider } from '@/context/EmployeeEditorContext'
 import { AppShell } from '@/components/layout/AppShell'
 import { WorkspaceTaskbar } from '@/components/layout/WorkspaceTaskbar'
 import { ShiftUrgentBar } from '@/components/ops/ShiftUrgentBar'
+import { ProductionJourneyPanel } from '@/components/productionCycle'
 import {
   computeShiftUrgentInbox,
   type ShiftUrgentTarget,
@@ -619,6 +620,29 @@ export default function App() {
           />
 
           <Suspense fallback={<PageLoader />}>
+          {(
+            [
+              'director',
+              'planner',
+              'production',
+              'warehouse',
+              'procurement',
+              'technologist',
+              'otc',
+              'mixer',
+            ] as ViewId[]
+          ).includes(app.view) && (
+            <div className="px-4 pt-3">
+              <ProductionJourneyPanel
+                store={app.store}
+                access={app.access}
+                user={accessUser}
+                adminCabinet={isAdmin ? app.adminCabinet : null}
+                onNavigate={(v) => app.setView(v)}
+                compact={app.view !== 'director'}
+              />
+            </div>
+          )}
           <ShiftUrgentBar
             items={shiftUrgent.items}
             hidden={app.view === 'director' || app.view === 'timeclock'}
