@@ -251,11 +251,31 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
   )
 
   const applyRemoteStore = useCallback(
-    (raw: AppStore, opts?: { force?: boolean; revision?: number; silentHint?: boolean }) => {
+    (
+      raw: AppStore,
+      opts?: {
+        force?: boolean
+        revision?: number
+        silentHint?: boolean
+        /** Only when G1 overlay unavailable — soft may supply docs/movements. */
+        includeSoftWarehouseTruth?: boolean
+      },
+    ) => {
       const force = opts?.force ?? false
       const base = lastSyncedStore.current ?? storeRef.current
       const local = storeRef.current
-      const remote = applyAppStoreSeeds(raw)
+      const remoteRaw = applyAppStoreSeeds(raw)
+      // R3.1B: soft FstStore warehouse documents/movements are not authoritative on web.
+      const remote = opts?.includeSoftWarehouseTruth
+        ? remoteRaw
+        : {
+            ...remoteRaw,
+            warehouse: {
+              ...remoteRaw.warehouse,
+              documents: local.warehouse?.documents ?? [],
+              movements: local.warehouse?.movements ?? [],
+            },
+          }
       const fpBefore = lastFingerprint.current
       const { store: merged, conflictCount: conflicts } = mergeCloudStores(base, remote, local)
       const mergedSeeded = applyAppStoreSeeds(restoreLocalSecrets(local, merged))
@@ -364,7 +384,12 @@ export function FstSqlConnectSync({ store, applyCloudStore, patchUserStore }: Fs
         } catch (g1Err) {
           console.warn('FST G1/G3 critical overlay skipped', g1Err)
           if (!localDirty || force) {
-            applyRemoteStore(parsed, { force, revision: row.revision, silentHint })
+            applyRemoteStore(parsed, {
+              force,
+              revision: row.revision,
+              silentHint,
+              includeSoftWarehouseTruth: true,
+            })
           }
         }
         if (force) setError(null)
