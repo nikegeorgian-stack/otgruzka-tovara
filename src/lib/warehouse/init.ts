@@ -227,6 +227,7 @@ export function normalizeWarehouse(raw: Partial<WarehouseStore> | undefined): Wa
     productionLineBindings: Array.isArray(raw.productionLineBindings)
       ? raw.productionLineBindings
       : [],
+    scrapLocationId: raw.scrapLocationId?.trim() || undefined,
   }
 
   if (needsCatalogMigration(store)) {

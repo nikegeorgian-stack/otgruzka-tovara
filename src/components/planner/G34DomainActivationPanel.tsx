@@ -80,6 +80,17 @@ export function G34DomainActivationPanel({
         setError(res.message || res.error || t('g34.activation.error.generic'))
         return
       }
+      if (
+        res.data.packagingQcActive !== true ||
+        res.data.productionActive !== true ||
+        !res.data.production ||
+        !res.data.warehouse ||
+        !Number.isInteger(Number(res.data.criticalRevision)) ||
+        Number(res.data.criticalRevision) <= 0
+      ) {
+        setError('g4_activation_ack_invalid')
+        return
+      }
       if (store) {
         const mirrored = mirrorG4Ack(
           store.warehouse,
@@ -88,10 +99,14 @@ export function G34DomainActivationPanel({
             warehouse: res.data.warehouse,
             production: res.data.production,
             criticalRevision: res.data.criticalRevision,
-            packagingQcActive: res.data.packagingQcActive ?? true,
-            productionActive: res.data.productionActive ?? true,
+            packagingQcActive: res.data.packagingQcActive,
+            productionActive: res.data.productionActive,
           },
         )
+        if (mirrored.authoritativeBlocked) {
+          setError('authoritative_g4_state_incomplete')
+          return
+        }
         onActivated?.({
           warehouse: mirrored.warehouse,
           production: mirrored.production as AppStore['production'],

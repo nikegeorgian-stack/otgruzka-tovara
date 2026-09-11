@@ -3,6 +3,7 @@ import { appendWarehouseAudit } from '@/lib/warehouse/audit'
 import { postWarehouseDocumentsAtomic } from '@/lib/warehouse/documents'
 import { computeAllBalances, validateIssueLines } from '@/lib/warehouse/stock'
 import { warehouseIdempotencyKey } from '@/lib/warehouse/stockSafety'
+import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import {
   componentConsumeKg,
@@ -15,9 +16,11 @@ import {
   parseFormulationInternalCodeNum,
 } from './init'
 import { syncFormulationRecipeWarehouse, formulationRecipeDisplayName } from './warehouseSync'
+import { batchMixCommandFingerprint } from './batchMixFingerprint.mjs'
 import type {
   FormulationBatchLine,
   FormulationBatchRun,
+  FormulationMixTask,
   FormulationRecipe,
   FormulationStore,
 } from './types'
@@ -56,9 +59,25 @@ export type PostBatchMixInput = {
   mixedAt: string
   mixedBy: string
   mixedByName: string
+  /** Optional for a free mix; otherwise copied from the selected mixer task. */
+  mixTaskId?: string
+  productionOrderId?: string
+  productionLineId?: string
   shiftBrigade?: string
   shiftNote?: string
   comment?: string
+}
+
+/** Exact stable lineage copied from a selected task; a free mix has no lineage. */
+export function batchLineageFromMixTask(
+  task: Pick<FormulationMixTask, 'id' | 'sourceOrderId' | 'lineId'> | null | undefined,
+): Pick<PostBatchMixInput, 'mixTaskId' | 'productionOrderId' | 'productionLineId'> {
+  if (!task) return {}
+  return {
+    mixTaskId: task.id,
+    ...(task.sourceOrderId ? { productionOrderId: task.sourceOrderId } : {}),
+    ...(task.lineId ? { productionLineId: task.lineId } : {}),
+  }
 }
 
 export type PostBatchMixResult =
@@ -219,6 +238,9 @@ export function createPendingBatchMix(
   const run: FormulationBatchRun = {
     id: batchRunId,
     documentNumber: docNo,
+    ...(input.mixTaskId ? { mixTaskId: input.mixTaskId } : {}),
+    ...(input.productionOrderId ? { productionOrderId: input.productionOrderId } : {}),
+    ...(input.productionLineId ? { productionLineId: input.productionLineId } : {}),
     internalCode,
     status: 'pending',
     recipeId: syncedRecipe.id,
@@ -294,7 +316,43 @@ export function confirmBatchMix(
     return { formulations, warehouse, result: { ok: false, error: 'batch_not_pending' } }
   }
 
-  const issueLines = run.lines.map((l) => ({ itemId: l.warehouseItemId, quantity: l.consumeKg }))
+  const hasAnyLineage = Boolean(
+    run.mixTaskId || run.productionOrderId || run.productionLineId,
+  )
+  let receiptWarehouseId = run.warehouseId
+  let receiptLocationId: string | undefined
+  if (hasAnyLineage) {
+    if (!run.mixTaskId || !run.productionOrderId || !run.productionLineId) {
+      return { formulations, warehouse, result: { ok: false, error: 'mixer_lineage_incomplete' } }
+    }
+    const route = resolveProductionLineLocation(warehouse, run.productionLineId)
+    if (!route.ok) {
+      return { formulations, warehouse, result: { ok: false, error: route.error } }
+    }
+    receiptWarehouseId = route.productionWarehouseId
+    receiptLocationId = route.productionLocationId
+  }
+
+  const lineage = {
+    batchRunId: run.id,
+    ...(run.mixTaskId ? { mixTaskId: run.mixTaskId } : {}),
+    ...(run.productionOrderId ? { productionOrderId: run.productionOrderId } : {}),
+    ...(run.productionLineId ? { productionLineId: run.productionLineId } : {}),
+  }
+  const issueLines = run.lines.map((l) => ({
+    itemId: l.warehouseItemId,
+    quantity: l.consumeKg,
+    ...lineage,
+  }))
+  const receiptLines = [
+    {
+      itemId: run.outputWarehouseItemId,
+      quantity: run.outputKg,
+      batchNo: run.documentNumber,
+      ...(receiptLocationId ? { locationId: receiptLocationId } : {}),
+      ...lineage,
+    },
+  ]
 
   const balances = computeAllBalances(warehouse, run.warehouseId)
   const check = validateIssueLines(warehouse.items, balances, issueLines)
@@ -324,6 +382,9 @@ export function confirmBatchMix(
       comment: `Накладная списания · ${mixComment}`,
       lines: issueLines,
       batchRunId: run.id,
+      mixTaskId: run.mixTaskId,
+      productionOrderId: run.productionOrderId,
+      productionLineId: run.productionLineId,
       docRole: 'batch_issue',
       skipAudit: true,
       skipFieldValidation: true,
@@ -338,11 +399,14 @@ export function confirmBatchMix(
       type: 'receipt',
       number: receiptNo,
       date: run.mixedAt,
-      warehouseId: run.warehouseId,
+      warehouseId: receiptWarehouseId,
       brigade: run.shiftBrigade,
       comment: `Оприходование пропитки · ${mixComment} · код ${run.internalCode ?? '—'}`,
-      lines: [{ itemId: run.outputWarehouseItemId, quantity: run.outputKg }],
+      lines: receiptLines,
       batchRunId: run.id,
+      mixTaskId: run.mixTaskId,
+      productionOrderId: run.productionOrderId,
+      productionLineId: run.productionLineId,
       docRole: 'batch_receipt',
       skipAudit: true,
       skipFieldValidation: true,
@@ -350,7 +414,7 @@ export function confirmBatchMix(
         source: 'batchRun',
         sourceId: run.id,
         role: 'batch_receipt',
-        warehouseId: run.warehouseId,
+        warehouseId: receiptWarehouseId,
       }),
     },
   ])
@@ -371,7 +435,31 @@ export function confirmBatchMix(
   const issueDocId = atomic.result.documentIds[0]!
   const receiptDocId = atomic.result.documentIds[1]!
 
-  const wh = appendWarehouseAudit(atomic.store, {
+  const batchDocumentIds = new Set([issueDocId, receiptDocId])
+  const linkedWarehouse: WarehouseStore = {
+    ...atomic.store,
+    documents: atomic.store.documents.map((document) =>
+      document.id === receiptDocId
+        ? {
+            ...document,
+            batchNo: run.documentNumber,
+          }
+        : document,
+    ),
+    movements: atomic.store.movements.map((movement) =>
+      movement.documentId && batchDocumentIds.has(movement.documentId)
+        ? {
+            ...movement,
+            batchRunId: run.id,
+            ...(run.mixTaskId ? { mixTaskId: run.mixTaskId } : {}),
+            ...(run.productionOrderId ? { productionOrderId: run.productionOrderId } : {}),
+            ...(run.productionLineId ? { productionLineId: run.productionLineId } : {}),
+          }
+        : movement,
+    ),
+  }
+
+  const wh = appendWarehouseAudit(linkedWarehouse, {
     action: 'batch_mix',
     detail: `Подтверждён замес ${run.documentNumber} · списание ${issueNo} · приход ${receiptNo}${input.keeperName ? ` · кладовщик ${input.keeperName}` : ''}`,
     batchRunId: run.id,
@@ -405,14 +493,43 @@ export function buildBatchMixConfirmCommand(
   recipe?: FormulationRecipe | null,
 ): {
   batchRunId: string
+  recipeId: string
+  documentNumber: string
   warehouseId: string
   date: string
   issueNumber: string
   receiptNumber: string
-  issueLines: Array<{ itemId: string; quantity: number }>
-  receiptLines: Array<{ itemId: string; quantity: number }>
+  mixTaskId?: string
+  productionOrderId?: string
+  productionLineId?: string
+  issueLines: Array<{
+    itemId: string
+    quantity: number
+    batchRunId: string
+    recipeId: string
+    mixTaskId?: string
+    productionOrderId?: string
+    productionLineId?: string
+  }>
+  receiptLines: Array<{
+    itemId: string
+    quantity: number
+    batchNo: string
+    batchRunId: string
+    recipeId: string
+    mixTaskId?: string
+    productionOrderId?: string
+    productionLineId?: string
+  }>
   comment: string
 } {
+  const lineage = {
+    batchRunId: run.id,
+    recipeId: run.recipeId,
+    ...(run.mixTaskId ? { mixTaskId: run.mixTaskId } : {}),
+    ...(run.productionOrderId ? { productionOrderId: run.productionOrderId } : {}),
+    ...(run.productionLineId ? { productionLineId: run.productionLineId } : {}),
+  }
   const mixComment = [
     `Замес куб · ${run.recipeCode}`,
     `${run.targetVolumeL} л`,
@@ -424,6 +541,7 @@ export function buildBatchMixConfirmCommand(
   const issueLines = run.lines.map((l) => ({
     itemId: l.warehouseItemId,
     quantity: l.consumeKg,
+    ...lineage,
   }))
   // Orphan / legacy pending runs may omit linked warehouse water — append from recipe.
   if (recipe) {
@@ -432,17 +550,29 @@ export function buildBatchMixConfirmCommand(
       if (!isFormulationWaterComponent(c) || !c.warehouseItemId) continue
       if (issueLines.some((l) => l.itemId === c.warehouseItemId)) continue
       const qty = Math.round(componentConsumeKg(c) * scale * 1000) / 1000
-      if (qty > 0) issueLines.push({ itemId: c.warehouseItemId, quantity: qty })
+      if (qty > 0) issueLines.push({ itemId: c.warehouseItemId, quantity: qty, ...lineage })
     }
   }
   return {
     batchRunId: run.id,
+    recipeId: run.recipeId,
+    documentNumber: run.documentNumber,
     warehouseId: run.warehouseId,
     date: run.mixedAt,
     issueNumber: `${run.documentNumber}-Р`,
     receiptNumber: `${run.documentNumber}-П`,
+    ...(run.mixTaskId ? { mixTaskId: run.mixTaskId } : {}),
+    ...(run.productionOrderId ? { productionOrderId: run.productionOrderId } : {}),
+    ...(run.productionLineId ? { productionLineId: run.productionLineId } : {}),
     issueLines,
-    receiptLines: [{ itemId: run.outputWarehouseItemId, quantity: run.outputKg }],
+    receiptLines: [
+      {
+        itemId: run.outputWarehouseItemId,
+        quantity: run.outputKg,
+        batchNo: run.documentNumber,
+        ...lineage,
+      },
+    ],
     comment: mixComment,
   }
 }
@@ -481,6 +611,260 @@ export function withBatchMixCatalogueSnapshots(
     issueLines: command.issueLines.map(stamp),
     receiptLines: command.receiptLines.map(stamp),
   }
+}
+
+type BatchMixAckRecord = Record<string, unknown>
+
+function batchMixAckId(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+function aggregateBatchMixAckLines(lines: unknown): Map<string, number> | null {
+  if (!Array.isArray(lines) || lines.length === 0) return null
+  const out = new Map<string, number>()
+  for (const raw of lines) {
+    const line = raw as BatchMixAckRecord
+    const itemId = batchMixAckId(line.itemId)
+    const quantity = Number(line.quantity)
+    if (!itemId || !Number.isFinite(quantity) || quantity <= 0) return null
+    out.set(itemId, Math.round(((out.get(itemId) ?? 0) + quantity) * 1e6) / 1e6)
+  }
+  return out
+}
+
+function batchMixAckQuantitiesEqual(
+  actual: Map<string, number> | null,
+  expected: Map<string, number> | null,
+): boolean {
+  if (!actual || !expected || actual.size !== expected.size) return false
+  for (const [itemId, quantity] of expected) {
+    const actualQuantity = actual.get(itemId)
+    if (actualQuantity == null || Math.abs(actualQuantity - quantity) > 1e-6) return false
+  }
+  return true
+}
+
+function batchMixAckLineageMatches(
+  record: BatchMixAckRecord,
+  run: FormulationBatchRun,
+): boolean {
+  return (
+    batchMixAckId(record.batchRunId) === run.id &&
+    batchMixAckId(record.recipeId) === run.recipeId &&
+    batchMixAckId(record.mixTaskId) === batchMixAckId(run.mixTaskId) &&
+    batchMixAckId(record.productionOrderId) === batchMixAckId(run.productionOrderId) &&
+    batchMixAckId(record.productionLineId) === batchMixAckId(run.productionLineId)
+  )
+}
+
+/**
+ * Validate the complete authoritative G2 acknowledgement before changing a
+ * pending local run to confirmed. IDs or a toast alone are not an ack.
+ */
+export function validateBatchMixAuthoritativeAck(
+  run: FormulationBatchRun,
+  command: ReturnType<typeof buildBatchMixConfirmCommand>,
+  data: unknown,
+  previousCriticalRevision = 0,
+):
+  | { ok: true; issueDocumentId: string; receiptDocumentId: string }
+  | { ok: false; error: 'batch_mix_authoritative_ack_invalid' } {
+  const ack = (data && typeof data === 'object' ? data : {}) as BatchMixAckRecord
+  const criticalRevision = Number(ack.criticalRevision)
+  const priorRevision = Math.max(0, Number(previousCriticalRevision) || 0)
+  const issueDocumentId = batchMixAckId(ack.issueDocumentId)
+  const receiptDocumentId = batchMixAckId(ack.receiptDocumentId)
+  if (
+    !Number.isInteger(criticalRevision) ||
+    criticalRevision <= 0 ||
+    criticalRevision < priorRevision ||
+    (criticalRevision === priorRevision && ack.idempotent !== true) ||
+    !issueDocumentId ||
+    !receiptDocumentId ||
+    issueDocumentId === receiptDocumentId ||
+    batchMixAckId(ack.commandFingerprint) !== batchMixCommandFingerprint(command)
+  ) {
+    return { ok: false, error: 'batch_mix_authoritative_ack_invalid' }
+  }
+
+  const warehouse = (ack.warehouse && typeof ack.warehouse === 'object'
+    ? ack.warehouse
+    : {}) as BatchMixAckRecord
+  const documents = Array.isArray(warehouse.documents)
+    ? (warehouse.documents as BatchMixAckRecord[])
+    : []
+  const movements = Array.isArray(warehouse.movements)
+    ? (warehouse.movements as BatchMixAckRecord[])
+    : []
+  const runDocuments = documents.filter(
+    (document) => batchMixAckId(document.batchRunId) === run.id,
+  )
+  const issueMatches = runDocuments.filter(
+    (document) => document.id === issueDocumentId && document.docRole === 'batch_issue',
+  )
+  const receiptMatches = runDocuments.filter(
+    (document) => document.id === receiptDocumentId && document.docRole === 'batch_receipt',
+  )
+  if (
+    runDocuments.length !== 2 ||
+    issueMatches.length !== 1 ||
+    receiptMatches.length !== 1 ||
+    !Array.isArray(ack.documentIds) ||
+    ack.documentIds.length !== 2 ||
+    new Set(ack.documentIds.map(batchMixAckId)).size !== 2 ||
+    !ack.documentIds.map(batchMixAckId).includes(issueDocumentId) ||
+    !ack.documentIds.map(batchMixAckId).includes(receiptDocumentId) ||
+    ack.status !== 'posted'
+  ) {
+    return { ok: false, error: 'batch_mix_authoritative_ack_invalid' }
+  }
+  const issueDocument = issueMatches[0]!
+  const receiptDocument = receiptMatches[0]!
+  if (
+    !batchMixAckLineageMatches(issueDocument, run) ||
+    !batchMixAckLineageMatches(receiptDocument, run) ||
+    issueDocument.status !== 'posted' ||
+    receiptDocument.status !== 'posted' ||
+    issueDocument.cancelled === true ||
+    receiptDocument.cancelled === true ||
+    issueDocument.type !== 'issue' ||
+    receiptDocument.type !== 'receipt' ||
+    issueDocument.purpose !== 'production' ||
+    receiptDocument.purpose !== 'production' ||
+    batchMixAckId(issueDocument.number) !== command.issueNumber ||
+    batchMixAckId(receiptDocument.number) !== command.receiptNumber ||
+    batchMixAckId(issueDocument.date).slice(0, 10) !== command.date.slice(0, 10) ||
+    batchMixAckId(receiptDocument.date).slice(0, 10) !== command.date.slice(0, 10) ||
+    batchMixAckId(issueDocument.warehouseId) !== command.warehouseId ||
+    batchMixAckId(receiptDocument.warehouseId) !== batchMixAckId(ack.receiptWarehouseId) ||
+    batchMixAckId(receiptDocument.batchNo) !== command.documentNumber
+  ) {
+    return { ok: false, error: 'batch_mix_authoritative_ack_invalid' }
+  }
+
+  const expectedIssues = aggregateBatchMixAckLines(command.issueLines)
+  const documentIssues = aggregateBatchMixAckLines(issueDocument.lines)
+  const issueDocumentLines = Array.isArray(issueDocument.lines)
+    ? (issueDocument.lines as BatchMixAckRecord[])
+    : []
+  const receiptCommandLine = command.receiptLines[0]
+  const receiptDocumentLines = Array.isArray(receiptDocument.lines)
+    ? (receiptDocument.lines as BatchMixAckRecord[])
+    : []
+  const receiptDocumentLine = receiptDocumentLines[0]
+  const issueDocumentLineIds = issueDocumentLines.map((line) => batchMixAckId(line.lineId))
+  if (
+    !batchMixAckQuantitiesEqual(documentIssues, expectedIssues) ||
+    issueDocumentLineIds.some((lineId) => !lineId) ||
+    new Set(issueDocumentLineIds).size !== issueDocumentLineIds.length ||
+    issueDocumentLines.some((line) => !batchMixAckLineageMatches(line, run)) ||
+    command.receiptLines.length !== 1 ||
+    receiptDocumentLines.length !== 1 ||
+    !receiptCommandLine ||
+    !receiptDocumentLine ||
+    batchMixAckId(receiptDocumentLine.itemId) !== receiptCommandLine.itemId ||
+    !Number.isFinite(Number(receiptDocumentLine.quantity)) ||
+    Number(receiptDocumentLine.quantity) <= 0 ||
+    Math.abs(Number(receiptDocumentLine.quantity) - receiptCommandLine.quantity) > 1e-6 ||
+    !batchMixAckId(receiptDocumentLine.lineId) ||
+    batchMixAckId(receiptDocumentLine.batchNo) !== command.documentNumber ||
+    batchMixAckId(receiptDocument.batchNo) !== command.documentNumber ||
+    !batchMixAckLineageMatches(receiptDocumentLine, run) ||
+    (run.productionLineId &&
+      batchMixAckId(receiptDocumentLine.locationId) !== batchMixAckId(ack.receiptLocationId))
+  ) {
+    return { ok: false, error: 'batch_mix_authoritative_ack_invalid' }
+  }
+
+  const issueMovements = movements.filter(
+    (movement) => movement.documentId === issueDocumentId && movement.type === 'issue',
+  )
+  const receiptMovements = movements.filter(
+    (movement) => movement.documentId === receiptDocumentId && movement.type === 'receipt',
+  )
+  const runMovements = movements.filter(
+    (movement) => batchMixAckId(movement.batchRunId) === run.id,
+  )
+  const documentMovements = movements.filter(
+    (movement) =>
+      movement.documentId === issueDocumentId || movement.documentId === receiptDocumentId,
+  )
+  const unexpectedRunMovements = runMovements.filter(
+    (movement) =>
+      !(
+        (movement.documentId === issueDocumentId && movement.type === 'issue') ||
+        (movement.documentId === receiptDocumentId && movement.type === 'receipt')
+      ),
+  )
+  const movementIssues = aggregateBatchMixAckLines(issueMovements)
+  const receiptMovement = receiptMovements[0]
+  const issueLinesById = new Map(
+    issueDocumentLines.map((line) => [batchMixAckId(line.lineId), line] as const),
+  )
+  const issueMovementQtyByLineId = new Map<string, number>()
+  let issueMovementTupleMismatch = false
+  for (const movement of issueMovements) {
+    const documentLineId = batchMixAckId(movement.documentLineId)
+    const documentLine = issueLinesById.get(documentLineId)
+    if (
+      !documentLine ||
+      batchMixAckId(movement.itemId) !== batchMixAckId(documentLine.itemId) ||
+      batchMixAckId(movement.warehouseId) !== command.warehouseId ||
+      batchMixAckId(movement.date).slice(0, 10) !== command.date.slice(0, 10) ||
+      (batchMixAckId(documentLine.batchNo) &&
+        batchMixAckId(movement.batchNo) !== batchMixAckId(documentLine.batchNo)) ||
+      (batchMixAckId(documentLine.locationId) &&
+        batchMixAckId(movement.locationId) !== batchMixAckId(documentLine.locationId))
+    ) {
+      issueMovementTupleMismatch = true
+      break
+    }
+    issueMovementQtyByLineId.set(
+      documentLineId,
+      Math.round(
+        ((issueMovementQtyByLineId.get(documentLineId) ?? 0) + Number(movement.quantity)) *
+          1e6,
+      ) / 1e6,
+    )
+  }
+  const issueLineMovementMismatch = issueDocumentLines.some((line) => {
+    const lineId = batchMixAckId(line.lineId)
+    const moved = issueMovementQtyByLineId.get(lineId)
+    return moved == null || Math.abs(moved - Number(line.quantity)) > 1e-6
+  })
+  if (
+    !batchMixAckQuantitiesEqual(movementIssues, expectedIssues) ||
+    unexpectedRunMovements.length !== 0 ||
+    runMovements.some(
+      (movement) =>
+        movement.cancelled === true ||
+        !Number.isFinite(Number(movement.quantity)) ||
+        Number(movement.quantity) <= 0,
+    ) ||
+    issueMovementTupleMismatch ||
+    issueLineMovementMismatch ||
+    receiptMovements.length !== 1 ||
+    !receiptMovement ||
+    runMovements.length !== issueMovements.length + receiptMovements.length ||
+    documentMovements.length !== issueMovements.length + receiptMovements.length ||
+    [...issueMovements, receiptMovement].some(
+      (movement) => !batchMixAckLineageMatches(movement, run),
+    ) ||
+    batchMixAckId(receiptMovement.itemId) !== receiptCommandLine.itemId ||
+    Math.abs(Number(receiptMovement.quantity) - receiptCommandLine.quantity) > 1e-6 ||
+    batchMixAckId(receiptMovement.documentLineId) !==
+      batchMixAckId(receiptDocumentLine.lineId) ||
+    batchMixAckId(receiptMovement.warehouseId) !== batchMixAckId(ack.receiptWarehouseId) ||
+    batchMixAckId(receiptMovement.batchNo) !== command.documentNumber ||
+    batchMixAckId(receiptMovement.date).slice(0, 10) !== command.date.slice(0, 10) ||
+    (run.productionLineId &&
+      batchMixAckId(receiptMovement.locationId) !== batchMixAckId(ack.receiptLocationId)) ||
+    Number(ack.movementsCount) !== issueMovements.length + receiptMovements.length
+  ) {
+    return { ok: false, error: 'batch_mix_authoritative_ack_invalid' }
+  }
+
+  return { ok: true, issueDocumentId, receiptDocumentId }
 }
 
 export type BatchMixWarehouseLedgerState = 'absent' | 'complete' | 'partial'

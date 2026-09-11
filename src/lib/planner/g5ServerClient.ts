@@ -6,8 +6,12 @@ import { fstApiUrl } from '@/lib/cloud/fstApiOrigin'
 import { FST_SHARED_STORE_DOC_ID } from '@/lib/cloud/firestoreSchema'
 import type { AppStore } from '@/lib/types'
 import type { WarehouseStore } from '@/lib/warehouse/types'
-import { emptyLineProgress } from '@/lib/sales/progress'
-import type { SalesOrder, SalesOrderLine, SalesOrderStatus } from '@/lib/sales/types'
+import type { PurchaseOrder, PurchaseOrderStatus } from '@/lib/procurement/types'
+import {
+  coerceG5SalesOrderRow,
+  coerceG5SalesOrderRows,
+} from '@/lib/sales/g5SalesOrderAuthority'
+import { sha256Utf8 } from '@/lib/formulations/batchMixFingerprint.mjs'
 import {
   g5FlagsFromStore,
   withG5ActivationOnStore,
@@ -45,6 +49,7 @@ export type G5CommandType =
   | 'planning.productionRecommendation.createManual'
   | 'procurement.domain.activate'
   | 'procurement.generateDraftsFromMrp'
+  | 'procurement.draft.create'
   | 'procurement.draft.edit'
   | 'procurement.order.change'
   | 'procurement.order.submit'
@@ -62,6 +67,9 @@ export type G5AckPayload = {
   /** Present on many command acks; unused by mirror except optional replace hydrate. */
   ok?: boolean
   id?: string
+  code?: string
+  item?: unknown
+  warehouseItemId?: string
   status?: string
   criticalRevision?: number
   masterDataActive?: boolean
@@ -72,6 +80,18 @@ export type G5AckPayload = {
   warehouseActive?: boolean
   /** When true with sales.orders, replace local sales.orders (G1 hydrate). */
   replaceSalesOrders?: boolean
+  /** When true with procurement.orders, replace local procurement rows on authoritative pull. */
+  replaceProcurementOrders?: boolean
+  orderNumber?: string
+  order?: unknown
+  documentId?: string
+  number?: string
+  movementsCount?: number
+  movementIds?: string[]
+  document?: unknown
+  movements?: unknown[]
+  commandFingerprint?: string
+  idempotent?: boolean
   masterData?: {
     items?: unknown[]
     finishedProducts?: unknown[]
@@ -226,6 +246,59 @@ export const g5MasterdataDomainActivate = namedG5('masterdata.domain.activate', 
 export const g5MasterdataItemUpsert = namedG5('masterdata.item.upsert', (opts) =>
   wrapG5Call('masterdata.item.upsert', opts),
 )
+
+export function validateG5MasterdataItemUpsertAck(
+  data: G5AckPayload,
+  previousRevision: number,
+  expected: {
+    id: string
+    code: string
+    name: string
+    baseUnit: string
+    categoryId: string
+    warehouseId: string
+  },
+): { ok: true; criticalRevision: number } | { ok: false; error: string } {
+  const revision = Number(data.criticalRevision)
+  const requestedCode = String(expected.code ?? '').trim()
+  const acknowledgedCode = String(data.code ?? '').trim()
+  const canonicalCode = requestedCode || acknowledgedCode
+  if (
+    !Number.isInteger(revision) ||
+    revision <= Number(previousRevision || 0) ||
+    String(data.id ?? '').trim() !== expected.id ||
+    !canonicalCode ||
+    acknowledgedCode !== canonicalCode ||
+    (!requestedCode && !/^FC-\d{6}$/.test(canonicalCode))
+  ) {
+    return { ok: false, error: 'masterdata_item_ack_mismatch' }
+  }
+  const rows = Array.isArray(data.masterData?.items)
+    ? (data.masterData.items as Array<Record<string, unknown>>).filter(
+        (row) => String(row?.id ?? '').trim() === expected.id,
+      )
+    : []
+  const resultItem =
+    data.item && typeof data.item === 'object'
+      ? (data.item as Record<string, unknown>)
+      : undefined
+  if (rows.length !== 1 || !resultItem) {
+    return { ok: false, error: 'masterdata_item_ack_mismatch' }
+  }
+  const matches = (row: Record<string, unknown>) =>
+    String(row.id ?? '').trim() === expected.id &&
+    String(row.code ?? '').trim() === canonicalCode &&
+    String(row.name ?? '').trim() === expected.name &&
+    String(row.baseUnit ?? '').trim() === expected.baseUnit &&
+    String(row.categoryId ?? '').trim() === expected.categoryId &&
+    String(row.warehouseId ?? '').trim() === expected.warehouseId &&
+    row.active === true &&
+    row.archived !== true
+  if (!matches(rows[0]) || !matches(resultItem)) {
+    return { ok: false, error: 'masterdata_item_ack_mismatch' }
+  }
+  return { ok: true, criticalRevision: revision }
+}
 export const g5MasterdataItemArchive = namedG5('masterdata.item.archive', (opts) =>
   wrapG5Call('masterdata.item.archive', opts),
 )
@@ -339,6 +412,9 @@ export const g5GenerateProcurementDrafts = namedG5('procurement.generateDraftsFr
     command: { planningRunId: opts.planningRunId, ...(opts.command ?? {}) },
   }),
 )
+export const g5ProcurementDraftCreate = namedG5('procurement.draft.create', (opts) =>
+  wrapG5Call('procurement.draft.create', opts),
+)
 export const g5ProcurementDraftEdit = namedG5('procurement.draft.edit', (opts) =>
   wrapG5Call('procurement.draft.edit', opts),
 )
@@ -413,6 +489,7 @@ export const G5_UI_GATEWAY_MATRIX: ReadonlyArray<{ wrapper: string; commandType:
     },
     { wrapper: 'g5ProcurementDomainActivate', commandType: 'procurement.domain.activate' },
     { wrapper: 'g5GenerateProcurementDrafts', commandType: 'procurement.generateDraftsFromMrp' },
+    { wrapper: 'g5ProcurementDraftCreate', commandType: 'procurement.draft.create' },
     { wrapper: 'g5ProcurementDraftEdit', commandType: 'procurement.draft.edit' },
     { wrapper: 'g5ProcurementOrderChange', commandType: 'procurement.order.change' },
     { wrapper: 'g5ProcurementSubmit', commandType: 'procurement.order.submit' },
@@ -423,112 +500,542 @@ export const G5_UI_GATEWAY_MATRIX: ReadonlyArray<{ wrapper: string; commandType:
     { wrapper: 'g5ProcurementPaymentRecord', commandType: 'procurement.payment.record' },
   ] as const
 
-/**
- * Conservatively merge G5 server ack into AppStore shapes.
- * Prefer server sales/procurement/masterData when present; warehouse/production only when returned.
- */
-function coerceG5SalesOrderRow(
-  row: Record<string, unknown>,
-  prev?: SalesOrder,
-): SalesOrder {
-  const id = String(row.id ?? prev?.id ?? '')
-  const now = new Date().toISOString()
-  const rawStatus = String(row.status ?? prev?.status ?? 'draft')
-  // G5 authoritative terminal state is `fulfilled`; soft UI uses `completed`.
-  const normalizedStatus = rawStatus === 'fulfilled' ? 'completed' : rawStatus
-  const status = (
-    ['draft', 'confirmed', 'in_production', 'shipped', 'completed', 'cancelled'].includes(
-      normalizedStatus,
+const PROCUREMENT_ORDER_NUMBER_RE = /^ЗЗ-\d{4}-\d+$/
+const PROCUREMENT_STATUSES = new Set([
+  'draft',
+  'submitted',
+  'approved',
+  'ordered',
+  'production',
+  'shipped',
+  'in_transit',
+  'customs',
+  'arrived',
+  'partially_received',
+  'partial',
+  'received',
+  'cancelled',
+])
+
+function stableProcurementJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableProcurementJson).join(',')}]`
+  const row = value as Record<string, unknown>
+  return `{${Object.keys(row)
+    .filter((key) => row[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableProcurementJson(row[key])}`)
+    .join(',')}}`
+}
+
+function text(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+function finitePositiveNumber(value: unknown): value is number {
+  return Number.isFinite(Number(value)) && Number(value) > 0
+}
+
+function finiteNonNegativeNumber(value: unknown): value is number {
+  return Number.isFinite(Number(value)) && Number(value) >= 0
+}
+
+function sameQuantity(left: unknown, right: unknown): boolean {
+  return (
+    Number.isFinite(Number(left)) &&
+    Number.isFinite(Number(right)) &&
+    Math.abs(Number(left) - Number(right)) <= 1e-6
+  )
+}
+
+export function canonicalG5ProcurementCommand(
+  commandType: 'procurement.draft.create' | 'procurement.receipt.post',
+  command: Record<string, unknown>,
+): Record<string, unknown> {
+  if (commandType === 'procurement.draft.create') {
+    const lines = (Array.isArray(command.lines)
+      ? (command.lines as Array<Record<string, unknown>>)
+      : []
     )
-      ? normalizedStatus
-      : 'draft'
-  ) as SalesOrderStatus
-  const commercial =
-    status === 'confirmed' || status === 'in_production' || status === 'shipped'
-      ? 'confirmed'
-      : status === 'completed'
-        ? 'completed'
-        : status === 'cancelled'
-          ? 'cancelled'
-          : 'draft'
-  const fulfillment =
-    status === 'shipped' || status === 'completed'
-      ? 'shipped'
-      : status === 'in_production'
-        ? 'in_production'
-        : 'unplanned'
-  const priorityRaw = row.priority
-  const priority =
-    priorityRaw === 'urgent' ||
-    (typeof priorityRaw === 'number' && priorityRaw >= 10) ||
-    prev?.priority === 'urgent'
-      ? 'urgent'
-      : 'normal'
-  const linesRaw = Array.isArray(row.lines) ? (row.lines as Array<Record<string, unknown>>) : null
-  const lines: SalesOrderLine[] = linesRaw
-    ? linesRaw.map((ln) => {
-        const lineId = String(ln.lineId ?? ln.id ?? '')
-        const prevLine = prev?.lines.find((l) => l.id === lineId)
-        const qtyMp = Number(ln.qtyMp ?? ln.quantity) || 0
-        return {
-          id: lineId || crypto.randomUUID(),
-          finishedProductId: String(
-            ln.finishedProductId ?? prevLine?.finishedProductId ?? '',
-          ) || undefined,
-          productName:
-            String(ln.productNameSnapshot ?? ln.productName ?? prevLine?.productName ?? '') ||
-            prevLine?.productName ||
-            '',
-          category: prevLine?.category ?? 'ratl1',
-          qtyMp,
-          unit: String(ln.unit ?? prevLine?.unit ?? '') || undefined,
-          productionOrderIds: Array.isArray(ln.linkedProductionOrderIds)
-            ? (ln.linkedProductionOrderIds as string[]).filter(Boolean)
-            : prevLine?.productionOrderIds ?? [],
-          progress: prevLine?.progress ?? emptyLineProgress(qtyMp),
-          qtyAreaM2: prevLine?.qtyAreaM2,
-          rollWidthM: prevLine?.rollWidthM,
-          targetGsm: prevLine?.targetGsm,
-          labelType: prevLine?.labelType,
-          preferredLineId: prevLine?.preferredLineId,
-          note: prevLine?.note,
-        }
-      })
-    : prev?.lines ?? []
+      .map((line) => ({
+        itemId: text(line.itemId),
+        requestedQty: Number(line.requestedQty ?? line.quantity),
+        unit: text(line.unit),
+        ...(line.requiredDate != null
+          ? { requiredDate: text(line.requiredDate).slice(0, 10) }
+          : {}),
+        ...(line.unitPrice != null ? { unitPrice: Number(line.unitPrice) } : {}),
+      }))
+      .sort((left, right) =>
+        stableProcurementJson(left).localeCompare(stableProcurementJson(right)),
+      )
+    return {
+      id: text(command.id),
+      supplierId: text(command.supplierId),
+      destinationWarehouseId: text(
+        command.destinationWarehouseId ?? command.warehouseId,
+      ),
+      orderDate: text(command.orderDate).slice(0, 10),
+      ...(command.requestedDeliveryDate != null
+        ? { requestedDeliveryDate: text(command.requestedDeliveryDate).slice(0, 10) }
+        : {}),
+      ...(command.scope != null ? { scope: text(command.scope) } : {}),
+      ...(command.category != null ? { category: text(command.category) } : {}),
+      ...(command.categoryId != null ? { categoryId: text(command.categoryId) } : {}),
+      ...(command.currency != null ? { currency: text(command.currency) } : {}),
+      lines,
+    }
+  }
+  const lines = (Array.isArray(command.lines)
+    ? (command.lines as Array<Record<string, unknown>>)
+    : []
+  )
+    .map((line) => ({
+      lineId: text(line.lineId),
+      ...(line.itemId != null ? { itemId: text(line.itemId) } : {}),
+      quantity: Number(line.quantity ?? line.receivedQty),
+      ...(line.unit != null ? { unit: text(line.unit) } : {}),
+      ...(line.locationId != null ? { locationId: text(line.locationId) } : {}),
+      ...(line.batchNo != null ? { batchNo: text(line.batchNo) } : {}),
+      ...(line.expiryDate != null
+        ? { expiryDate: text(line.expiryDate).slice(0, 10) }
+        : {}),
+    }))
+    .sort((left, right) => left.lineId.localeCompare(right.lineId))
+  return {
+    purchaseOrderId: text(command.purchaseOrderId ?? command.orderId ?? command.id),
+    warehouseId: text(command.warehouseId),
+    date: text(command.date).slice(0, 10),
+    lines,
+  }
+}
+
+export function g5ProcurementCommandFingerprint(
+  commandType: 'procurement.draft.create' | 'procurement.receipt.post',
+  command: Record<string, unknown>,
+): string {
+  return `procurement:${commandType}:v1:sha256:${sha256Utf8(
+    stableProcurementJson(canonicalG5ProcurementCommand(commandType, command)),
+  )}`
+}
+
+function normalizedProcurementStatus(value: unknown): string {
+  const status = text(value)
+  return status === 'partially_received' ? 'partial' : status
+}
+
+function assertUniqueNonEmptyIds(
+  rows: Array<Record<string, unknown>>,
+  key: string,
+): boolean {
+  const ids = rows.map((row) => text(row[key]))
+  return ids.every(Boolean) && new Set(ids).size === ids.length
+}
+
+/**
+ * Canonical G5 procurement row adapter. It never keeps client-side identity fields
+ * when the authoritative row supplies a different schema.
+ */
+export function coerceG5ProcurementOrderRow(
+  row: Record<string, unknown>,
+  prev?: PurchaseOrder,
+): PurchaseOrder {
+  const id = text(row.id)
+  const orderNumber = text(row.orderNumber)
+  const supplierId = text(row.supplierId)
+  const rawStatus = text(row.status)
+  const orderDate = text(row.orderDate).slice(0, 10)
+  const rawLines = Array.isArray(row.lines)
+    ? (row.lines as Array<Record<string, unknown>>)
+    : []
+  if (
+    !id ||
+    !PROCUREMENT_ORDER_NUMBER_RE.test(orderNumber) ||
+    !supplierId ||
+    !PROCUREMENT_STATUSES.has(rawStatus) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(orderDate) ||
+    rawLines.length === 0 ||
+    !assertUniqueNonEmptyIds(rawLines, 'lineId')
+  ) {
+    throw new Error('procurement_order_schema_mismatch')
+  }
+
+  const lines = rawLines.map((line) => {
+    const lineId = text(line.lineId)
+    const itemId = text(line.itemId)
+    const name = text(line.itemNameSnapshot)
+    const unit = text(line.unit)
+    const requestedQty = Number(line.requestedQty)
+    const receivedQty = Number(line.receivedQty)
+    if (
+      !lineId ||
+      !itemId ||
+      !name ||
+      !unit ||
+      !finitePositiveNumber(requestedQty) ||
+      !finiteNonNegativeNumber(receivedQty) ||
+      receivedQty > requestedQty + 1e-6
+    ) {
+      throw new Error('procurement_order_schema_mismatch')
+    }
+    return {
+      id: lineId,
+      warehouseItemId: itemId,
+      name,
+      quantity: requestedQty,
+      unit,
+      receivedQty,
+      unitPrice:
+        line.unitPrice != null && finiteNonNegativeNumber(line.unitPrice)
+          ? Number(line.unitPrice)
+          : undefined,
+    }
+  })
+
+  const scope = text(row.scope)
+  const category = text(row.category)
+  if (scope !== 'domestic' && scope !== 'international') {
+    throw new Error('procurement_order_schema_mismatch')
+  }
+  if (!category) throw new Error('procurement_order_schema_mismatch')
 
   return {
     ...(prev ?? {
       id,
-      orderNumber: '',
-      customer: '',
-      history: [],
-      createdAt: String(row.createdAt ?? now),
+      orderNumber,
+      counterpartyId: supplierId,
+      scope: scope as PurchaseOrder['scope'],
+      category: category as PurchaseOrder['category'],
+      status: 'draft',
+      orderDate,
+      lines: [],
+      legs: [],
+      milestones: [],
+      statusHistory: [],
+      attachments: [],
+      warehouseDocumentIds: [],
+      createdAt: text(row.createdAt),
+      updatedAt: text(row.updatedAt),
     }),
     id,
-    orderNumber: String(row.orderNumber ?? prev?.orderNumber ?? ''),
-    counterpartyId:
-      String(row.customerId ?? row.counterpartyId ?? prev?.counterpartyId ?? '') || undefined,
-    customer: String(row.customer ?? prev?.customer ?? ''),
-    status,
-    commercialStatus: commercial,
-    fulfillmentStatus: fulfillment,
-    priority,
-    orderDate: String(row.orderDate ?? prev?.orderDate ?? row.createdAt ?? now).slice(0, 10),
-    dueDate: row.requestedShipDate
-      ? String(row.requestedShipDate).slice(0, 10)
-      : prev?.dueDate,
+    orderNumber,
+    counterpartyId: supplierId,
+    scope: scope as PurchaseOrder['scope'],
+    category: category as PurchaseOrder['category'],
+    categoryId: text(row.categoryId) || undefined,
+    status: normalizedProcurementStatus(rawStatus) as PurchaseOrderStatus,
+    orderDate,
+    requestedDeliveryDate: text(row.requestedDeliveryDate) || undefined,
+    confirmedDeliveryDate: text(row.confirmedDeliveryDate) || undefined,
+    destinationWarehouseId: text(row.destinationWarehouseId) || undefined,
+    currency: text(row.currency) || undefined,
     lines,
-    note:
-      row.note != null
-        ? String(row.note)
-        : row.notes != null
-          ? String(row.notes)
-          : prev?.note,
-    history: prev?.history ?? [],
-    createdAt: String(row.createdAt ?? prev?.createdAt ?? now),
-    updatedAt: String(row.updatedAt ?? prev?.updatedAt ?? now),
-  }
+    warehouseDocumentIds: Array.isArray(row.warehouseDocumentIds)
+      ? [...new Set(row.warehouseDocumentIds.map(text).filter(Boolean))]
+      : prev?.warehouseDocumentIds ?? [],
+    createdAt: text(row.createdAt) || prev?.createdAt || '',
+    updatedAt: text(row.updatedAt) || prev?.updatedAt || '',
+    ...(Number.isInteger(Number(row.revision))
+      ? { revision: Number(row.revision) }
+      : {}),
+  } as PurchaseOrder
 }
+
+export type ExpectedG5ProcurementOrderAck = {
+  operation: 'create' | 'edit' | 'submit' | 'approve' | 'markOrdered' | 'cancel'
+  orderId?: string
+  status: string
+  supplierId?: string
+  destinationWarehouseId?: string
+  commandFingerprint?: string
+  lines: Array<{
+    lineId?: string
+    itemId: string
+    requestedQty: number
+    unit: string
+  }>
+}
+
+export function validateG5ProcurementOrderAck(
+  data: G5AckPayload,
+  previousRevision: number,
+  expected: ExpectedG5ProcurementOrderAck,
+):
+  | { ok: true; criticalRevision: number; order: PurchaseOrder }
+  | { ok: false; error: string } {
+  const revision = Number(data.criticalRevision)
+  const replay = data.idempotent === true
+  if (
+    !Number.isInteger(revision) ||
+    revision < Number(previousRevision || 0) ||
+    (!replay && revision <= Number(previousRevision || 0)) ||
+    !Array.isArray(data.procurement?.orders)
+  ) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  const rawOrders = data.procurement.orders as Array<Record<string, unknown>>
+  if (!assertUniqueNonEmptyIds(rawOrders, 'id')) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  const acknowledgedId = text(data.id)
+  const targetId = text(expected.orderId) || acknowledgedId
+  const matches = rawOrders.filter((row) => text(row.id) === targetId)
+  if (!targetId || acknowledgedId !== targetId || matches.length !== 1) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  let order: PurchaseOrder
+  try {
+    order = coerceG5ProcurementOrderRow(matches[0])
+  } catch {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  if (
+    normalizedProcurementStatus(data.status) !== normalizedProcurementStatus(expected.status) ||
+    normalizedProcurementStatus(order.status) !== normalizedProcurementStatus(expected.status) ||
+    text(data.orderNumber) !== order.orderNumber ||
+    (expected.supplierId != null && order.counterpartyId !== text(expected.supplierId)) ||
+    (expected.destinationWarehouseId != null &&
+      order.destinationWarehouseId !== text(expected.destinationWarehouseId)) ||
+    (expected.commandFingerprint != null &&
+      text(data.commandFingerprint) !== expected.commandFingerprint)
+  ) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  if (data.order == null) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  try {
+    const resultOrder = coerceG5ProcurementOrderRow(
+      data.order as Record<string, unknown>,
+    )
+    if (stableProcurementJson(resultOrder) !== stableProcurementJson(order)) {
+      return { ok: false, error: 'procurement_order_ack_mismatch' }
+    }
+  } catch {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+
+  if (order.lines.length !== expected.lines.length) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  const remaining = [...order.lines]
+  for (const expectedLine of expected.lines) {
+    const index = remaining.findIndex(
+      (line) =>
+        (expected.operation === 'create' || line.id === text(expectedLine.lineId)) &&
+        line.warehouseItemId === text(expectedLine.itemId) &&
+        sameQuantity(line.quantity, expectedLine.requestedQty) &&
+        line.unit === text(expectedLine.unit),
+    )
+    if (index < 0) return { ok: false, error: 'procurement_order_ack_mismatch' }
+    remaining.splice(index, 1)
+  }
+  if (remaining.length > 0) {
+    return { ok: false, error: 'procurement_order_ack_mismatch' }
+  }
+  return { ok: true, criticalRevision: revision, order }
+}
+
+export type ExpectedG5ProcurementReceiptAck = {
+  purchaseOrderId: string
+  warehouseId: string
+  date: string
+  commandFingerprint?: string
+  lines: Array<{
+    lineId: string
+    itemId: string
+    quantity: number
+    unit?: string
+    locationId?: string
+    batchNo?: string
+    expiryDate?: string
+    expectedReceivedQty?: number
+  }>
+}
+
+function movementBalance(
+  rows: unknown[],
+  tuple: { warehouseId: string; itemId: string; locationId?: string; batchNo?: string },
+): number {
+  return (rows as Array<Record<string, unknown>>).reduce((sum, movement) => {
+    if (
+      movement.cancelled === true ||
+      text(movement.warehouseId) !== tuple.warehouseId ||
+      text(movement.itemId) !== tuple.itemId ||
+      text(movement.locationId) !== text(tuple.locationId) ||
+      text(movement.batchNo) !== text(tuple.batchNo)
+    ) {
+      return sum
+    }
+    const qty = Number(movement.quantity)
+    if (!Number.isFinite(qty)) return Number.NaN
+    if (movement.type === 'receipt' || movement.type === 'in') return sum + qty
+    if (movement.type === 'issue' || movement.type === 'out') return sum - qty
+    return sum
+  }, 0)
+}
+
+export function validateG5ProcurementReceiptAck(
+  data: G5AckPayload,
+  previousRevision: number,
+  expected: ExpectedG5ProcurementReceiptAck,
+  previousWarehouse?: Pick<WarehouseStore, 'movements'>,
+):
+  | { ok: true; criticalRevision: number; documentId: string; documentNumber: string }
+  | { ok: false; error: string } {
+  const mismatch = { ok: false as const, error: 'procurement_receipt_ack_mismatch' }
+  const revision = Number(data.criticalRevision)
+  const replay = data.idempotent === true
+  const documentId = text(data.documentId)
+  const documentNumber = text(data.number)
+  if (
+    !Number.isInteger(revision) ||
+    revision < Number(previousRevision || 0) ||
+    (!replay && revision <= Number(previousRevision || 0)) ||
+    text((data as Record<string, unknown>).purchaseOrderId) !== expected.purchaseOrderId ||
+    !documentId ||
+    !documentNumber ||
+    !Array.isArray(data.procurement?.orders) ||
+    !Array.isArray(data.warehouse?.documents) ||
+    !Array.isArray(data.warehouse?.movements) ||
+    Number(data.movementsCount) !== expected.lines.length ||
+    (expected.commandFingerprint != null &&
+      text(data.commandFingerprint) !== expected.commandFingerprint)
+  ) {
+    return mismatch
+  }
+
+  const rawOrders = data.procurement.orders as Array<Record<string, unknown>>
+  if (!assertUniqueNonEmptyIds(rawOrders, 'id')) return mismatch
+  const orderRows = rawOrders.filter((row) => text(row.id) === expected.purchaseOrderId)
+  if (orderRows.length !== 1) return mismatch
+  let order: PurchaseOrder
+  try {
+    order = coerceG5ProcurementOrderRow(orderRows[0])
+  } catch {
+    return mismatch
+  }
+
+  const documents = data.warehouse.documents as Array<Record<string, unknown>>
+  const documentRows = documents.filter((row) => text(row.id) === documentId)
+  const poDocumentRows = documents.filter(
+    (row) =>
+      text(row.purchaseOrderId) === expected.purchaseOrderId &&
+      (expected.commandFingerprint == null ||
+        text(row.commandFingerprint) === expected.commandFingerprint),
+  )
+  if (documentRows.length !== 1 || poDocumentRows.length !== 1) return mismatch
+  const document = documentRows[0]
+  const documentLines = Array.isArray(document.lines)
+    ? (document.lines as Array<Record<string, unknown>>)
+    : []
+  if (
+    document.status !== 'posted' ||
+    document.type !== 'receipt' ||
+    document.purpose !== 'purchase' ||
+    document.docRole !== 'procurement_receipt' ||
+    text(document.purchaseOrderId) !== expected.purchaseOrderId ||
+    text(document.warehouseId) !== expected.warehouseId ||
+    text(document.date).slice(0, 10) !== expected.date ||
+    text(document.number) !== documentNumber ||
+    documentLines.length !== expected.lines.length ||
+    !assertUniqueNonEmptyIds(documentLines, 'lineId')
+  ) {
+    return mismatch
+  }
+
+  const movements = (data.warehouse.movements as Array<Record<string, unknown>>).filter(
+    (row) => text(row.documentId) === documentId,
+  )
+  if (
+    movements.length !== expected.lines.length ||
+    !assertUniqueNonEmptyIds(movements, 'id') ||
+    movements.some((movement) => movement.cancelled === true)
+  ) {
+    return mismatch
+  }
+
+  for (const expectedLine of expected.lines) {
+    const poLine = order.lines.find((line) => line.id === expectedLine.lineId)
+    const matchingDocumentLines = documentLines.filter(
+      (line) => text(line.purchaseOrderLineId) === expectedLine.lineId,
+    )
+    if (!poLine || matchingDocumentLines.length !== 1) return mismatch
+    const documentLine = matchingDocumentLines[0]
+    if (
+      text(documentLine.itemId) !== expectedLine.itemId ||
+      !finitePositiveNumber(documentLine.quantity) ||
+      !sameQuantity(documentLine.quantity, expectedLine.quantity) ||
+      (expectedLine.unit != null && text(documentLine.unitSnapshot) !== expectedLine.unit) ||
+      text(documentLine.locationId) !== text(expectedLine.locationId) ||
+      text(documentLine.batchNo) !== text(expectedLine.batchNo) ||
+      text(documentLine.expiryDate) !== text(expectedLine.expiryDate) ||
+      (expectedLine.expectedReceivedQty != null &&
+        !sameQuantity(poLine.receivedQty, expectedLine.expectedReceivedQty))
+    ) {
+      return mismatch
+    }
+    const linkedMovements = movements.filter(
+      (movement) => text(movement.documentLineId) === text(documentLine.lineId),
+    )
+    if (linkedMovements.length !== 1) return mismatch
+    const movement = linkedMovements[0]
+    if (
+      movement.type !== 'receipt' ||
+      text(movement.purchaseOrderId) !== expected.purchaseOrderId ||
+      text(movement.purchaseOrderLineId) !== expectedLine.lineId ||
+      text(movement.warehouseId) !== expected.warehouseId ||
+      text(movement.itemId) !== expectedLine.itemId ||
+      text(movement.locationId) !== text(expectedLine.locationId) ||
+      text(movement.batchNo) !== text(expectedLine.batchNo) ||
+      text(movement.expiryDate) !== text(expectedLine.expiryDate) ||
+      (expectedLine.unit != null && text(movement.unitSnapshot) !== expectedLine.unit) ||
+      text(movement.date).slice(0, 10) !== expected.date ||
+      !finitePositiveNumber(movement.quantity) ||
+      !sameQuantity(movement.quantity, expectedLine.quantity) ||
+      (expected.commandFingerprint != null &&
+        text(movement.commandFingerprint) !== expected.commandFingerprint)
+    ) {
+      return mismatch
+    }
+
+    if (previousWarehouse && replay !== true) {
+      const tuple = {
+        warehouseId: expected.warehouseId,
+        itemId: expectedLine.itemId,
+        locationId: expectedLine.locationId,
+        batchNo: expectedLine.batchNo,
+      }
+      const before = movementBalance(previousWarehouse.movements, tuple)
+      const after = movementBalance(data.warehouse.movements as unknown[], tuple)
+      if (!sameQuantity(after - before, expectedLine.quantity)) return mismatch
+    }
+  }
+
+  if (
+    data.document == null ||
+    stableProcurementJson(data.document) !== stableProcurementJson(document)
+  ) {
+    return mismatch
+  }
+  if (
+    !Array.isArray(data.movements) ||
+    data.movements.length !== movements.length ||
+    !data.movements.every((row) =>
+      movements.some(
+        (movement) => stableProcurementJson(movement) === stableProcurementJson(row),
+      ),
+    )
+  ) {
+    return mismatch
+  }
+  return { ok: true, criticalRevision: revision, documentId, documentNumber }
+}
+
+/**
+ * Conservatively merge G5 server ack into AppStore shapes.
+ * Prefer server sales/procurement/masterData when present; warehouse/production only when returned.
+ */
 
 export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
   let next = withG5ActivationOnStore(store, {
@@ -539,6 +1046,16 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
   })
 
   if (server.warehouse) {
+    const loadingShipments = server.warehouse.loadingShipments
+      ? server.warehouse.loadingShipments.map((authoritative) => {
+          const local = next.warehouse.loadingShipments?.find(
+            (shipment) => shipment.id === authoritative.id,
+          )
+          // Draft presentation fields (container/lines/human number) can live in the
+          // soft UI store; authoritative G5 tuple/status always wins after ACK validation.
+          return local ? { ...local, ...authoritative } : authoritative
+        })
+      : next.warehouse.loadingShipments
     next = {
       ...next,
       warehouse: {
@@ -546,7 +1063,7 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
         ...server.warehouse,
         documents: server.warehouse.documents ?? next.warehouse.documents,
         movements: server.warehouse.movements ?? next.warehouse.movements,
-        loadingShipments: server.warehouse.loadingShipments ?? next.warehouse.loadingShipments,
+        loadingShipments,
         auditLog: server.warehouse.auditLog ?? next.warehouse.auditLog,
         closedMonths: server.warehouse.closedMonths ?? next.warehouse.closedMonths,
       },
@@ -577,6 +1094,49 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
 
   // Mirror master-data customers/suppliers → counterparties (UI store) when provided.
   if (server.masterData) {
+    const masterItems = Array.isArray(server.masterData.items) ? server.masterData.items : null
+    if (masterItems) {
+      const byId = new Map(next.warehouse.items.map((item) => [item.id, item] as const))
+      for (const raw of masterItems) {
+        const row = raw as Record<string, unknown>
+        const id = String(row.id ?? '').trim()
+        if (!id) continue
+        const prev = byId.get(id)
+        const unit = String(row.baseUnit ?? prev?.unit ?? '').trim()
+        const internalCode = String(row.code ?? prev?.internalCode ?? '').trim()
+        const name = String(row.name ?? prev?.name ?? '').trim()
+        // G5 master-data may omit G2 placement fields. Never invent them from
+        // the first local category/location: accept explicit authoritative
+        // values or preserve the exact tuple of an already-known warehouse row.
+        const categoryId =
+          String(row.categoryId ?? '').trim() || String(prev?.categoryId ?? '').trim()
+        const warehouseId =
+          String(row.warehouseId ?? '').trim() || String(prev?.warehouseId ?? '').trim()
+        if (!unit || !internalCode || !name || !categoryId || !warehouseId) continue
+        byId.set(id, {
+          ...(prev ?? {
+            id,
+            sortOrder: byId.size,
+            createdAt: String(row.updatedAt ?? new Date().toISOString()),
+          }),
+          id,
+          internalCode,
+          name,
+          categoryId,
+          warehouseId,
+          unit,
+          active: row.archived === true ? false : row.active !== false,
+        })
+      }
+      next = {
+        ...next,
+        warehouse: {
+          ...next.warehouse,
+          items: [...byId.values()],
+        },
+      }
+    }
+
     const fps = Array.isArray(server.masterData.finishedProducts)
       ? server.masterData.finishedProducts
       : null
@@ -602,6 +1162,8 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
           id,
           code: String(row.code ?? prev?.code ?? id),
           name: String(row.name ?? prev?.name ?? ''),
+          warehouseItemId:
+            String(row.warehouseItemId ?? prev?.warehouseItemId ?? '').trim() || undefined,
           active: row.archived === true ? false : row.active !== false,
           updatedAt: String(row.updatedAt ?? prev?.updatedAt ?? new Date().toISOString()),
         } as (typeof next.finishedProducts.items)[number])
@@ -694,11 +1256,9 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
     const byId = new Map(
       server.replaceSalesOrders ? [] : next.sales.orders.map((o) => [o.id, o] as const),
     )
-    for (const row of serverOrders) {
-      const id = String(row.id ?? '')
-      if (!id) continue
-      const prev = byId.get(id)
-      byId.set(id, coerceG5SalesOrderRow(row, prev))
+    const authoritative = coerceG5SalesOrderRows(serverOrders, [...byId.values()])
+    for (const order of authoritative) {
+      byId.set(order.id, order)
     }
     next = {
       ...next,
@@ -711,32 +1271,33 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
 
   if (server.procurement?.orders) {
     const serverOrders = server.procurement.orders as Array<Record<string, unknown>>
-    const byId = new Map(next.procurement.orders.map((o) => [o.id, o] as const))
+    const byId = new Map(
+      server.replaceProcurementOrders
+        ? []
+        : next.procurement.orders.map((o) => [o.id, o] as const),
+    )
     for (const row of serverOrders) {
       const id = String(row.id ?? '')
       if (!id) continue
       const prev = byId.get(id)
-      if (prev) {
-        byId.set(id, {
-          ...prev,
-          ...row,
-          id,
-          lines: Array.isArray(row.lines) ? (row.lines as typeof prev.lines) : prev.lines,
-          updatedAt: String(row.updatedAt ?? prev.updatedAt),
-        } as typeof prev)
-      } else {
-        byId.set(id, {
-          ...(row as (typeof next.procurement.orders)[number]),
-          id,
-          updatedAt: String(row.updatedAt ?? new Date().toISOString()),
-        } as (typeof next.procurement.orders)[number])
+      try {
+        byId.set(id, coerceG5ProcurementOrderRow(row, prev))
+      } catch {
+        // Quarantine incomplete authoritative rows instead of inventing IDs,
+        // quantities, units or destination placement from local defaults.
       }
     }
+    const orders = [...byId.values()]
+    const nextOrderSeq = orders.reduce((max, order) => {
+      const match = order.orderNumber.match(/^ЗЗ-\d{4}-(\d+)$/)
+      return match ? Math.max(max, Number(match[1]) + 1) : max
+    }, next.procurement.nextOrderSeq ?? 1)
     next = {
       ...next,
       procurement: {
         ...next.procurement,
-        orders: [...byId.values()],
+        orders,
+        nextOrderSeq,
       },
     }
   }
@@ -745,4 +1306,5 @@ export function mirrorG5Ack(store: AppStore, server: G5AckPayload): AppStore {
 }
 
 export { g5FlagsFromStore, withG5ActivationOnStore }
+export { coerceG5SalesOrderRow }
 export type { G5ActivationFlags }

@@ -20,6 +20,8 @@ export type FinishedGoodsLot = {
   productionOrderId: string
   packagingReportId: string
   sourceShiftReportIds: string[]
+  sourceWipBatchIds?: string[]
+  wipContractVersion?: 1
   outputM2: number
   rollCount: number
   palletCount: number

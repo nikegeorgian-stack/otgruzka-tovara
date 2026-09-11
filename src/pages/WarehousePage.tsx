@@ -19,6 +19,7 @@ import { WarehouseItemRequestsPanel } from '@/components/warehouse/WarehouseItem
 import { WarehouseMixReservesPanel } from '@/components/warehouse/WarehouseMixReservesPanel'
 import { ProductionRequestsPanel } from '@/components/warehouse/ProductionRequestsPanel'
 import { BatchConfirmRequestsPanel } from '@/components/warehouse/BatchConfirmRequestsPanel'
+import { PlannerMaterialsPanel } from '@/components/planner/PlannerMaterialsPanel'
 import { WarehouseInventoryTab } from '@/components/warehouse/WarehouseInventoryTab'
 import { AsOfSnapshotBar } from '@/components/asOf/AsOfSnapshotBar'
 import { ProductionDaySnapshot } from '@/components/production/ProductionDaySnapshot'
@@ -76,6 +77,7 @@ import type {
   WarehouseItem,
   WarehouseLocation,
 } from '@/lib/warehouse/types'
+import { canViewWarehouseCanonicalHandoff } from '@/lib/warehouse/warehouseHandoffView'
 
 export function WarehousePage(props: WarehousePageProps) {
   const {
@@ -148,6 +150,10 @@ export function WarehousePage(props: WarehousePageProps) {
     brigadeNamesKa,
     onSaveProductionRequest,
     onPostProductionRequest,
+    plannerOrders = [],
+    onReserveProductionOrderMaterials,
+    onUnreserveProductionOrderMaterials,
+    onTransferProductionOrderMaterials,
     journalNav,
     onJournalNavConsumed,
     userWarehouseDefaults,
@@ -352,6 +358,7 @@ export function WarehousePage(props: WarehousePageProps) {
   const tabLabels: Record<WarehouseTab, string> = {
     balances: t('warehouse.tab.balances'),
     requests: t('warehouse.tab.requests'),
+    materials: t('planner.tab.materials'),
     nomenclature: t('warehouse.tab.nomenclature'),
     movements: t('warehouse.tab.movements'),
     documents: t('warehouse.tab.documents'),
@@ -363,7 +370,13 @@ export function WarehousePage(props: WarehousePageProps) {
     audit: t('warehouse.tab.audit'),
   }
 
-  const visibleTabs = webWarehouseMode ? WAREHOUSE_WEB_TABS : WAREHOUSE_TABS
+  const canViewCanonicalHandoff = canViewWarehouseCanonicalHandoff(
+    webWarehouseMode,
+    currentUser,
+  )
+  const visibleTabs = (webWarehouseMode ? WAREHOUSE_WEB_TABS : WAREHOUSE_TABS).filter(
+    (id) => id !== 'materials' || canViewCanonicalHandoff,
+  )
 
   useEffect(() => {
     if (!visibleTabs.includes(tab)) {
@@ -723,8 +736,7 @@ export function WarehousePage(props: WarehousePageProps) {
           {mixTasks ? (
             <WarehouseMixReservesPanel warehouse={warehouse} mixTasks={mixTasks} />
           ) : null}
-          {!webWarehouseMode &&
-            pendingBatchRuns &&
+          {pendingBatchRuns &&
             onConfirmFormulationBatch &&
             onRejectFormulationBatch && (
               <BatchConfirmRequestsPanel
@@ -920,6 +932,28 @@ export function WarehousePage(props: WarehousePageProps) {
       )}
       {!embedded && tab === 'audit' && <WarehouseAuditTab warehouse={warehouse} />}
       {!embedded &&
+        tab === 'materials' &&
+        canViewCanonicalHandoff &&
+        onReserveProductionOrderMaterials &&
+        onUnreserveProductionOrderMaterials &&
+        onTransferProductionOrderMaterials && (
+          <PlannerMaterialsPanel
+            orders={plannerOrders}
+            warehouseItems={warehouse.items}
+            warehouseMovements={warehouse.movements}
+            warehouseDocuments={warehouse.documents}
+            warehouseLocations={warehouse.locations}
+            productionLineBindings={warehouse.productionLineBindings}
+            warehouseAccounting={warehouse.accountingByWarehouse}
+            onReserveOrder={onReserveProductionOrderMaterials}
+            onUnreserveOrder={onUnreserveProductionOrderMaterials}
+            onTransferProductionOrderMaterials={onTransferProductionOrderMaterials}
+            access={access}
+            currentUser={currentUser}
+            onCreateWorkTask={onCreateWorkTask}
+          />
+        )}
+      {!embedded &&
         tab === 'requests' &&
         onCreateKeeperReplenishment &&
         onCreateReplenishmentFromDeficit &&
@@ -993,8 +1027,8 @@ export function WarehousePage(props: WarehousePageProps) {
           locations={resolveWarehouseLocationsForPicker(warehouse)}
           actorRoleId={accessPersona(currentUser)?.roleId}
           onClose={() => setEditItem(null)}
-          onSave={(item) => {
-            onUpsertItem(item)
+          onSave={async (item) => {
+            await onUpsertItem(item)
             setEditItem(null)
           }}
           onAddCategory={(name) => {
@@ -1342,7 +1376,7 @@ function ItemEditModal({
   locations: WarehouseLocation[]
   actorRoleId?: string
   onClose: () => void
-  onSave: (item: WarehouseItem) => void
+  onSave: (item: WarehouseItem) => void | Promise<void>
   onAddCategory: (name: string) => string
   onAddLocation: (name: string) => string
 }) {
@@ -1358,6 +1392,7 @@ function ItemEditModal({
   const [showPackaging, setShowPackaging] = useState((item.unitConversions?.length ?? 0) > 0)
   const [error, setError] = useState<string | null>(null)
   const [photoBusy, setPhotoBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
   const showTechnicalName = isProductionNomenclature(draft, locations)
   const editTechnicalName = canSetTechnicalName(actorRoleId, draft, locations)
 
@@ -1376,22 +1411,26 @@ function ItemEditModal({
     )
   }
 
-  function save(): boolean {
+  async function save(): Promise<boolean> {
     const name = draft.name.trim()
     if (!name) {
       setError(t('warehouse.err.nameRequired'))
       return false
     }
     setError(null)
+    setSaving(true)
     try {
-      onSave({ ...draft, name })
+      await onSave({ ...draft, name })
       return true
     } catch (err) {
       if (err instanceof WarehouseItemIdentityError) {
         setError(t(err.code))
         return false
       }
-      throw err
+      setError(t(err instanceof Error ? err.message : 'common.error'))
+      return false
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -1415,7 +1454,7 @@ function ItemEditModal({
       onClose={requestClose}
       title={isNew ? t('warehouse.addItem') : t('warehouse.editItem')}
       size="lg"
-      onPrimaryAction={() => save()}
+      onPrimaryAction={() => void save()}
       initialFocus="primary"
       footer={
         <div className="flex justify-end gap-2">
@@ -1426,9 +1465,10 @@ function ItemEditModal({
             type="button"
             data-modal-primary
             className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
-            onClick={() => save()}
+            disabled={saving}
+            onClick={() => void save()}
           >
-            {t('common.save')}
+            {saving ? t('web.cloud.savingShort') : t('common.save')}
           </button>
         </div>
       }

@@ -18,13 +18,10 @@ import {
   getFstPrincipalAccessByUidStore,
   getG1DataConnect,
   insertFstCommandReceipt,
-  upsertFstCriticalStore,
 } from './_g1DataConnect.mjs'
 import {
   computeServerBalance,
-  emptyCriticalPayload,
   emptyProductionStore,
-  fingerprintCriticalPayload,
   isPackagingQcFeatureActive,
   isPeriodClosed,
   isProductionDomainActive,
@@ -36,7 +33,6 @@ import {
   nextServerDocumentNumber,
   parseCapabilities,
   parseCriticalPayload,
-  serializeCriticalPayload,
   stableDomainHash,
 } from './_g1CriticalHelpers.mjs'
 import {
@@ -48,7 +44,19 @@ import { hasCapability, normalizeCapabilities } from './_g2Capabilities.mjs'
 import { hasLineScope } from './_g3Capabilities.mjs'
 import { casCommitDomains } from './_g3ProductionService.mjs'
 import { G4_CAPS, hasWarehouseScope } from './_g4Capabilities.mjs'
+import {
+  canonicalPackagingCommandFingerprint,
+  resolveCanonicalPackBinding,
+  validateCanonicalFinishedGoodsMapping,
+  validateCanonicalPackagingCorrectionBoundary,
+  validateCanonicalPackagingWipLineage,
+} from './_g4PackagingIntegrity.mjs'
 import { comparePackagingActualToNorm } from './_g5PackagingBomHelpers.mjs'
+import { isStagingIsolatedRuntime } from './_dataConnectRuntime.mjs'
+import {
+  g4CriticalMutationCommandFingerprint,
+  isG4CriticalMutationCommand,
+} from '../../src/lib/production/g4CriticalMutationIntegrityCore.mjs'
 import {
   getQcDataConnect,
   insertQcLotDecision,
@@ -78,6 +86,102 @@ function str(value) {
 
 function num(value) {
   return Number(value)
+}
+
+function optionalNonNegativeInteger(value, error) {
+  if (value === undefined) return ok({ value: undefined })
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    return fail(error, 400)
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    return fail(error, 400)
+  }
+  return ok({ value: parsed })
+}
+
+function optionalPositiveFinite(value, error) {
+  if (value === undefined) return ok({ value: undefined })
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    return fail(error, 400)
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fail(error, 400)
+  return ok({ value: parsed })
+}
+
+function resolvePackagingOutputQuantity(command, fallback = {}, { allowMissingZero = false } = {}) {
+  const outputM2 = optionalPositiveFinite(command?.outputM2, 'invalid_output')
+  if (!outputM2.ok) return outputM2
+  const outputMp = optionalPositiveFinite(command?.outputMp, 'invalid_output')
+  if (!outputMp.ok) return outputMp
+  if (
+    outputM2.value !== undefined &&
+    outputMp.value !== undefined &&
+    Math.abs(outputM2.value - outputMp.value) > EPS
+  ) {
+    return fail('invalid_output', 400)
+  }
+  const claimed = outputM2.value ?? outputMp.value
+  if (claimed !== undefined) return ok({ value: claimed })
+
+  const fallbackValue = fallback?.outputM2 ?? fallback?.outputMp
+  if (fallbackValue === undefined) {
+    return allowMissingZero ? ok({ value: 0 }) : fail('invalid_output', 400)
+  }
+  if (
+    (typeof fallbackValue !== 'number' && typeof fallbackValue !== 'string') ||
+    (typeof fallbackValue === 'string' && !fallbackValue.trim())
+  ) {
+    return fail('invalid_output', 400)
+  }
+  const parsedFallback = Number(fallbackValue)
+  if (
+    !Number.isFinite(parsedFallback) ||
+    (allowMissingZero ? parsedFallback < 0 : parsedFallback <= 0)
+  ) {
+    return fail('invalid_output', 400)
+  }
+  return ok({ value: parsedFallback })
+}
+
+/** Validate count aliases without truncating/clamping a malformed client claim. */
+function resolvePackagingOutputCounts(command, fallback = {}) {
+  const rolls = optionalNonNegativeInteger(command?.outputRolls, 'invalid_output_rolls')
+  if (!rolls.ok) return rolls
+  const fallbackRolls = optionalNonNegativeInteger(
+    fallback?.outputRolls,
+    'invalid_output_rolls',
+  )
+  if (!fallbackRolls.ok) return fallbackRolls
+
+  const pallets = optionalNonNegativeInteger(command?.outputPallets, 'invalid_output_pallets')
+  if (!pallets.ok) return pallets
+  const palletAlias = optionalNonNegativeInteger(command?.palletCount, 'invalid_output_pallets')
+  if (!palletAlias.ok) return palletAlias
+  if (
+    pallets.value !== undefined &&
+    palletAlias.value !== undefined &&
+    pallets.value !== palletAlias.value
+  ) {
+    return fail('invalid_output_pallets', 400)
+  }
+  const fallbackPallets = optionalNonNegativeInteger(
+    fallback?.outputPallets,
+    'invalid_output_pallets',
+  )
+  if (!fallbackPallets.ok) return fallbackPallets
+
+  return ok({
+    outputRolls: rolls.value ?? fallbackRolls.value ?? 0,
+    outputPallets: pallets.value ?? palletAlias.value ?? fallbackPallets.value ?? 0,
+  })
 }
 
 function roundQty(value) {
@@ -189,21 +293,14 @@ export async function requireG4Capability(
 // Critical store + idempotency
 // ---------------------------------------------------------------------------
 
-async function loadOrInitCritical(dc, storeId, actorUid) {
+async function loadCritical(dc, storeId) {
   const { data } = await getFstCriticalStore(dc, { id: storeId })
   const row = data?.fstCriticalStore
-  if (!row) {
-    const payload = emptyCriticalPayload()
-    const json = serializeCriticalPayload(payload)
-    await upsertFstCriticalStore(dc, {
-      id: storeId,
-      payloadJson: json,
-      fingerprint: fingerprintCriticalPayload(json),
-      revision: 0,
-      updatedByUid: actorUid,
-    })
-    return ok({ revision: 0, payload, row: null })
-  }
+  // G4 is not a bootstrap gateway. In particular, a denied/read/confirm command
+  // must never create a revision-0 critical row as a side effect. G3 activation
+  // owns the production-domain bootstrap; G4 activation only CASes an existing
+  // production-active row.
+  if (!row) return ok({ missing: true, revision: 0, payload: null, row: null })
   const revision = Number(row.revision) || 0
   const parsed = parseCriticalPayload(row.payloadJson, { revision })
   if (!parsed.ok) return fail(parsed.error, 500)
@@ -219,7 +316,11 @@ async function loadReceipt(dc, idempotencyKey, storeId) {
   if (!row) return null
   if (row.storeId !== storeId) return { conflict: true }
   try {
-    return { result: JSON.parse(row.resultJson), criticalRevision: row.criticalRevisionAfter }
+    return {
+      result: JSON.parse(row.resultJson),
+      commandType: row.commandType,
+      criticalRevision: row.criticalRevisionAfter,
+    }
   } catch {
     return { corrupt: true }
   }
@@ -230,9 +331,309 @@ function embeddedReceipt(payload, idempotencyKey) {
   if (!row?.result) return null
   return {
     result: row.result,
+    commandType: row.commandType,
     criticalRevision: row.criticalRevisionAfter,
     embedded: true,
   }
+}
+
+const PAYLOAD_BOUND_IDEMPOTENCY_COMMANDS = new Set([
+  'packaging.report.confirm',
+  'packaging.report.confirmCorrection',
+])
+
+function idempotencyReplayConflict(receipt, commandType, commandFingerprint, { strict = false } = {}) {
+  if (
+    !PAYLOAD_BOUND_IDEMPOTENCY_COMMANDS.has(commandType) &&
+    !isG4CriticalMutationCommand(commandType)
+  ) {
+    return false
+  }
+  if (receipt?.commandType && receipt.commandType !== commandType) return true
+  const storedFingerprint = str(
+    isG4CriticalMutationCommand(commandType)
+      ? receipt?.result?.commandFingerprint
+      : receipt?.result?.idempotencyFingerprint,
+  )
+  // A canonical/staging replay without a cryptographic payload fingerprint is
+  // unverifiable. Historical soft receipts remain compatible only outside the
+  // strict path.
+  if (strict && !storedFingerprint) return true
+  return Boolean(storedFingerprint && storedFingerprint !== commandFingerprint)
+}
+
+function strictPackagingReplayRequired(commandType, command, production) {
+  if (!PAYLOAD_BOUND_IDEMPOTENCY_COMMANDS.has(commandType)) return false
+  if (isStagingIsolatedRuntime()) return true
+
+  const orderIds = new Set([
+    str(command?.productionOrderId ?? command?.orderId),
+  ].filter(Boolean))
+  const originalReportId = str(command?.originalReportId ?? command?.correctsReportId)
+  const reportKey = str(command?.reportKey)
+  if (originalReportId) {
+    for (const report of production?.packagingReports ?? []) {
+      if (str(report?.id) !== originalReportId) continue
+      if (Number(report?.wipContractVersion) >= 1) return true
+      const orderId = str(report?.productionOrderId)
+      if (orderId) orderIds.add(orderId)
+    }
+  }
+  if (reportKey) {
+    for (const report of production?.packagingReports ?? []) {
+      if (str(report?.idempotencyKey) !== reportKey) continue
+      if (Number(report?.wipContractVersion) >= 1) return true
+      const orderId = str(report?.productionOrderId)
+      if (orderId) orderIds.add(orderId)
+    }
+  }
+  return (production?.orders ?? []).some(
+    (order) => orderIds.has(str(order?.id)) && Number(order?.wipContractVersion) >= 1,
+  )
+}
+
+function strictPackagingReplayStateValid({ reportId, lotId, fingerprint }, production) {
+  reportId = str(reportId)
+  lotId = str(lotId)
+  fingerprint = str(fingerprint)
+  if (!fingerprint || !reportId || !lotId) return false
+  const reports = (production?.packagingReports ?? []).filter(
+    (report) => str(report?.id) === reportId,
+  )
+  const lots = (production?.finishedGoodsLots ?? []).filter((lot) => str(lot?.id) === lotId)
+  return (
+    reports.length === 1 &&
+    lots.length === 1 &&
+    reports[0]?.status === 'confirmed' &&
+    str(reports[0]?.idempotencyFingerprint) === fingerprint &&
+    str(reports[0]?.finishedGoodsLotId) === lotId &&
+    str(lots[0]?.packagingReportId) === reportId
+  )
+}
+
+function strictEmbeddedPackagingReplayValid(receipt, production) {
+  return strictPackagingReplayStateValid(
+    {
+      reportId: receipt?.result?.reportId,
+      lotId: receipt?.result?.finishedGoodsLotId,
+      fingerprint: receipt?.result?.idempotencyFingerprint,
+    },
+    production,
+  )
+}
+
+function exactOneById(rows, id) {
+  id = str(id)
+  if (!id) return null
+  const matches = (rows ?? []).filter((row) => str(row?.id) === id)
+  return matches.length === 1 ? matches[0] : null
+}
+
+function exactFingerprintRows(rows, fingerprint) {
+  return (rows ?? []).filter((row) => str(row?.commandFingerprint) === fingerprint)
+}
+
+/**
+ * Re-enter the irreversible mutation's authoritative state reducer on replay.
+ * The SQL receipt is deliberately insufficient: the embedded CAS receipt,
+ * current lot/decision and every claimed ledger row must still agree.
+ */
+function reenterStrictCriticalMutationReducer(commandType, receipt, production, warehouse) {
+  const result = receipt?.result ?? {}
+  const fingerprint = str(result.commandFingerprint)
+  if (!fingerprint) return fail('g4_idempotency_state_mismatch', 409)
+
+  const lot = exactOneById(production?.finishedGoodsLots, result.finishedGoodsLotId)
+  if (!lot) return fail('g4_idempotency_state_mismatch', 409)
+  const decision = result.decisionId
+    ? exactOneById(production?.qcDecisions, result.decisionId)
+    : null
+  const decisionMatches = (status) =>
+    Boolean(
+      decision &&
+        str(lot.currentDecisionId) === str(decision.id) &&
+        str(decision.lotId ?? decision.finishedGoodsLotId) === str(lot.id) &&
+        decision.status === status &&
+        str(decision.commandFingerprint) === fingerprint &&
+        Number(decision.lotRevision) === Number(lot.lotRevision),
+    )
+  const exactIds = (left, right) => {
+    const a = Array.isArray(left) ? left.map(str).filter(Boolean) : []
+    const b = Array.isArray(right) ? right.map(str).filter(Boolean) : []
+    return (
+      a.length === b.length &&
+      new Set(a).size === a.length &&
+      a.every((id, index) => id === b[index])
+    )
+  }
+  const ledgerMatches = (expectedDocumentCount) => {
+    const resultDocumentIds =
+      commandType === 'shipment.cancel' ? result.reversalDocumentIds : result.documentIds
+    const resultMovementIds =
+      commandType === 'shipment.cancel' ? result.reversalMovementIds : result.movementIds
+    const documentIds = Array.isArray(resultDocumentIds)
+      ? resultDocumentIds.map(str).filter(Boolean)
+      : str(result.documentId)
+        ? [str(result.documentId)]
+        : []
+    const movementIds = Array.isArray(resultMovementIds)
+      ? resultMovementIds.map(str).filter(Boolean)
+      : str(result.movementId)
+        ? [str(result.movementId)]
+        : []
+    if (
+      documentIds.length !== expectedDocumentCount ||
+      movementIds.length !== expectedDocumentCount ||
+      new Set(documentIds).size !== expectedDocumentCount ||
+      new Set(movementIds).size !== expectedDocumentCount ||
+      exactFingerprintRows(warehouse?.documents, fingerprint).length !== expectedDocumentCount ||
+      exactFingerprintRows(warehouse?.movements, fingerprint).length !== expectedDocumentCount
+    ) {
+      return false
+    }
+    const graphExpectations = {
+      'qc.regrade': [
+        { role: 'qc_regrade_issue', type: 'issue', lotId: str(result.finishedGoodsLotId) },
+        {
+          role: 'qc_regrade_receipt',
+          type: 'receipt',
+          lotId: str(result.newFinishedGoodsLotId),
+        },
+      ],
+      'qc.reject': [
+        { role: 'qc_reject_issue', type: 'issue', lotId: str(result.finishedGoodsLotId) },
+        {
+          role: 'qc_reject_scrap_receipt',
+          type: 'receipt',
+          lotId: str(result.finishedGoodsLotId),
+        },
+      ],
+      'qc.scrap.writeoff': [
+        { role: 'qc_scrap_writeoff', type: 'issue', lotId: str(result.finishedGoodsLotId) },
+      ],
+      'shipment.post': [
+        {
+          role: 'finished_goods_shipment',
+          type: 'issue',
+          lotId: str(result.finishedGoodsLotId),
+          shipmentId: str(result.shipmentId),
+        },
+      ],
+      'shipment.cancel': [
+        {
+          role: 'finished_goods_shipment_cancel',
+          type: 'receipt',
+          lotId: str(result.finishedGoodsLotId),
+          shipmentId: str(result.shipmentId),
+        },
+      ],
+    }[commandType]
+    if (!Array.isArray(graphExpectations) || graphExpectations.length !== documentIds.length) {
+      return false
+    }
+    return documentIds.every((documentId, index) => {
+      const document = exactOneById(warehouse?.documents, documentId)
+      const expected = graphExpectations[index]
+      if (
+        !document ||
+        document.status !== 'posted' ||
+        str(document.docRole) !== expected.role ||
+        str(document.type) !== expected.type ||
+        str(document.finishedGoodsLotId) !== expected.lotId ||
+        (expected.shipmentId && str(document.shipmentId) !== expected.shipmentId)
+      ) {
+        return false
+      }
+      const lines = Array.isArray(document.lines) ? document.lines : []
+      if (lines.length !== 1 || !str(lines[0]?.lineId)) return false
+      const movements = (warehouse?.movements ?? []).filter(
+        (movement) => str(movement?.documentId) === documentId,
+      )
+      return (
+        movements.length === 1 &&
+        movementIds.includes(str(movements[0]?.id)) &&
+        str(movements[0]?.documentLineId) === str(lines[0]?.lineId) &&
+        str(document.commandFingerprint) === fingerprint &&
+        str(movements[0]?.commandFingerprint) === fingerprint &&
+        str(movements[0]?.type) === expected.type &&
+        str(document.finishedGoodsLotId) === str(movements[0]?.finishedGoodsLotId) &&
+        str(document.warehouseId) === str(movements[0]?.warehouseId) &&
+        str(lines[0]?.itemId) === str(movements[0]?.itemId) &&
+        str(lines[0]?.locationId) === str(movements[0]?.locationId) &&
+        str(lines[0]?.batchNo) === str(movements[0]?.batchNo) &&
+        Math.abs(num(lines[0]?.quantity) - num(movements[0]?.quantity)) <= EPS
+      )
+    })
+  }
+
+  if (commandType === 'qc.review.start') {
+    return lot.qcStatus === 'in_review' &&
+      str(lot.reviewCommandFingerprint) === fingerprint &&
+      decisionMatches('in_review')
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+  if (commandType === 'qc.release') {
+    return lot.qcStatus === 'released' &&
+      str(lot.releaseCommandFingerprint) === fingerprint &&
+      decisionMatches('released')
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+  if (commandType === 'qc.regrade') {
+    const child = exactOneById(production?.finishedGoodsLots, result.newFinishedGoodsLotId)
+    return lot.qcStatus === 'regrade_pending' &&
+      str(lot.regradeCommandFingerprint) === fingerprint &&
+      str(lot.regradedToLotId) === str(child?.id) &&
+      str(child?.parentLotId) === str(lot.id) &&
+      exactIds(lot.regradeDocumentIds, result.documentIds) &&
+      exactIds(lot.regradeMovementIds, result.movementIds) &&
+      decisionMatches('regrade_pending') &&
+      ledgerMatches(2)
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+  if (commandType === 'qc.reject') {
+    return lot.qcStatus === 'scrap_pending' &&
+      str(lot.rejectCommandFingerprint) === fingerprint &&
+      exactIds(lot.rejectDocumentIds, result.documentIds) &&
+      exactIds(lot.rejectMovementIds, result.movementIds) &&
+      decisionMatches('rejected') &&
+      ledgerMatches(2)
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+  if (commandType === 'qc.scrap.writeoff') {
+    return lot.qcStatus === 'written_off' &&
+      str(lot.writeoffCommandFingerprint) === fingerprint &&
+      str(lot.writeoffDocumentId) === str(result.documentId) &&
+      str(lot.writeoffMovementId) === str(result.movementId) &&
+      decisionMatches('written_off') &&
+      ledgerMatches(1)
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+
+  const shipment = exactOneById(warehouse?.loadingShipments, result.shipmentId)
+  if (!shipment || str(shipment.finishedGoodsLotId) !== str(lot.id)) {
+    return fail('g4_idempotency_state_mismatch', 409)
+  }
+  if (commandType === 'shipment.post') {
+    return shipment.status === 'posted' &&
+      str(shipment.postCommandFingerprint ?? shipment.commandFingerprint) === fingerprint &&
+      exactIds(shipment.documentIds, [result.documentId]) &&
+      exactIds(shipment.movementIds, [result.movementId]) &&
+      ledgerMatches(1)
+      ? ok({ result })
+      : fail('g4_idempotency_state_mismatch', 409)
+  }
+  return shipment.status === 'cancelled' &&
+    str(shipment.cancelCommandFingerprint) === fingerprint &&
+    exactIds(shipment.reversalDocumentIds, result.reversalDocumentIds) &&
+    exactIds(shipment.reversalMovementIds, result.reversalMovementIds) &&
+    ledgerMatches(1)
+    ? ok({ result })
+    : fail('g4_idempotency_state_mismatch', 409)
 }
 
 async function saveReceipt(dc, idempotencyKey, storeId, commandType, actorUid, result, criticalRevision) {
@@ -304,6 +705,10 @@ function postWarehouseDoc(warehouse, spec, actor, now) {
     expiryDate: line.expiryDate,
     locationId: line.locationId,
     unitSnapshot: line.unitSnapshot,
+    sourceDocumentId: line.sourceDocumentId,
+    sourceDocumentLineId: line.sourceDocumentLineId,
+    sourceShiftReportId: line.sourceShiftReportId,
+    sourceWipBatchId: line.sourceWipBatchId,
   }))
   const doc = {
     id: documentId,
@@ -335,6 +740,12 @@ function postWarehouseDoc(warehouse, spec, actor, now) {
     actorUid: actor.uid,
     batchNo: line.batchNo,
     expiryDate: line.expiryDate,
+    unitSnapshot: line.unitSnapshot,
+    sourceDocumentId: line.sourceDocumentId,
+    sourceDocumentLineId: line.sourceDocumentLineId,
+    sourceShiftReportId: line.sourceShiftReportId,
+    sourceWipBatchId: line.sourceWipBatchId,
+    shiftReportId: line.shiftReportId ?? line.sourceShiftReportId,
     ...(spec.movementExtra ?? {}),
   }))
   return {
@@ -362,7 +773,13 @@ function reverseMovementType(type) {
  * Storno of an already posted document. `keepQtyByItem` lets a correction keep the
  * part of a finished-goods receipt that was already shipped out of the ledger.
  */
-function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyByItem } = {}) {
+function reverseDocument(
+  warehouse,
+  doc,
+  actor,
+  now,
+  { reason, docRole, keepQtyByItem, commandFingerprint } = {},
+) {
   const date = now.slice(0, 10)
   const documentId = `wh-doc-${crypto.randomUUID()}`
   const related = (warehouse.movements ?? []).filter((m) => m.documentId === doc.id && !m.cancelled)
@@ -386,22 +803,23 @@ function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyB
     return { warehouse, reverseDocumentId: null, skipped: true }
   }
 
+  const reversedLines = reversed.map((r) => ({
+    lineId: crypto.randomUUID(),
+    itemId: r.mov.itemId,
+    quantity: r.quantity,
+    batchNo: r.mov.batchNo,
+    expiryDate: r.mov.expiryDate,
+    locationId: r.mov.locationId,
+  }))
   const revDoc = {
     id: documentId,
-    type: doc.type,
+    type: reverseMovementType(doc.type) ?? doc.type,
     purpose: doc.purpose,
     docRole: docRole ?? 'packaging_correction_reversal',
     warehouseId: doc.warehouseId,
     date,
     number: nextReversalNumber(doc.number),
-    lines: reversed.map((r) => ({
-      lineId: crypto.randomUUID(),
-      itemId: r.mov.itemId,
-      quantity: r.quantity,
-      batchNo: r.mov.batchNo,
-      expiryDate: r.mov.expiryDate,
-      locationId: r.mov.locationId,
-    })),
+    lines: reversedLines,
     status: 'posted',
     reversesDocumentId: doc.id,
     packagingReportId: doc.packagingReportId,
@@ -413,10 +831,12 @@ function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyB
     postedByName: actor.email ?? actor.uid,
     createdAt: now,
     cancellationReason: reason,
+    commandFingerprint: str(commandFingerprint) || undefined,
   }
-  const movements = reversed.map((r) => ({
+  const movements = reversed.map((r, index) => ({
     id: `mov-${crypto.randomUUID()}`,
     documentId,
+    documentLineId: reversedLines[index].lineId,
     warehouseId: r.mov.warehouseId,
     locationId: r.mov.locationId,
     itemId: r.mov.itemId,
@@ -434,6 +854,7 @@ function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyB
     reversesMovementId: r.mov.id,
     isWip: r.mov.isWip,
     isScrap: r.mov.isScrap,
+    commandFingerprint: str(commandFingerprint) || undefined,
   }))
   return {
     warehouse: {
@@ -446,69 +867,8 @@ function reverseDocument(warehouse, doc, actor, now, { reason, docRole, keepQtyB
   }
 }
 
-/**
- * Pack location is owned by warehouse.productionLineBindings. When critical bindings
- * are empty (staging null-WH), accept explicit command warehouse/location from soft.
- */
-function resolvePackBinding(warehouse, command) {
-  const binding = (warehouse.productionLineBindings ?? []).find((b) => {
-    const byLine = normalizePackLineId(b.lineId)
-    const byId = normalizePackLineId(b.id)
-    return byLine === PACK_LINE_ID || byId === PACK_LINE_ID
-  })
-  if (binding) {
-    const packagingWarehouseId = str(
-      binding.packagingWarehouseId ?? binding.productionWarehouseId ?? binding.sourceWarehouseId,
-    )
-    const packagingLocationId = str(binding.packagingLocationId ?? binding.productionLocationId)
-    if (!packagingWarehouseId || !packagingLocationId) {
-      return { ok: false, error: 'pack_location_not_configured' }
-    }
-    const fgWarehouseId =
-      str(binding.finishedGoodsWarehouseId ?? binding.fgWarehouseId) || packagingWarehouseId
-    const fgLocationId =
-      str(binding.finishedGoodsLocationId ?? binding.fgLocationId) || packagingLocationId
-
-    const claimedWarehouse = str(command.packagingWarehouseId ?? command.warehouseId)
-    if (claimedWarehouse && claimedWarehouse !== packagingWarehouseId) {
-      return { ok: false, error: 'pack_location_mismatch' }
-    }
-    const claimedLocation = str(command.packagingLocationId ?? command.locationId)
-    if (claimedLocation && claimedLocation !== packagingLocationId) {
-      return { ok: false, error: 'pack_location_mismatch' }
-    }
-    const claimedFgWarehouse = str(command.finishedGoodsWarehouseId)
-    if (claimedFgWarehouse && claimedFgWarehouse !== fgWarehouseId) {
-      return { ok: false, error: 'pack_location_mismatch' }
-    }
-    const claimedFgLocation = str(command.finishedGoodsLocationId)
-    if (claimedFgLocation && claimedFgLocation !== fgLocationId) {
-      return { ok: false, error: 'pack_location_mismatch' }
-    }
-    return {
-      ok: true,
-      packagingWarehouseId,
-      packagingLocationId,
-      fgWarehouseId,
-      fgLocationId,
-    }
-  }
-
-  const packagingWarehouseId = str(command.packagingWarehouseId ?? command.warehouseId)
-  const packagingLocationId = str(command.packagingLocationId ?? command.locationId)
-  if (!packagingWarehouseId || !packagingLocationId) {
-    return { ok: false, error: 'pack_location_not_configured' }
-  }
-  const fgWarehouseId = str(command.finishedGoodsWarehouseId) || packagingWarehouseId
-  const fgLocationId = str(command.finishedGoodsLocationId) || packagingLocationId
-  return {
-    ok: true,
-    packagingWarehouseId,
-    packagingLocationId,
-    fgWarehouseId,
-    fgLocationId,
-    fromCommand: true,
-  }
+function resolvePackBinding(warehouse, command, options = {}) {
+  return resolveCanonicalPackBinding(warehouse, command, options)
 }
 
 function nextLotNumber(lots, dateIso) {
@@ -520,6 +880,24 @@ function nextLotNumber(lots, dateIso) {
     if (match) max = Math.max(max, parseInt(match[1], 10))
   }
   return `LOT-${date}-${String(max + 1).padStart(3, '0')}`
+}
+
+/**
+ * Human-readable packaging report number owned by the authoritative G4 reducer.
+ * CAS serialises concurrent confirms, so scanning the current critical snapshot is
+ * sufficient to keep the daily sequence unique without trusting a client number.
+ */
+function nextPackagingReportNumber(reports, dateIso) {
+  const date = str(dateIso).slice(0, 10).replace(/-/g, '') || '00000000'
+  const prefix = `УП-${date}-`
+  let max = 0
+  for (const report of reports ?? []) {
+    const number = str(report?.number)
+    if (!number.startsWith(prefix)) continue
+    const sequence = Number(number.slice(prefix.length))
+    if (Number.isInteger(sequence) && sequence > max) max = sequence
+  }
+  return `${prefix}${String(max + 1).padStart(3, '0')}`
 }
 
 function findLot(production, lotId) {
@@ -554,6 +932,7 @@ function buildDecision({
   targetFinishedProductId,
   quantity,
   idempotencyKey,
+  commandFingerprint,
 }) {
   const decisionId = `qcd-${crypto.randomUUID()}`
   return {
@@ -579,6 +958,7 @@ function buildDecision({
     protocolGeneration: attachments?.protocol?.generation,
     protocolStoragePath: attachments?.protocol?.storagePath,
     idempotencyKey: idempotencyKey || undefined,
+    commandFingerprint: str(commandFingerprint) || undefined,
   }
 }
 
@@ -586,16 +966,23 @@ function buildDecision({
 // Packaging reports
 // ---------------------------------------------------------------------------
 
-function sanitizePackagingLines(rawLines, { itemKey }) {
+function sanitizePackagingLines(rawLines, { itemKey, preserveWipLineage = false }) {
   if (!Array.isArray(rawLines)) return { ok: true, lines: [] }
   const out = []
+  const lineIds = new Set()
   for (const raw of rawLines) {
     const itemId = str(raw?.[itemKey] ?? raw?.itemId ?? raw?.warehouseItemId)
     const quantity = num(raw?.quantity ?? raw?.qty)
     if (!itemId) return { ok: false, error: 'invalid_line_item' }
     if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, error: 'invalid_quantity' }
-    out.push({
-      lineId: str(raw?.lineId) || crypto.randomUUID(),
+    const suppliedLineId = str(raw?.lineId)
+    if (suppliedLineId && lineIds.has(suppliedLineId)) {
+      return { ok: false, error: 'duplicate_line_id' }
+    }
+    const lineId = suppliedLineId || crypto.randomUUID()
+    lineIds.add(lineId)
+    const line = {
+      lineId,
       itemId,
       quantity: roundQty(quantity),
       unitSnapshot: raw?.unitSnapshot != null ? String(raw.unitSnapshot) : undefined,
@@ -606,7 +993,13 @@ function sanitizePackagingLines(rawLines, { itemKey }) {
             ? str(raw.batchNo)
             : undefined,
       note: raw?.note != null ? String(raw.note) : undefined,
-    })
+    }
+    if (preserveWipLineage) {
+      line.productionOrderId = str(raw?.productionOrderId) || undefined
+      line.shiftReportId = str(raw?.shiftReportId) || undefined
+      line.receiptDocumentId = str(raw?.receiptDocumentId) || undefined
+    }
+    out.push(line)
   }
   return { ok: true, lines: out }
 }
@@ -619,10 +1012,19 @@ function applyPackagingDraftSave(production, command, actor, now) {
   }
   const lineId = normalizePackLineId(command.lineId ?? PACK_LINE_ID)
   if (lineId !== PACK_LINE_ID) return fail('invalid_pack_line', 400)
-  const wip = sanitizePackagingLines(command.wipLines, { itemKey: 'semiFinishedItemId' })
+  const wip = sanitizePackagingLines(command.wipLines, {
+    itemKey: 'semiFinishedItemId',
+    preserveWipLineage: true,
+  })
   if (!wip.ok) return fail(wip.error, 400)
   const materials = sanitizePackagingLines(command.materialLines, { itemKey: 'itemId' })
   if (!materials.ok) return fail(materials.error, 400)
+  const outputCounts = resolvePackagingOutputCounts(command, existing ?? {})
+  if (!outputCounts.ok) return outputCounts
+  const outputQuantity = resolvePackagingOutputQuantity(command, existing ?? {}, {
+    allowMissingZero: true,
+  })
+  if (!outputQuantity.ok) return outputQuantity
 
   const draft = {
     ...(existing ?? {}),
@@ -634,8 +1036,9 @@ function applyPackagingDraftSave(production, command, actor, now) {
     shiftSlot: command.shiftSlot === 'night' ? 'night' : 'day',
     finishedProductId: str(command.finishedProductId ?? existing?.finishedProductId),
     warehouseItemId: str(command.warehouseItemId ?? existing?.warehouseItemId),
-    outputM2: roundQty(num(command.outputM2 ?? command.outputMp ?? existing?.outputM2) || 0),
-    outputRolls: Math.max(0, Math.trunc(num(command.outputRolls ?? existing?.outputRolls) || 0)),
+    outputM2: roundQty(outputQuantity.value),
+    outputRolls: outputCounts.outputRolls,
+    outputPallets: outputCounts.outputPallets,
     wipLines: wip.lines,
     materialLines: materials.lines,
     note: command.note != null ? String(command.note) : existing?.note,
@@ -681,27 +1084,94 @@ function applyPackagingDraftDelete(production, command, actor, now) {
 function applyPackagingConfirm(production, warehouse, command, actor, now, options = {}) {
   const correction = options.correction ?? null
   const masterDataActive = options.masterDataActive === true
+  const enforceCanonicalLineage = options.enforceCanonicalLineage === true
+  const masterData = options.masterData ?? null
+  const idempotencyFingerprint = str(options.idempotencyFingerprint)
   const orderId = str(command.productionOrderId ?? command.orderId)
   const lineId = normalizePackLineId(command.lineId ?? PACK_LINE_ID)
   const reportDate = str(command.reportDate ?? command.date ?? now).slice(0, 10)
   const shiftSlot = command.shiftSlot === 'night' ? 'night' : 'day'
   const idempotencyKey =
     str(command.reportKey) || `${orderId}::${lineId}::${reportDate}::${shiftSlot}`
+  const outputCounts = resolvePackagingOutputCounts(command)
+  if (!outputCounts.ok) return outputCounts
+  const outputQuantity = resolvePackagingOutputQuantity(command)
+  if (!outputQuantity.ok) return outputQuantity
+  const replayOrder = (production.orders ?? []).find((candidate) => str(candidate?.id) === orderId)
+  const strictIdempotency =
+    enforceCanonicalLineage || Number(replayOrder?.wipContractVersion) >= 1
+  const claimedReportId = str(command.reportId)
 
-  const already = (production.packagingReports ?? []).find(
+  const alreadyMatches = (production.packagingReports ?? []).filter(
     (r) => r.idempotencyKey === idempotencyKey && r.status === 'confirmed',
   )
+  if (alreadyMatches.length > 1) return fail('packaging_report_ambiguous', 409)
+  const already = alreadyMatches[0]
   if (already) {
+    if (claimedReportId && str(already.id) !== claimedReportId) {
+      return fail('packaging_report_id_conflict', 409)
+    }
+    if (strictIdempotency && !str(already.idempotencyFingerprint)) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
+    if (
+      already.idempotencyFingerprint &&
+      str(already.idempotencyFingerprint) !== idempotencyFingerprint
+    ) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
+    if (
+      strictIdempotency &&
+      !strictPackagingReplayStateValid(
+        {
+          reportId: already.id,
+          lotId: already.finishedGoodsLotId,
+          fingerprint: already.idempotencyFingerprint,
+        },
+        production,
+      )
+    ) {
+      return fail('packaging_idempotency_state_mismatch', 409)
+    }
+    const alreadyLot = findLot(production, already.finishedGoodsLotId)
     return ok({
       production,
       warehouse,
       result: {
         reportId: already.id,
         finishedGoodsLotId: already.finishedGoodsLotId ?? null,
+        reportNumber: already.number ?? null,
+        lotNumber: alreadyLot?.lotNumber ?? already.lotNumber ?? null,
+        quantityProduced: alreadyLot?.quantityProduced ?? null,
+        documentIds: already.documentIds ?? [],
+        qcStatus: alreadyLot?.qcStatus,
         status: 'confirmed',
         idempotent: true,
       },
     })
+  }
+
+  // A caller-supplied report ID is an identity claim, never an upsert key. Only
+  // the exact draft lineage may be promoted; another confirmed/correction report
+  // must be rejected before any warehouse effect is built.
+  if (claimedReportId) {
+    const idMatches = (production.packagingReports ?? []).filter(
+      (report) => str(report?.id) === claimedReportId,
+    )
+    if (idMatches.length > 1) return fail('packaging_report_ambiguous', 409)
+    const draft = idMatches[0]
+    if (draft) {
+      const expectedStatus = correction ? 'correction_draft' : 'draft'
+      const expectedCorrectionId = correction ? str(correction.originalReportId) : ''
+      if (
+        draft.status !== expectedStatus ||
+        str(draft.productionOrderId) !== orderId ||
+        normalizePackLineId(draft.lineId) !== lineId ||
+        str(draft.correctsReportId) !== expectedCorrectionId
+      ) {
+        return fail('packaging_report_id_conflict', 409)
+      }
+    }
   }
 
   if (!orderId) return fail('invalid_input', 400)
@@ -713,6 +1183,9 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
       : null
   let order = (production.orders ?? []).find((o) => o.id === orderId) ?? null
   let productionWithOrder = production
+  if (!order && enforceCanonicalLineage) {
+    return fail('authoritative_packaging_order_required', 409)
+  }
   if (!order && orderSnap) {
     const status = str(orderSnap.status) || 'active'
     order = {
@@ -732,10 +1205,34 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
   }
   if (!order) return fail('not_found', 404)
   if (order.status !== 'active') return fail('order_not_active', 409)
+  if (enforceCanonicalLineage && Number(order.wipContractVersion) < 1) {
+    return fail('canonical_wip_contract_required', 409)
+  }
   if (isPeriodClosed(warehouse, reportDate)) return fail('period_closed', 403)
 
-  const binding = resolvePackBinding(warehouse, command)
-  if (!binding.ok) return fail(binding.error, 400)
+  const binding = resolvePackBinding(warehouse, command, {
+    strict: enforceCanonicalLineage || Number(order.wipContractVersion) >= 1,
+  })
+  if (!binding.ok) return fail(binding.error, binding.status || 400, binding)
+  if (enforceCanonicalLineage && binding.fromCommand === true) {
+    return fail('canonical_pack_binding_required', 409)
+  }
+
+  const finishedGoodsMapping = validateCanonicalFinishedGoodsMapping({
+    order,
+    command,
+    warehouse,
+    masterData,
+    masterDataActive,
+    enforceCanonical: enforceCanonicalLineage,
+  })
+  if (!finishedGoodsMapping.ok) {
+    return fail(
+      finishedGoodsMapping.error,
+      finishedGoodsMapping.status || 409,
+      finishedGoodsMapping,
+    )
+  }
 
   // Prefer productionWithOrder for the rest of confirm so soft orderSnapshot persists.
   production = productionWithOrder
@@ -764,16 +1261,19 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
   }
   warehouse = whSeed
 
-  const finishedProductId = str(command.finishedProductId)
+  const finishedProductId = finishedGoodsMapping.canonical
+    ? finishedGoodsMapping.finishedProductId
+    : str(command.finishedProductId)
   if (!finishedProductId) return fail('finished_product_required', 400)
   if (order.finishedProductId && order.finishedProductId !== finishedProductId) {
     return fail('finished_product_mismatch', 400)
   }
-  const warehouseItemId = str(command.warehouseItemId) || finishedProductId
+  const warehouseItemId = finishedGoodsMapping.canonical
+    ? finishedGoodsMapping.warehouseItemId
+    : str(command.warehouseItemId) || finishedProductId
 
-  const outputM2 = num(command.outputM2 ?? command.outputMp)
-  if (!Number.isFinite(outputM2) || outputM2 <= 0) return fail('invalid_output', 400)
-  const outputRolls = Math.max(0, Math.trunc(num(command.outputRolls) || 0))
+  const outputM2 = outputQuantity.value
+  const { outputRolls, outputPallets } = outputCounts
 
   const carryShipped = Math.max(0, roundQty(num(correction?.carryShippedQty) || 0))
   if (carryShipped > 0 && outputM2 + EPS < carryShipped) {
@@ -781,38 +1281,58 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
   }
   const fgQty = roundQty(outputM2 - carryShipped)
 
-  const wip = sanitizePackagingLines(command.wipLines, { itemKey: 'semiFinishedItemId' })
+  const wip = sanitizePackagingLines(command.wipLines, {
+    itemKey: 'semiFinishedItemId',
+    preserveWipLineage: true,
+  })
   if (!wip.ok) return fail(wip.error, 400)
   if (wip.lines.length === 0) return fail('wip_lines_required', 400)
   const materials = sanitizePackagingLines(command.materialLines, { itemKey: 'itemId' })
   if (!materials.ok) return fail(materials.error, 400)
 
+  const canonicalLineage = validateCanonicalPackagingWipLineage({
+    production,
+    warehouse,
+    order,
+    binding,
+    wipLines: wip.lines,
+    outputM2,
+  })
+  if (!canonicalLineage.ok) {
+    return fail(canonicalLineage.error, canonicalLineage.status || 409, canonicalLineage)
+  }
+
   // G5.4: when masterData active, norms come ONLY from order.packagingBomSnapshot
   // (never live BOM, never client snapshot). Corrections inherit original report BOM.
   let packagingBomAnalysis = null
-  if (masterDataActive) {
+  const packagingBomRequired = order.packagingBomRequired !== false
+  if (masterDataActive || canonicalLineage.canonical) {
     const snap = correction?.packagingBomSnapshot ?? order.packagingBomSnapshot ?? null
     if (!snap || !str(snap.packagingBomId) || !str(snap.contentHash)) {
-      return fail('packaging_bom_snapshot_required', 409)
-    }
-    const compared = comparePackagingActualToNorm(snap, outputM2, materials.lines, {
-      excessReason: command.excessReason ?? command.deviationReason ?? command.reason,
-    })
-    if (!compared.ok) {
-      return fail(compared.error, compared.status || 400, {
-        itemId: compared.itemId,
-        expectedUnit: compared.expectedUnit,
-        actualUnit: compared.actualUnit,
-        components: compared.components,
+      if (packagingBomRequired) return fail('packaging_bom_snapshot_required', 409)
+    } else {
+      const compared = comparePackagingActualToNorm(snap, outputM2, materials.lines, {
+        excessReason: command.excessReason ?? command.deviationReason ?? command.reason,
+        requireComplete: canonicalLineage.canonical,
       })
-    }
-    packagingBomAnalysis = {
-      packagingBomId: compared.packagingBomId,
-      version: compared.version,
-      contentHash: compared.contentHash,
-      componentNorms: compared.components,
-      excessReason: compared.excessReason,
-      snapshotAsOfDate: snap.asOfDate,
+      if (!compared.ok) {
+        return fail(compared.error, compared.status || 400, {
+          itemId: compared.itemId,
+          expectedUnit: compared.expectedUnit,
+          actualUnit: compared.actualUnit,
+          expected: compared.expected,
+          actual: compared.actual,
+          components: compared.components,
+        })
+      }
+      packagingBomAnalysis = {
+        packagingBomId: compared.packagingBomId,
+        version: compared.version,
+        contentHash: compared.contentHash,
+        componentNorms: compared.components,
+        excessReason: compared.excessReason,
+        snapshotAsOfDate: snap.asOfDate,
+      }
     }
   }
 
@@ -841,6 +1361,11 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
       batchNo: line.wipBatchId,
       locationId: binding.packagingLocationId,
       unitSnapshot: line.unitSnapshot,
+      sourceDocumentId: line.receiptDocumentId,
+      sourceDocumentLineId: line.lineId,
+      sourceShiftReportId: line.shiftReportId,
+      sourceWipBatchId: line.wipBatchId,
+      shiftReportId: line.shiftReportId,
     })
     working = [
       ...working,
@@ -904,9 +1429,10 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
     }
   }
 
-  const reportId = str(command.reportId) || `pkr-${crypto.randomUUID()}`
+  const reportId = claimedReportId || `pkr-${crypto.randomUUID()}`
   const lotId = `fgl-${crypto.randomUUID()}`
   const lotNumber = nextLotNumber(production.finishedGoodsLots, reportDate)
+  const reportNumber = nextPackagingReportNumber(production.packagingReports, reportDate)
 
   let wh = warehouse
   const documentIds = []
@@ -988,7 +1514,11 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
             quantity: fgQty,
             batchNo: lotNumber,
             locationId: binding.fgLocationId,
-            unitSnapshot: command.unitSnapshot != null ? String(command.unitSnapshot) : undefined,
+            unitSnapshot: finishedGoodsMapping.canonical
+              ? finishedGoodsMapping.unitSnapshot
+              : command.unitSnapshot != null
+                ? String(command.unitSnapshot)
+                : undefined,
           },
         ],
         movementType: 'receipt',
@@ -1019,12 +1549,17 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
     lotNumber,
     packagingReportId: reportId,
     productionOrderId: orderId,
+    sourceShiftReportIds: canonicalLineage.sourceShiftReportIds,
+    sourceWipBatchIds: canonicalLineage.sourceWipBatchIds,
+    wipContractVersion: canonicalLineage.canonical ? 1 : undefined,
     lineId,
     finishedProductId,
     warehouseItemId,
     warehouseId: binding.fgWarehouseId,
     locationId: binding.fgLocationId,
     qcStatus: 'pending',
+    outputRolls,
+    outputPallets,
     quantityProduced: fgQty,
     quantityQcReleased: 0,
     quantityShipped: 0,
@@ -1034,6 +1569,7 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
     correctsLotId: correction?.supersededLotId ?? undefined,
     producedAt: reportDate,
     createdAt: now,
+    updatedAt: now,
     createdBy: actor.uid,
     createdByName: actor.email ?? actor.uid,
     history: [
@@ -1049,7 +1585,9 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
 
   const report = {
     id: reportId,
+    number: reportNumber,
     idempotencyKey,
+    idempotencyFingerprint: idempotencyFingerprint || undefined,
     status: 'confirmed',
     productionOrderId: orderId,
     lineId,
@@ -1057,9 +1595,15 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
     shiftSlot,
     finishedProductId,
     warehouseItemId,
+    semiFinishedItemId: str(order.semiFinishedItemId) || undefined,
     outputM2: roundQty(outputM2),
     outputRolls,
+    outputPallets,
+    lotNumber: fgQty > EPS ? lotNumber : undefined,
     wipLines: wip.lines,
+    sourceShiftReportIds: canonicalLineage.sourceShiftReportIds,
+    sourceWipBatchIds: canonicalLineage.sourceWipBatchIds,
+    wipContractVersion: canonicalLineage.canonical ? 1 : undefined,
     materialLines: materials.lines,
     materialAllocations: materialConsumption,
     packagingWarehouseId: binding.packagingWarehouseId,
@@ -1083,10 +1627,12 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
       packagingBomAnalysis != null
         ? (correction?.packagingBomSnapshot ?? order.packagingBomSnapshot)
         : undefined,
+    packagingBomRequired,
     confirmedAt: now,
     confirmedBy: actor.uid,
     confirmedByName: actor.email ?? actor.uid,
     createdAt: now,
+    updatedAt: now,
     createdBy: actor.uid,
   }
 
@@ -1121,6 +1667,7 @@ function applyPackagingConfirm(production, warehouse, command, actor, now, optio
       status: 'confirmed',
       finishedGoodsLotId: fgQty > EPS ? lotId : null,
       lotNumber: fgQty > EPS ? lotNumber : null,
+      reportNumber,
       quantityProduced: fgQty,
       documentIds,
       qcStatus: fgQty > EPS ? 'pending' : undefined,
@@ -1132,9 +1679,17 @@ function applyPackagingCreateCorrection(production, command, actor, now) {
   const originalReportId = str(command.originalReportId ?? command.correctsReportId)
   const reason = str(command.correctionReason ?? command.reason)
   if (!originalReportId || !reason) return fail('correction_reason_required', 400)
-  const original = (production.packagingReports ?? []).find((r) => r.id === originalReportId)
-  if (!original) return fail('not_found', 404)
+  const originalMatches = (production.packagingReports ?? []).filter(
+    (report) => str(report?.id) === originalReportId,
+  )
+  if (originalMatches.length === 0) return fail('not_found', 404)
+  if (originalMatches.length !== 1) return fail('packaging_report_ambiguous', 409)
+  const original = originalMatches[0]
   if (original.status !== 'confirmed') return fail('packaging_report_immutable', 409)
+  const outputCounts = resolvePackagingOutputCounts(command, original)
+  if (!outputCounts.ok) return outputCounts
+  const outputQuantity = resolvePackagingOutputQuantity(command, original)
+  if (!outputQuantity.ok) return outputQuantity
 
   const draftId = str(command.draftId ?? command.reportId) || `pkc-${crypto.randomUUID()}`
   const existing = (production.packagingReports ?? []).find((r) => r.id === draftId)
@@ -1147,7 +1702,10 @@ function applyPackagingCreateCorrection(production, command, actor, now) {
   }
 
   const wip = Array.isArray(command.wipLines)
-    ? sanitizePackagingLines(command.wipLines, { itemKey: 'semiFinishedItemId' })
+    ? sanitizePackagingLines(command.wipLines, {
+        itemKey: 'semiFinishedItemId',
+        preserveWipLineage: true,
+      })
     : { ok: true, lines: original.wipLines ?? [] }
   if (!wip.ok) return fail(wip.error, 400)
   const materials = Array.isArray(command.materialLines)
@@ -1166,11 +1724,9 @@ function applyPackagingCreateCorrection(production, command, actor, now) {
     shiftSlot: command.shiftSlot === 'night' ? 'night' : (original.shiftSlot ?? 'day'),
     finishedProductId: str(command.finishedProductId ?? original.finishedProductId),
     warehouseItemId: str(command.warehouseItemId ?? original.warehouseItemId),
-    outputM2: roundQty(num(command.outputM2 ?? command.outputMp ?? original.outputM2) || 0),
-    outputRolls: Math.max(
-      0,
-      Math.trunc(num(command.outputRolls ?? original.outputRolls) || 0),
-    ),
+    outputM2: roundQty(outputQuantity.value),
+    outputRolls: outputCounts.outputRolls,
+    outputPallets: outputCounts.outputPallets,
     wipLines: wip.lines,
     materialLines: materials.lines,
     note: command.note != null ? String(command.note) : original.note,
@@ -1195,28 +1751,76 @@ function applyPackagingCreateCorrection(production, command, actor, now) {
 
 function applyPackagingConfirmCorrection(production, warehouse, command, actor, now, options = {}) {
   const masterDataActive = options.masterDataActive === true
+  const enforceCanonicalLineage = options.enforceCanonicalLineage === true
+  const masterData = options.masterData ?? null
+  const idempotencyFingerprint = str(options.idempotencyFingerprint)
   const originalReportId = str(command.originalReportId ?? command.correctsReportId)
   const reason = str(command.correctionReason ?? command.reason)
   if (!originalReportId || !reason) return fail('correction_reason_required', 400)
   if (isSysadminActor(actor) && !str(command.emergencyReason ?? reason)) {
     return fail('emergency_reason_required', 400)
   }
-  const original = (production.packagingReports ?? []).find((r) => r.id === originalReportId)
-  if (!original) return fail('not_found', 404)
+  const originalMatches = (production.packagingReports ?? []).filter(
+    (report) => str(report?.id) === originalReportId,
+  )
+  if (originalMatches.length === 0) return fail('not_found', 404)
+  if (originalMatches.length !== 1) return fail('packaging_report_ambiguous', 409)
+  const original = originalMatches[0]
   if (original.status !== 'confirmed') return fail('packaging_report_immutable', 409)
+  const outputCounts = resolvePackagingOutputCounts(command, original)
+  if (!outputCounts.ok) return outputCounts
+  const outputQuantity = resolvePackagingOutputQuantity(command, original)
+  if (!outputQuantity.ok) return outputQuantity
+  const originalOrder = (production.orders ?? []).find(
+    (candidate) => str(candidate?.id) === str(original.productionOrderId),
+  )
+  const strictIdempotency =
+    enforceCanonicalLineage ||
+    Number(original?.wipContractVersion) >= 1 ||
+    Number(originalOrder?.wipContractVersion) >= 1
 
   const correctionKey =
     str(command.reportKey) || `pkgcorr::${originalReportId}::${str(command.idempotencySuffix) || reason}`
-  const already = (production.packagingReports ?? []).find(
+  const alreadyMatches = (production.packagingReports ?? []).filter(
     (r) => r.idempotencyKey === correctionKey && r.status === 'confirmed',
   )
+  if (alreadyMatches.length > 1) return fail('packaging_report_ambiguous', 409)
+  const already = alreadyMatches[0]
   if (already) {
+    if (strictIdempotency && !str(already.idempotencyFingerprint)) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
+    if (
+      already.idempotencyFingerprint &&
+      str(already.idempotencyFingerprint) !== idempotencyFingerprint
+    ) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
+    if (
+      strictIdempotency &&
+      !strictPackagingReplayStateValid(
+        {
+          reportId: already.id,
+          lotId: already.finishedGoodsLotId,
+          fingerprint: already.idempotencyFingerprint,
+        },
+        production,
+      )
+    ) {
+      return fail('packaging_idempotency_state_mismatch', 409)
+    }
+    const alreadyLot = findLot(production, already.finishedGoodsLotId)
     return ok({
       production,
       warehouse,
       result: {
         reportId: already.id,
         finishedGoodsLotId: already.finishedGoodsLotId ?? null,
+        reportNumber: already.number ?? null,
+        lotNumber: alreadyLot?.lotNumber ?? already.lotNumber ?? null,
+        quantityProduced: alreadyLot?.quantityProduced ?? null,
+        documentIds: already.documentIds ?? [],
+        qcStatus: alreadyLot?.qcStatus,
         status: 'confirmed',
         idempotent: true,
       },
@@ -1226,11 +1830,41 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
     return fail('period_closed', 403)
   }
 
-  const oldLot = findLot(production, original.finishedGoodsLotId)
+  const originalLotId = str(original.finishedGoodsLotId)
+  const oldLotMatches = (production.finishedGoodsLots ?? []).filter(
+    (lot) => str(lot?.id) === originalLotId,
+  )
+  if (!originalLotId || oldLotMatches.length === 0) {
+    return fail('packaging_correction_lot_missing', 409)
+  }
+  if (oldLotMatches.length !== 1) return fail('packaging_correction_lot_ambiguous', 409)
+  const oldLot = oldLotMatches[0]
+  if (
+    str(oldLot.packagingReportId) !== originalReportId ||
+    str(oldLot.productionOrderId) !== str(original.productionOrderId)
+  ) {
+    return fail('packaging_correction_lot_mismatch', 409)
+  }
+  const correctionBoundary = validateCanonicalPackagingCorrectionBoundary({
+    production,
+    warehouse,
+    report: original,
+    lot: oldLot,
+    enforceCanonical: enforceCanonicalLineage,
+  })
+  if (!correctionBoundary.ok) {
+    return fail(
+      correctionBoundary.error,
+      correctionBoundary.status || 409,
+      correctionBoundary,
+    )
+  }
   const shippedQty = Math.max(0, roundQty(num(oldLot?.quantityShipped) || 0))
-  const nextOutput = num(command.outputM2 ?? command.outputMp ?? original.outputM2)
-  if (!Number.isFinite(nextOutput) || nextOutput <= 0) return fail('invalid_output', 400)
-  if (nextOutput + EPS < shippedQty) return fail('fg_below_shipped', 409)
+  const nextOutput = outputQuantity.value
+  // A correction equal to shipped quantity would reverse/supersede the original
+  // graph but create no replacement FG lot. G4 has no canonical zero-lot flow,
+  // and its ACK/replay contract requires one exact replacement lot.
+  if (nextOutput <= shippedQty + EPS) return fail('fg_below_shipped', 409)
 
   // Storno of the original postings. The already shipped finished-goods quantity stays
   // in the ledger, so the correction only re-posts the still-owned remainder.
@@ -1264,6 +1898,7 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
       quantityRemaining: 0,
       qcStatus: 'pending',
       lotRevision: (Number(oldLot.lotRevision) || 1) + 1,
+      updatedAt: now,
       correctedAt: now,
       correctedBy: actor.uid,
       correctionReason: reason,
@@ -1298,6 +1933,7 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
       ? {
           ...r,
           correctedAt: now,
+          updatedAt: now,
           correctedBy: actor.uid,
           correctionOpen: true,
           correctionReason: reason,
@@ -1319,7 +1955,8 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
       finishedProductId: command.finishedProductId ?? original.finishedProductId,
       warehouseItemId: command.warehouseItemId ?? original.warehouseItemId,
       outputM2: nextOutput,
-      outputRolls: command.outputRolls ?? original.outputRolls,
+      outputRolls: outputCounts.outputRolls,
+      outputPallets: outputCounts.outputPallets,
       wipLines: Array.isArray(command.wipLines) ? command.wipLines : original.wipLines,
       materialLines: Array.isArray(command.materialLines)
         ? command.materialLines
@@ -1331,6 +1968,9 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
     now,
     {
       masterDataActive,
+      masterData,
+      enforceCanonicalLineage,
+      idempotencyFingerprint,
       correction: {
         originalReportId,
         reason,
@@ -1365,14 +2005,30 @@ function applyPackagingConfirmCorrection(production, warehouse, command, actor, 
 // QC
 // ---------------------------------------------------------------------------
 
-function applyQcReviewStart(production, command, actor, now) {
+function applyQcReviewStart(production, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const lot = findLot(production, command.finishedGoodsLotId ?? command.lotId)
   if (!lot) return fail('not_found', 404)
   if (lot.qcStatus === 'in_review') {
+    const decision = exactOneById(production.qcDecisions, lot.currentDecisionId)
+    if (
+      !commandFingerprint ||
+      str(lot.reviewCommandFingerprint) !== commandFingerprint ||
+      !decision ||
+      decision.status !== 'in_review' ||
+      str(decision.commandFingerprint) !== commandFingerprint
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse: null,
-      result: { finishedGoodsLotId: lot.id, qcStatus: 'in_review', idempotent: true },
+      result: {
+        finishedGoodsLotId: lot.id,
+        qcStatus: 'in_review',
+        decisionId: decision.id,
+        idempotent: true,
+      },
     })
   }
   if (lot.qcStatus !== 'pending' && lot.qcStatus !== 'regrade_pending') {
@@ -1384,13 +2040,16 @@ function applyQcReviewStart(production, command, actor, now) {
     actor,
     now,
     reason: str(command.reason) || undefined,
+    commandFingerprint,
   })
   const nextLot = {
     ...lot,
     qcStatus: 'in_review',
+    updatedAt: now,
     currentDecisionId: decision.id,
     reviewStartedAt: now,
     reviewStartedBy: actor.uid,
+    reviewCommandFingerprint: commandFingerprint,
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -1459,6 +2118,7 @@ async function verifyAttachment(record, storeId, lotId) {
 
 async function applyQcRelease(production, command, actor, now, context) {
   const { storeId, capabilities, idempotencyKey } = context
+  const commandFingerprint = str(context.commandFingerprint)
   // Release is never delegated to sysadmin emergency rights: the capability is required.
   if (
     capabilities[G4_CAPS.QC_RELEASE] !== true &&
@@ -1470,13 +2130,29 @@ async function applyQcRelease(production, command, actor, now, context) {
   const lot = findLot(production, command.finishedGoodsLotId ?? command.lotId)
   if (!lot) return fail('not_found', 404)
   if (lot.qcStatus === 'released') {
+    const decision = exactOneById(production.qcDecisions, lot.currentDecisionId)
+    if (
+      !commandFingerprint ||
+      str(lot.releaseCommandFingerprint) !== commandFingerprint ||
+      !decision ||
+      decision.status !== 'released' ||
+      str(decision.commandFingerprint) !== commandFingerprint
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse: null,
       result: {
         finishedGoodsLotId: lot.id,
+        lotNumber: lot.lotNumber,
         qcStatus: 'released',
-        decisionId: lot.currentDecisionId ?? null,
+        decisionId: decision.id,
+        lotRevision: lot.lotRevision,
+        quantityQcReleased: lot.quantityQcReleased,
+        quantityRemaining: lot.quantityRemaining,
+        passportAttachmentId: decision.passportAttachmentId,
+        protocolAttachmentId: decision.protocolAttachmentId,
         idempotent: true,
       },
     })
@@ -1504,11 +2180,13 @@ async function applyQcRelease(production, command, actor, now, context) {
     attachments: { passport: passport.attachment, protocol: protocol.attachment },
     quantity: quantityProduced,
     idempotencyKey,
+    commandFingerprint,
   })
   const shipped = Math.max(0, roundQty(num(lot.quantityShipped) || 0))
   const nextLot = {
     ...lot,
     qcStatus: 'released',
+    updatedAt: now,
     quantityQcReleased: quantityProduced,
     quantityRemaining: roundQty(quantityProduced - shipped),
     currentDecisionId: decision.id,
@@ -1516,6 +2194,7 @@ async function applyQcRelease(production, command, actor, now, context) {
     releasedAt: now,
     releasedBy: actor.uid,
     releasedByName: actor.email ?? actor.uid,
+    releaseCommandFingerprint: commandFingerprint,
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -1547,7 +2226,8 @@ async function applyQcRelease(production, command, actor, now, context) {
   })
 }
 
-function applyQcRegrade(production, warehouse, command, actor, now) {
+function applyQcRegrade(production, warehouse, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const reason = str(command.reason ?? command.regradeReason)
   if (!reason) return fail('regrade_reason_required', 400)
   const targetFinishedProductId = str(command.targetFinishedProductId)
@@ -1564,6 +2244,37 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
 
   const lot = findLot(production, command.finishedGoodsLotId ?? command.lotId)
   if (!lot) return fail('not_found', 404)
+  if (lot.qcStatus === 'regrade_pending' && str(lot.regradeCommandFingerprint)) {
+    const decision = exactOneById(production.qcDecisions, lot.currentDecisionId)
+    const child = exactOneById(production.finishedGoodsLots, lot.regradedToLotId)
+    if (
+      !commandFingerprint ||
+      str(lot.regradeCommandFingerprint) !== commandFingerprint ||
+      !decision ||
+      decision.status !== 'regrade_pending' ||
+      str(decision.commandFingerprint) !== commandFingerprint ||
+      !child ||
+      str(child.parentLotId) !== str(lot.id)
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
+    return ok({
+      production,
+      warehouse,
+      result: {
+        finishedGoodsLotId: lot.id,
+        qcStatus: 'regrade_pending',
+        decisionId: decision.id,
+        newFinishedGoodsLotId: child.id,
+        newLotNumber: child.lotNumber,
+        targetFinishedProductId: child.finishedProductId,
+        quantity: child.quantityProduced,
+        documentIds: lot.regradeDocumentIds ?? [],
+        movementIds: lot.regradeMovementIds ?? [],
+        idempotent: true,
+      },
+    })
+  }
   if (lot.qcStatus === 'written_off' || lot.qcStatus === 'scrap_pending') {
     return fail('lot_status_invalid', 409, { qcStatus: lot.qcStatus })
   }
@@ -1614,11 +2325,13 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
         transferPairId,
         cancellationReason: reason,
         isFinishedGoods: true,
+        commandFingerprint,
       },
       movementExtra: {
         finishedGoodsLotId: lot.id,
         transferPairId,
         isFinishedGoods: true,
+        commandFingerprint,
       },
     },
     actor,
@@ -1640,11 +2353,13 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
         parentFinishedGoodsLotId: lot.id,
         transferPairId,
         isFinishedGoods: true,
+        commandFingerprint,
       },
       movementExtra: {
         finishedGoodsLotId: newLotId,
         transferPairId,
         isFinishedGoods: true,
+        commandFingerprint,
       },
     },
     actor,
@@ -1661,11 +2376,13 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
     reason,
     targetFinishedProductId,
     quantity,
+    commandFingerprint,
   })
   const sourceLot = {
     ...lot,
     // regrade_pending fails the release gate, so the source lot can no longer ship.
     qcStatus: 'regrade_pending',
+    updatedAt: now,
     quantityProduced: roundQty(produced - quantity),
     quantityQcReleased: 0,
     quantityRemaining: 0,
@@ -1675,6 +2392,9 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
     regradedBy: actor.uid,
     regradeReason: reason,
     regradedToLotId: newLotId,
+    regradeCommandFingerprint: commandFingerprint,
+    regradeDocumentIds: [issue.documentId, receipt.documentId],
+    regradeMovementIds: [...issue.movements, ...receipt.movements].map((movement) => movement.id),
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -1694,6 +2414,8 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
     warehouseId,
     locationId,
     qcStatus: 'pending',
+    outputRolls: 0,
+    outputPallets: 0,
     quantityProduced: quantity,
     quantityQcReleased: 0,
     quantityShipped: 0,
@@ -1704,6 +2426,7 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
     regradeReason: reason,
     producedAt: date,
     createdAt: now,
+    updatedAt: now,
     createdBy: actor.uid,
     createdByName: actor.email ?? actor.uid,
     history: [
@@ -1738,23 +2461,39 @@ function applyQcRegrade(production, warehouse, command, actor, now) {
       targetFinishedProductId,
       quantity,
       documentIds: [issue.documentId, receipt.documentId],
+      movementIds: [...issue.movements, ...receipt.movements].map((movement) => movement.id),
     },
   })
 }
 
-function applyQcReject(production, warehouse, command, actor, now) {
+function applyQcReject(production, warehouse, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const reason = str(command.reason ?? command.rejectReason)
   if (!reason) return fail('reject_reason_required', 400)
   const lot = findLot(production, command.finishedGoodsLotId ?? command.lotId)
   if (!lot) return fail('not_found', 404)
   if (lot.qcStatus === 'scrap_pending') {
+    const decision = exactOneById(production.qcDecisions, lot.currentDecisionId)
+    if (
+      !commandFingerprint ||
+      str(lot.rejectCommandFingerprint) !== commandFingerprint ||
+      !decision ||
+      decision.status !== 'rejected' ||
+      str(decision.commandFingerprint) !== commandFingerprint
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse,
       result: {
         finishedGoodsLotId: lot.id,
         qcStatus: 'scrap_pending',
-        decisionId: lot.currentDecisionId ?? null,
+        decisionId: decision.id,
+        scrapLocationId: lot.scrapLocationId,
+        quantity: lot.scrapQuantity,
+        documentIds: lot.rejectDocumentIds ?? [],
+        movementIds: lot.rejectMovementIds ?? [],
         idempotent: true,
       },
     })
@@ -1803,8 +2542,14 @@ function applyQcReject(production, warehouse, command, actor, now) {
         transferPairId,
         cancellationReason: reason,
         isFinishedGoods: true,
+        commandFingerprint,
       },
-      movementExtra: { finishedGoodsLotId: lot.id, transferPairId, isFinishedGoods: true },
+      movementExtra: {
+        finishedGoodsLotId: lot.id,
+        transferPairId,
+        isFinishedGoods: true,
+        commandFingerprint,
+      },
     },
     actor,
     now,
@@ -1822,8 +2567,18 @@ function applyQcReject(production, warehouse, command, actor, now) {
         { itemId: lot.warehouseItemId, quantity, batchNo: lot.lotNumber, locationId: scrapLocationId },
       ],
       movementType: 'receipt',
-      docExtra: { finishedGoodsLotId: lot.id, transferPairId, isScrap: true },
-      movementExtra: { finishedGoodsLotId: lot.id, transferPairId, isScrap: true },
+      docExtra: {
+        finishedGoodsLotId: lot.id,
+        transferPairId,
+        isScrap: true,
+        commandFingerprint,
+      },
+      movementExtra: {
+        finishedGoodsLotId: lot.id,
+        transferPairId,
+        isScrap: true,
+        commandFingerprint,
+      },
     },
     actor,
     now,
@@ -1838,11 +2593,13 @@ function applyQcReject(production, warehouse, command, actor, now) {
     now,
     reason,
     quantity,
+    commandFingerprint,
   })
   // No automatic write-off: scrap stock stays on the books until qc.scrap.writeoff.
   const nextLot = {
     ...lot,
     qcStatus: 'scrap_pending',
+    updatedAt: now,
     quantityQcReleased: 0,
     quantityRemaining: 0,
     locationId: scrapLocationId,
@@ -1853,6 +2610,9 @@ function applyQcReject(production, warehouse, command, actor, now) {
     rejectedAt: now,
     rejectedBy: actor.uid,
     rejectReason: reason,
+    rejectCommandFingerprint: commandFingerprint,
+    rejectDocumentIds: [issue.documentId, receipt.documentId],
+    rejectMovementIds: [...issue.movements, ...receipt.movements].map((movement) => movement.id),
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -1877,23 +2637,38 @@ function applyQcReject(production, warehouse, command, actor, now) {
       scrapLocationId,
       quantity,
       documentIds: [issue.documentId, receipt.documentId],
+      movementIds: [...issue.movements, ...receipt.movements].map((movement) => movement.id),
     },
   })
 }
 
-function applyQcScrapWriteoff(production, warehouse, command, actor, now) {
+function applyQcScrapWriteoff(production, warehouse, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const reason = str(command.reason ?? command.writeoffReason)
   if (!reason) return fail('writeoff_reason_required', 400)
   const lot = findLot(production, command.finishedGoodsLotId ?? command.lotId)
   if (!lot) return fail('not_found', 404)
   if (lot.qcStatus === 'written_off') {
+    const decision = exactOneById(production.qcDecisions, lot.currentDecisionId)
+    if (
+      !commandFingerprint ||
+      str(lot.writeoffCommandFingerprint) !== commandFingerprint ||
+      !decision ||
+      decision.status !== 'written_off' ||
+      str(decision.commandFingerprint) !== commandFingerprint
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse,
       result: {
         finishedGoodsLotId: lot.id,
         qcStatus: 'written_off',
-        decisionId: lot.currentDecisionId ?? null,
+        decisionId: decision.id,
+        quantity: lot.quantityWrittenOff,
+        documentId: lot.writeoffDocumentId,
+        movementId: lot.writeoffMovementId,
         idempotent: true,
       },
     })
@@ -1942,8 +2717,9 @@ function applyQcScrapWriteoff(production, warehouse, command, actor, now) {
         finishedGoodsLotId: lot.id,
         cancellationReason: reason,
         isScrap: true,
+        commandFingerprint,
       },
-      movementExtra: { finishedGoodsLotId: lot.id, isScrap: true },
+      movementExtra: { finishedGoodsLotId: lot.id, isScrap: true, commandFingerprint },
     },
     actor,
     now,
@@ -1958,10 +2734,12 @@ function applyQcScrapWriteoff(production, warehouse, command, actor, now) {
     now,
     reason,
     quantity,
+    commandFingerprint,
   })
   const nextLot = {
     ...lot,
     qcStatus: 'written_off',
+    updatedAt: now,
     quantityQcReleased: 0,
     quantityRemaining: 0,
     quantityWrittenOff: quantity,
@@ -1970,6 +2748,9 @@ function applyQcScrapWriteoff(production, warehouse, command, actor, now) {
     writtenOffAt: now,
     writtenOffBy: actor.uid,
     writeoffReason: reason,
+    writeoffCommandFingerprint: commandFingerprint,
+    writeoffDocumentId: writeoff.documentId,
+    writeoffMovementId: writeoff.movements[0]?.id,
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -1996,6 +2777,7 @@ function applyQcScrapWriteoff(production, warehouse, command, actor, now) {
       decisionId: decision.id,
       quantity,
       documentId: writeoff.documentId,
+      movementId: writeoff.movements[0]?.id,
     },
   })
 }
@@ -2071,10 +2853,23 @@ function applyShipmentDraftDelete(warehouse, command, actor, now) {
   return ok({ production: null, warehouse: wh, result: { shipmentId, deleted: true } })
 }
 
-function applyShipmentPost(production, warehouse, command, actor, now) {
+function applyShipmentPost(production, warehouse, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const shipmentId = str(command.shipmentId) || `shp-${crypto.randomUUID()}`
   const existing = findShipment(warehouse, shipmentId)
   if (existing?.status === 'posted') {
+    const lot = findLot(production, existing.finishedGoodsLotId)
+    const documentIds = Array.isArray(existing.documentIds) ? existing.documentIds : []
+    const movementIds = Array.isArray(existing.movementIds) ? existing.movementIds : []
+    if (
+      !commandFingerprint ||
+      str(existing.postCommandFingerprint ?? existing.commandFingerprint) !== commandFingerprint ||
+      !lot ||
+      documentIds.length !== 1 ||
+      movementIds.length !== 1
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse,
@@ -2082,7 +2877,18 @@ function applyShipmentPost(production, warehouse, command, actor, now) {
         shipmentId,
         status: 'posted',
         finishedGoodsLotId: existing.finishedGoodsLotId,
+        finishedProductId: existing.finishedProductId,
+        warehouseId: existing.warehouseId,
+        locationId: existing.locationId,
+        date: existing.date,
+        counterpartyId: existing.counterpartyId,
+        salesOrderId: existing.salesOrderId,
         quantity: existing.quantity,
+        quantityShipped: lot.quantityShipped,
+        quantityRemaining: lot.quantityRemaining,
+        qcDecisionId: existing.qcDecisionId,
+        documentId: documentIds[0],
+        movementId: movementIds[0],
         idempotent: true,
       },
     })
@@ -2162,11 +2968,13 @@ function applyShipmentPost(production, warehouse, command, actor, now) {
         salesOrderId: str(command.salesOrderId) || undefined,
         qcDecisionId: decision.id,
         isFinishedGoods: true,
+        commandFingerprint,
       },
       movementExtra: {
         finishedGoodsLotId: lot.id,
         shipmentId,
         isFinishedGoods: true,
+        commandFingerprint,
       },
     },
     actor,
@@ -2179,6 +2987,7 @@ function applyShipmentPost(production, warehouse, command, actor, now) {
     ...lot,
     quantityShipped: nextShipped,
     quantityRemaining: roundQty(released - nextShipped),
+    updatedAt: now,
     lastShipmentId: shipmentId,
     lastShippedAt: now,
     history: lotHistory(lot, {
@@ -2211,6 +3020,9 @@ function applyShipmentPost(production, warehouse, command, actor, now) {
     qcDecisionId: decision.id,
     lotRevisionAtPost: Number(lot.lotRevision) || 1,
     documentIds: [posted.documentId],
+    movementIds: posted.movements.map((movement) => movement.id),
+    commandFingerprint,
+    postCommandFingerprint: commandFingerprint,
     createdAt: existing?.createdAt ?? now,
     createdBy: existing?.createdBy ?? actor.uid,
     postedAt: now,
@@ -2238,17 +3050,25 @@ function applyShipmentPost(production, warehouse, command, actor, now) {
       shipmentId,
       status: 'posted',
       finishedGoodsLotId: lot.id,
+      finishedProductId,
       lotNumber: lot.lotNumber,
+      warehouseId,
+      locationId,
+      date,
+      counterpartyId: str(command.counterpartyId) || existing?.counterpartyId,
+      salesOrderId: str(command.salesOrderId) || existing?.salesOrderId,
       quantity,
       quantityShipped: nextShipped,
       quantityRemaining: nextLot.quantityRemaining,
       qcDecisionId: decision.id,
       documentId: posted.documentId,
+      movementId: posted.movements[0]?.id,
     },
   })
 }
 
-function applyShipmentCancel(production, warehouse, command, actor, now) {
+function applyShipmentCancel(production, warehouse, command, actor, now, options = {}) {
+  const commandFingerprint = str(options.commandFingerprint)
   const shipmentId = str(command.shipmentId)
   const reason = str(command.reason ?? command.cancellationReason)
   if (!shipmentId) return fail('invalid_input', 400)
@@ -2257,10 +3077,32 @@ function applyShipmentCancel(production, warehouse, command, actor, now) {
   const shipment = findShipment(warehouse, shipmentId)
   if (!shipment) return fail('not_found', 404)
   if (shipment.status === 'cancelled') {
+    const lot = findLot(production, shipment.finishedGoodsLotId)
+    if (
+      !commandFingerprint ||
+      str(shipment.cancelCommandFingerprint) !== commandFingerprint ||
+      !lot ||
+      !Array.isArray(shipment.reversalDocumentIds) ||
+      !Array.isArray(shipment.reversalMovementIds)
+    ) {
+      return fail('g4_idempotency_conflict', 409)
+    }
     return ok({
       production,
       warehouse,
-      result: { shipmentId, status: 'cancelled', idempotent: true },
+      result: {
+        shipmentId,
+        status: 'cancelled',
+        finishedGoodsLotId: shipment.finishedGoodsLotId,
+        quantity: shipment.quantity,
+        quantityShipped: lot.quantityShipped,
+        quantityRemaining: lot.quantityRemaining,
+        reason: shipment.cancellationReason,
+        date: shipment.cancellationDate,
+        reversalDocumentIds: shipment.reversalDocumentIds,
+        reversalMovementIds: shipment.reversalMovementIds,
+        idempotent: true,
+      },
     })
   }
   if (shipment.status !== 'posted') return fail('shipment_not_posted', 409)
@@ -2296,11 +3138,19 @@ function applyShipmentCancel(production, warehouse, command, actor, now) {
     const rev = reverseDocument(wh, doc, actor, now, {
       reason,
       docRole: 'finished_goods_shipment_cancel',
+      commandFingerprint,
     })
     wh = rev.warehouse
     if (rev.reverseDocumentId) reversalDocumentIds.push(rev.reverseDocumentId)
   }
   if (reversalDocumentIds.length === 0) return fail('shipment_documents_missing', 409)
+  const reversalMovementIds = (wh.movements ?? [])
+    .filter((movement) => reversalDocumentIds.includes(str(movement.documentId)))
+    .map((movement) => str(movement.id))
+    .filter(Boolean)
+  if (reversalMovementIds.length !== reversalDocumentIds.length) {
+    return fail('shipment_movements_missing', 409)
+  }
 
   const released = roundQty(num(lot.quantityQcReleased) || 0)
   const nextShipped = roundQty(shipped - quantity)
@@ -2308,6 +3158,7 @@ function applyShipmentCancel(production, warehouse, command, actor, now) {
     ...lot,
     quantityShipped: nextShipped,
     quantityRemaining: roundQty(released - nextShipped),
+    updatedAt: now,
     history: lotHistory(lot, {
       id: `h-${crypto.randomUUID()}`,
       at: now,
@@ -2322,10 +3173,13 @@ function applyShipmentCancel(production, warehouse, command, actor, now) {
     status: 'cancelled',
     groupKind: 'finished_goods_shipment_cancel',
     reversalDocumentIds,
+    reversalMovementIds,
     cancelledAt: now,
     cancelledBy: actor.uid,
     cancelledByName: actor.email ?? actor.uid,
     cancellationReason: reason,
+    cancellationDate: date,
+    cancelCommandFingerprint: commandFingerprint,
     updatedAt: now,
   }
   wh = replaceShipment(wh, cancelled)
@@ -2351,7 +3205,10 @@ function applyShipmentCancel(production, warehouse, command, actor, now) {
       quantity,
       quantityShipped: nextShipped,
       quantityRemaining: nextLot.quantityRemaining,
+      reason,
+      date,
       reversalDocumentIds,
+      reversalMovementIds,
     },
   })
 }
@@ -2562,6 +3419,11 @@ export async function executeG4Command(input) {
 
   const needed = CAP_BY_COMMAND[commandType]
   if (!needed) return fail('unknown_command', 400)
+  const commandFingerprint = PAYLOAD_BOUND_IDEMPOTENCY_COMMANDS.has(commandType)
+    ? canonicalPackagingCommandFingerprint(commandType, rawCommand)
+    : isG4CriticalMutationCommand(commandType)
+      ? g4CriticalMutationCommandFingerprint(commandType, rawCommand)
+      : ''
 
   const requireLineScope = LINE_SCOPED_COMMANDS.has(commandType)
   const claimedLineId = normalizePackLineId(
@@ -2578,16 +3440,112 @@ export async function executeG4Command(input) {
   if (!perm.ok) return perm
 
   const dc = getG1DataConnect()
+  // Always establish current critical truth before considering a SQL receipt.
+  // The receipt table is a best-effort projection and cannot resurrect a
+  // missing/deactivated/corrupt authoritative store.
+  const critical = await loadCritical(dc, storeId)
+  if (!critical.ok) return critical
+  if (critical.missing) {
+    if (commandType === 'packaging.read') {
+      return ok({
+        criticalRevision: 0,
+        productionActive: false,
+        packagingQcActive: false,
+        source: 'critical_store_missing',
+      })
+    }
+    if (commandType === 'packaging.domain.activate') {
+      return fail('production_domain_inactive', 409)
+    }
+    return fail('critical_store_missing', 409)
+  }
+
+  let warehouse = structuredClone(critical.payload.domains.warehouse)
+  let production = structuredClone(critical.payload.domains.production ?? emptyProductionStore())
+  const warehouseBeforeHash = stableDomainHash(warehouse)
+  const now = new Date().toISOString()
+  const productionActive = isProductionDomainActive(critical.payload, critical.revision)
+  const packagingActive = isPackagingQcFeatureActive(critical.payload)
+  const strictCriticalReplay = isG4CriticalMutationCommand(commandType)
+  const strictReplay =
+    strictCriticalReplay || strictPackagingReplayRequired(commandType, rawCommand, production)
+
+  if (strictReplay && (!productionActive || !packagingActive)) {
+    return fail(productionActive ? 'packaging_qc_inactive' : 'production_domain_inactive', 409)
+  }
+
   const receipt = await loadReceipt(dc, idempotencyKey, storeId)
   if (receipt?.conflict) return fail('not_found', 404)
   if (receipt?.corrupt) return fail('receipt_corrupt', 500)
-  if (receipt?.result) return ok({ ...receipt.result, idempotent: true })
-
-  const critical = await loadOrInitCritical(dc, storeId, actor.uid)
-  if (!critical.ok) return critical
 
   const embedded = embeddedReceipt(critical.payload, idempotencyKey)
-  if (embedded?.result) {
+
+  if (strictReplay) {
+    // Strict replay is anchored in the receipt embedded by the same critical
+    // CAS as the business effects. A pre-R3.1C SQL-only receipt is not proof.
+    if (
+      (receipt?.result &&
+        idempotencyReplayConflict(receipt, commandType, commandFingerprint, { strict: true })) ||
+      (embedded?.result &&
+        idempotencyReplayConflict(embedded, commandType, commandFingerprint, { strict: true }))
+    ) {
+      return fail(
+        strictCriticalReplay ? 'g4_idempotency_conflict' : 'packaging_idempotency_conflict',
+        409,
+      )
+    }
+    if (receipt?.result && !embedded?.result) {
+      return fail(
+        strictCriticalReplay
+          ? 'g4_receipt_not_authoritative'
+          : 'packaging_receipt_not_authoritative',
+        409,
+      )
+    }
+    if (embedded?.result) {
+      const replayValidation = strictCriticalReplay
+        ? reenterStrictCriticalMutationReducer(commandType, embedded, production, warehouse)
+        : strictEmbeddedPackagingReplayValid(embedded, production)
+          ? ok()
+          : fail('packaging_idempotency_state_mismatch', 409)
+      if (!replayValidation.ok) {
+        return replayValidation
+      }
+      const replayResult = {
+        ...embedded.result,
+        criticalRevision: critical.revision,
+        ...(strictCriticalReplay
+          ? { commandFingerprint }
+          : { idempotencyFingerprint: commandFingerprint }),
+        productionActive,
+        packagingQcActive: packagingActive,
+        warehouse: warehouseSnapshot(warehouse),
+        production: productionSnapshot(production),
+        idempotent: true,
+        recoveredFromEmbeddedReceipt: !receipt?.result,
+      }
+      if (!receipt?.result) {
+        await saveReceipt(
+          dc,
+          idempotencyKey,
+          storeId,
+          commandType,
+          actor.uid,
+          replayResult,
+          critical.revision,
+        )
+      }
+      return ok(replayResult)
+    }
+  } else if (receipt?.result) {
+    if (idempotencyReplayConflict(receipt, commandType, commandFingerprint)) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
+    return ok({ ...receipt.result, idempotent: true })
+  } else if (embedded?.result) {
+    if (idempotencyReplayConflict(embedded, commandType, commandFingerprint)) {
+      return fail('packaging_idempotency_conflict', 409)
+    }
     await saveReceipt(
       dc,
       idempotencyKey,
@@ -2604,13 +3562,6 @@ export async function executeG4Command(input) {
       recoveredFromEmbeddedReceipt: true,
     })
   }
-
-  let warehouse = structuredClone(critical.payload.domains.warehouse)
-  let production = structuredClone(critical.payload.domains.production ?? emptyProductionStore())
-  const warehouseBeforeHash = stableDomainHash(warehouse)
-  const now = new Date().toISOString()
-  const productionActive = isProductionDomainActive(critical.payload, critical.revision)
-  const packagingActive = isPackagingQcFeatureActive(critical.payload)
 
   if (commandType === 'packaging.read') {
     return ok({
@@ -2708,27 +3659,40 @@ export async function executeG4Command(input) {
   } else if (commandType === 'packaging.report.confirm') {
     applied = applyPackagingConfirm(production, warehouse, rawCommand, actor, now, {
       masterDataActive: isMasterDataDomainActive(critical.payload),
+      masterData: critical.payload.domains.masterData,
+      enforceCanonicalLineage: isStagingIsolatedRuntime(),
+      idempotencyFingerprint: commandFingerprint,
     })
   } else if (commandType === 'packaging.report.createCorrection') {
     applied = applyPackagingCreateCorrection(production, rawCommand, actor, now)
   } else if (commandType === 'packaging.report.confirmCorrection') {
     applied = applyPackagingConfirmCorrection(production, warehouse, rawCommand, actor, now, {
       masterDataActive: isMasterDataDomainActive(critical.payload),
+      masterData: critical.payload.domains.masterData,
+      enforceCanonicalLineage: isStagingIsolatedRuntime(),
+      idempotencyFingerprint: commandFingerprint,
     })
   } else if (commandType === 'qc.review.start') {
-    applied = applyQcReviewStart(production, rawCommand, actor, now)
+    applied = applyQcReviewStart(production, rawCommand, actor, now, { commandFingerprint })
   } else if (commandType === 'qc.release') {
     applied = await applyQcRelease(production, rawCommand, actor, now, {
       storeId,
       capabilities: perm.capabilities,
       idempotencyKey,
+      commandFingerprint,
     })
   } else if (commandType === 'qc.regrade') {
-    applied = applyQcRegrade(production, warehouse, rawCommand, actor, now)
+    applied = applyQcRegrade(production, warehouse, rawCommand, actor, now, {
+      commandFingerprint,
+    })
   } else if (commandType === 'qc.reject') {
-    applied = applyQcReject(production, warehouse, rawCommand, actor, now)
+    applied = applyQcReject(production, warehouse, rawCommand, actor, now, {
+      commandFingerprint,
+    })
   } else if (commandType === 'qc.scrap.writeoff') {
-    applied = applyQcScrapWriteoff(production, warehouse, rawCommand, actor, now)
+    applied = applyQcScrapWriteoff(production, warehouse, rawCommand, actor, now, {
+      commandFingerprint,
+    })
   } else if (commandType === 'shipment.draft.save') {
     applied = applyShipmentDraftSave(warehouse, rawCommand, actor, now)
   } else if (commandType === 'shipment.draft.delete') {
@@ -2745,8 +3709,12 @@ export async function executeG4Command(input) {
     }
     applied =
       commandType === 'shipment.post'
-        ? applyShipmentPost(production, warehouse, rawCommand, actor, now)
-        : applyShipmentCancel(production, warehouse, rawCommand, actor, now)
+        ? applyShipmentPost(production, warehouse, rawCommand, actor, now, {
+            commandFingerprint,
+          })
+        : applyShipmentCancel(production, warehouse, rawCommand, actor, now, {
+            commandFingerprint,
+          })
   } else {
     return fail('unknown_command', 400)
   }
@@ -2771,6 +3739,13 @@ export async function executeG4Command(input) {
   const { projection, ...appliedResult } = applied
   const resultPreview = {
     ...appliedResult.result,
+    ...(PAYLOAD_BOUND_IDEMPOTENCY_COMMANDS.has(commandType) && commandFingerprint
+      ? { idempotencyFingerprint: commandFingerprint }
+      : {}),
+    ...(strictCriticalReplay && commandFingerprint ? { commandFingerprint } : {}),
+    productionActive,
+    packagingQcActive: packagingActive,
+    touchesWarehouse,
     warehouse: warehouseSnapshot(warehouse),
     production: productionSnapshot(production),
   }

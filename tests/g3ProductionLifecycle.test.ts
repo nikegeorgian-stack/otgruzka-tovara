@@ -159,11 +159,19 @@ async function seedStock() {
       productionWarehouseId: 'prod-wh',
       productionLocationId: 'prod-loc',
     },
+    {
+      id: 'pack',
+      lineId: 'pack',
+      productionWarehouseId: 'pack-wh',
+      productionLocationId: 'pack-loc',
+    },
   ]
   payload.domains.warehouse.locations = [
     { id: 'raw' },
     { id: 'prod-wh' },
     { id: 'prod-loc' },
+    { id: 'pack-wh' },
+    { id: 'pack-loc' },
     { id: 'scrap' },
   ]
   payload.domains.warehouse.scrapLocationId = 'scrap'
@@ -408,7 +416,7 @@ describe('G3 materials / shift / atomicity', () => {
         actualInputs: [{ itemId: 'mat-1', quantity: 5 }],
         wasteLines: [{ itemId: 'mat-1', quantity: 0.1, reason: 'trim' }],
         semiFinishedItemId: 'wip-item',
-        packLocationId: 'prod-loc',
+        packLocationId: 'pack-loc',
       },
     })
     // waste 0.1 may exceed remaining after consume 5 — adjust: consume 4.9
@@ -426,7 +434,7 @@ describe('G3 materials / shift / atomicity', () => {
           actualInputs: [{ itemId: 'mat-1', quantity: 4 }],
           wasteLines: [],
           semiFinishedItemId: 'wip-item',
-          packLocationId: 'prod-loc',
+          packLocationId: 'pack-loc',
         },
       })
       expect(shift2.ok).toBe(true)
@@ -438,6 +446,19 @@ describe('G3 materials / shift / atomicity', () => {
         true,
       )
     }
+    const afterShift = JSON.parse(String(dcState.critical!.payloadJson))
+    const wipReceipt = afterShift.domains.warehouse.documents.find(
+      (document: { docRole?: string }) => document.docRole === 'wip_receipt',
+    )
+    expect(wipReceipt).toMatchObject({ warehouseId: 'pack-wh' })
+    expect(wipReceipt.lines[0]).toMatchObject({ locationId: 'pack-loc' })
+    const wipMovement = afterShift.domains.warehouse.movements.find(
+      (movement: { documentId?: string }) => movement.documentId === wipReceipt.id,
+    )
+    expect(wipMovement).toMatchObject({
+      warehouseId: 'pack-wh',
+      locationId: 'pack-loc',
+    })
 
     // Concurrent CAS: force conflict
     calls.updateCas.mockImplementationOnce(async () => {
@@ -551,7 +572,7 @@ describe('G3 materials / shift / atomicity', () => {
         actualInputs: [{ itemId: 'mat-1', quantity: 2 }],
         wasteLines: [],
         semiFinishedItemId: 'wip-item',
-        packLocationId: 'prod-loc',
+        packLocationId: 'pack-loc',
       },
     })
     expect(shift.ok).toBe(true)
@@ -571,7 +592,7 @@ describe('G3 materials / shift / atomicity', () => {
         actualInputs: [{ itemId: 'mat-1', quantity: 2.5 }],
         wasteLines: [],
         semiFinishedItemId: 'wip-item',
-        packLocationId: 'prod-loc',
+        packLocationId: 'pack-loc',
       },
     })
     expect(corr.ok).toBe(true)

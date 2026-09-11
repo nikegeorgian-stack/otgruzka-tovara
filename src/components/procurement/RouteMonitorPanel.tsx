@@ -20,7 +20,11 @@ function progressPercent(order: PurchaseOrder): number {
   const legs = order.legs
   if (!legs.length) {
     const done = ['arrived', 'partial', 'received'].includes(order.status)
-    return done ? 100 : order.status === 'draft' || order.status === 'ordered' ? 5 : 35
+    return done
+      ? 100
+      : ['draft', 'submitted', 'approved', 'ordered'].includes(order.status)
+        ? 5
+        : 35
   }
   let done = 0
   for (const leg of legs) {

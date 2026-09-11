@@ -18,7 +18,6 @@ import {
   g5ProcurementCancel,
   g5ProcurementMarkOrdered,
   g5ProcurementPaymentRecord,
-  g5ProcurementReceiptPost,
   g5ProcurementSubmit,
   g5ProductionRecommendationCreateManual,
   g5ResolveShortageManual,
@@ -763,30 +762,6 @@ export function G5MrpWorkspace({
           command: { id: poId },
         }),
       `g5.mrp.success.po.${action}`,
-    )
-  }
-
-  async function handlePoPartialReceipt(po: ProcurementOrderLite) {
-    const line = (po.lines ?? [])[0]
-    if (!line?.lineId) {
-      setError(t('g5.mrp.error.noPoLine'))
-      return
-    }
-    const requested = num(line.requestedQty)
-    const received = num(line.receivedQty)
-    const openQty = Math.max(0, requested - received)
-    const qty = openQty > 0 ? Math.max(0.001, openQty / 2) : Math.max(0.001, requested / 2 || 0.5)
-    await runCommand(
-      () =>
-        g5ProcurementReceiptPost({
-          idempotencyKey: idemKey(`po-receipt-${po.id}`),
-          command: {
-            id: po.id,
-            orderId: po.id,
-            lines: [{ lineId: line.lineId, quantity: qty }],
-          },
-        }),
-      'g5.mrp.success.po.receipt',
     )
   }
 
@@ -1719,16 +1694,6 @@ export function G5MrpWorkspace({
                               onClick={() => void handlePoLifecycle(po.id, 'ordered')}
                             >
                               {t('g5.mrp.action.poOrdered')}
-                            </Button>
-                          ) : null}
-                          {['approved', 'ordered', 'partially_received'].includes(status) ? (
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              disabled={inFlight}
-                              onClick={() => void handlePoPartialReceipt(po)}
-                            >
-                              {t('g5.mrp.action.poReceipt')}
                             </Button>
                           ) : null}
                           {canViewPayment &&

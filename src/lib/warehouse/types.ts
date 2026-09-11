@@ -30,6 +30,8 @@ export type WarehouseLocation = {
 
 export type WarehouseDocumentPurpose =
   | 'purchase'
+  /** Canonical paired mixer issue/receipt documents. */
+  | 'production'
   | 'production_issue'
   | 'production_receipt'
   | 'return'
@@ -129,12 +131,19 @@ export type StockMovement = {
   id: string
   itemId: string
   warehouseId: string
+  /** Physical sub-location inside warehouse (authoritative G3 tuple). */
+  locationId?: string
   type: StockMovementType
   quantity: number
   date: string
   documentId?: string
   /** PHASE W1 — link to WarehouseDocumentLine.lineId */
   documentLineId?: string
+  /** Canonical source WIP receipt lineage for packaging consumption. */
+  sourceDocumentId?: string
+  sourceDocumentLineId?: string
+  sourceShiftReportId?: string
+  sourceWipBatchId?: string
   documentNo?: string
   /** PHASE W0.6/W1 — cloud atomic group when part of warehouse transaction */
   transactionGroupId?: string
@@ -142,12 +151,20 @@ export type StockMovement = {
   comment?: string
   /** Резерв под заказ планировщика */
   productionOrderId?: string
+  /** Exact production line and mixer lineage for canonical G3 movements. */
+  productionLineId?: string
+  batchRunId?: string
   /** PHASE P1B — сменный отчёт */
   shiftReportId?: string
   /** PHASE P1C — отчёт упаковки */
   packagingReportId?: string
   /** PHASE P1C — лот готовой продукции */
   finishedGoodsLotId?: string
+  /** Exact G5 sales linkage for authoritative shipment movements. */
+  shipmentId?: string
+  salesOrderId?: string
+  salesLineId?: string
+  commandFingerprint?: string
   /** Резерв под задание миксеру (ЗД-…) */
   mixTaskId?: string
   /** if entered in alternate unit */
@@ -158,6 +175,8 @@ export type StockMovement = {
   batchNo?: string
   /** Срок годности партии (YYYY-MM-DD) */
   expiryDate?: string
+  /** Immutable posting unit for exact authoritative tuple checks. */
+  unitSnapshot?: string
   createdAt: string
   /** PHASE W1 — immutable actor snapshot */
   createdBy?: string
@@ -169,6 +188,16 @@ export type WarehouseDocumentLine = {
   lineId?: string
   itemId: string
   quantity: number
+  /** Physical sub-location within warehouse for tuple-aware documents. */
+  locationId?: string
+  /** Canonical production and batch lineage for authoritative document rows. */
+  productionOrderId?: string
+  productionLineId?: string
+  batchRunId?: string
+  /** Exact source WIP row consumed by packaging. */
+  sourceDocumentId?: string
+  sourceDocumentLineId?: string
+  sourceWipBatchId?: string
   /** Snapshot at post time — rename of item must not rewrite history */
   itemCodeSnapshot?: string
   itemNameSnapshot?: string
@@ -263,6 +292,8 @@ export type WarehouseDocument = {
   cancellationReason?: string
   reversalDocumentId?: string
   reversesDocumentId?: string
+  /** Legacy/server cancellation linkage retained for fail-closed graph checks. */
+  cancelledDocumentId?: string
   /** Кладовщик, проводивший документ */
   keeperId?: string
   keeperName?: string
@@ -324,6 +355,8 @@ export type WarehouseDocument = {
     | 'production_fg_receipt'
     | 'production_fg_regrade_transfer'
     | 'production_fg_reject_transfer'
+    | 'finished_goods_shipment'
+    | 'finished_goods_shipment_cancel'
   /** PHASE P1A — линия производства */
   productionLineId?: string
   /** PHASE P1B — сменный отчёт */
@@ -332,6 +365,13 @@ export type WarehouseDocument = {
   packagingReportId?: string
   /** PHASE P1C — лот готовой продукции */
   finishedGoodsLotId?: string
+  /** Exact G5 shipment linkage and command evidence. */
+  shipmentId?: string
+  salesOrderId?: string
+  salesLineId?: string
+  qcDecisionId?: string
+  commandFingerprint?: string
+  isFinishedGoods?: boolean
   /** PHASE P1A — ссылка на документ резерва */
   reservationDocumentId?: string
   /** Причина превышения резерва / возврата */
@@ -528,7 +568,7 @@ export type LoadingShipmentLine = {
   cellSize?: string
 }
 
-export type LoadingShipmentStatus = 'draft' | 'posted'
+export type LoadingShipmentStatus = 'draft' | 'posted' | 'cancelled'
 
 /** Учётная форма погрузки готовой продукции (отгрузка) */
 export type LoadingShipment = {
@@ -574,6 +614,24 @@ export type LoadingShipment = {
   postedAt?: string
   /** Авто-расход ГП при проведении погрузки */
   postedDocumentId?: string
+  /** Authoritative G5 single-lot linkage and replay evidence. */
+  finishedProductId?: string
+  warehouseItemId?: string
+  unitSnapshot?: string
+  finishedGoodsLotId?: string
+  lotNumber?: string
+  locationId?: string
+  quantity?: number
+  qcDecisionId?: string
+  lotRevisionAtPost?: number
+  documentIds?: string[]
+  commandFingerprint?: string
+  postCommandFingerprint?: string
+  cancelCommandFingerprint?: string
+  reversalDocumentIds?: string[]
+  cancellationDate?: string
+  cancellationReason?: string
+  cancelledAt?: string
 }
 
 /** Черновик выдачи за день — проводится одним расходом в конце смены */

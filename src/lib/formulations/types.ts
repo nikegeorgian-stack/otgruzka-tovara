@@ -148,6 +148,12 @@ export type FormulationBatchStatus = 'pending' | 'confirmed' | 'rejected'
 export type FormulationBatchRun = {
   id: string
   documentNumber: string
+  /** Задание миксеру, из которого создан замес (отсутствует у свободного замеса). */
+  mixTaskId?: string
+  /** Производственный заказ задания на момент создания замеса. */
+  productionOrderId?: string
+  /** Производственная линия задания на момент создания замеса. */
+  productionLineId?: string
   /** Внутренний код готовой пропитки для штрихкода (PM-000123) */
   internalCode?: string
   status?: FormulationBatchStatus

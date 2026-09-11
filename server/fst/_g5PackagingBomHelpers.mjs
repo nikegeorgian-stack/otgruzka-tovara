@@ -186,6 +186,10 @@ export function computePackagingRequirements(snapshotOrBom, outputQty) {
  */
 export function comparePackagingActualToNorm(snapshot, outputQty, materialLines, opts = {}) {
   const norms = computePackagingRequirements(snapshot, outputQty)
+  const requireComplete = opts.requireComplete === true
+  if (requireComplete && norms.length === 0) {
+    return { ok: false, error: 'packaging_bom_components_required', status: 409 }
+  }
   const byItem = new Map(norms.map((n) => [n.itemId, { ...n, actualQty: 0 }]))
   const lines = Array.isArray(materialLines) ? materialLines : []
   const excessReason = str(opts.excessReason ?? opts.deviationReason ?? opts.reason)
@@ -222,6 +226,7 @@ export function comparePackagingActualToNorm(snapshot, outputQty, materialLines,
 
   const components = []
   let excessRequiresReason = false
+  let incomplete = null
   for (const norm of byItem.values()) {
     const deviation = roundQty(norm.actualQty - norm.normQty)
     const tolAbs =
@@ -230,6 +235,13 @@ export function comparePackagingActualToNorm(snapshot, outputQty, materialLines,
         : 0
     const overTol = deviation > tolAbs + EPS
     if (overTol) excessRequiresReason = true
+    if (requireComplete && norm.actualQty + EPS < norm.normQty && incomplete == null) {
+      incomplete = {
+        itemId: norm.itemId,
+        expected: norm.normQty,
+        actual: norm.actualQty,
+      }
+    }
     components.push({
       itemId: norm.itemId,
       warehouseItemId: norm.warehouseItemId,
@@ -240,6 +252,16 @@ export function comparePackagingActualToNorm(snapshot, outputQty, materialLines,
       tolerance: norm.tolerance,
       overTolerance: overTol,
     })
+  }
+
+  if (incomplete) {
+    return {
+      ok: false,
+      error: 'packaging_material_bom_incomplete',
+      status: 409,
+      ...incomplete,
+      components,
+    }
   }
 
   if (excessRequiresReason && !excessReason) {

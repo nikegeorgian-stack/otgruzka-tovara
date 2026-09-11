@@ -14,6 +14,8 @@ export const G3_CAPS = Object.freeze({
   RESERVATION_REALLOCATE: 'production.reservation.reallocate',
   MATERIAL_ISSUE: 'production.material.issue',
   MATERIAL_RETURN: 'production.material.return',
+  IMPREGNATION_QC_DECIDE: 'production.impregnationQc.decide',
+  LINE_BINDING_CONFIGURE: 'production.lineBinding.configure',
   SHIFT_EDIT: 'production.shift.edit',
   SHIFT_CONFIRM: 'production.shift.confirm',
   SHIFT_CORRECT: 'production.shift.correct',

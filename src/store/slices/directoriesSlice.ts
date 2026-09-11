@@ -231,6 +231,7 @@ export function createDirectoriesSlice({ setStore, getStore, getActor }: StoreSl
               code: normalized.code,
               name: normalized.name,
               active: normalized.active,
+              warehouseItemId: normalized.warehouseItemId,
               formulationRecipeId: normalized.defaultFormulationRecipeId,
               packagingBomId: normalized.defaultPackagingRecipeId,
             },

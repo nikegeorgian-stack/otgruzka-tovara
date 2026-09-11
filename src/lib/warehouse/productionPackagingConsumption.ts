@@ -54,8 +54,12 @@ export function postPackagingReportWarehouseEffects(
   const { report } = input
   const now = report.confirmedAt ?? new Date().toISOString()
   const date = report.shiftDate
+  // Historical local reports used the location id as the warehouse id. Keep
+  // that collapsed tuple only when the report predates packagingWarehouseId.
+  const packagingWarehouseId =
+    report.packagingWarehouseId?.trim() || report.packagingLocationId
 
-  if (!isWarehouseAccountingActive(store, report.packagingLocationId)) {
+  if (!isWarehouseAccountingActive(store, packagingWarehouseId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
 
@@ -93,6 +97,7 @@ export function postPackagingReportWarehouseEffects(
       itemId: line.semiFinishedItemId,
       quantity: line.quantity,
       unitSnapshot: line.unitSnapshot || 'm2',
+      locationId: report.packagingLocationId,
       batchNo: line.batchNo,
       expiryDate: line.expiryDate,
     }))
@@ -103,7 +108,7 @@ export function postPackagingReportWarehouseEffects(
       number: `СП-${report.number}`,
       date,
       documentDateTime: now,
-      warehouseId: report.packagingLocationId,
+      warehouseId: packagingWarehouseId,
       purpose: 'production_wip_pack_consumption',
       docRole: 'production_wip_pack_consumption',
       productionOrderId: report.productionOrderId,
@@ -133,6 +138,10 @@ export function postPackagingReportWarehouseEffects(
             packagingReportId: report.id,
             productionOrderId: report.productionOrderId,
             shiftReportId: line.shiftReportId,
+            sourceDocumentId: line.receiptDocumentId,
+            sourceDocumentLineId: line.lineId,
+            sourceShiftReportId: line.shiftReportId,
+            sourceWipBatchId: line.batchNo,
           }
         : movement
     })
@@ -149,6 +158,7 @@ export function postPackagingReportWarehouseEffects(
       itemNameSnapshot: line.itemNameSnapshot,
       unitSnapshot: line.unitSnapshot,
       inputUnit: line.inputUnit,
+      locationId: report.packagingLocationId,
       batchNo: line.batchNo,
       expiryDate: line.expiryDate,
       batchOverrideReason: line.batchOverrideReason,
@@ -161,7 +171,7 @@ export function postPackagingReportWarehouseEffects(
       number: `УПМ-${report.number}`,
       date,
       documentDateTime: now,
-      warehouseId: report.packagingLocationId,
+      warehouseId: packagingWarehouseId,
       purpose: 'production_packaging_consumption',
       docRole: 'production_packaging_consumption',
       productionOrderId: report.productionOrderId,
@@ -197,7 +207,7 @@ export function postPackagingReportWarehouseEffects(
     number: `ГП-${report.number}`,
     date,
     documentDateTime: now,
-    warehouseId: report.packagingLocationId,
+    warehouseId: packagingWarehouseId,
     purpose: 'production_fg_receipt',
     docRole: 'production_fg_receipt',
     productionOrderId: report.productionOrderId,
@@ -215,6 +225,7 @@ export function postPackagingReportWarehouseEffects(
         itemCodeSnapshot: fgItem.internalCode,
         itemNameSnapshot: fgItem.name,
         unitSnapshot: fgItem.unit || 'm2',
+        locationId: report.packagingLocationId,
         batchNo: report.batchNo,
       },
     ],
@@ -277,4 +288,3 @@ export function reversePackagingReportWarehouseEffects(
   }
   return { store: working, documentIds }
 }
-

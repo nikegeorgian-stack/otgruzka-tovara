@@ -48,7 +48,12 @@ type Props = {
   access: AccessStore
   finishedProducts: FinishedProduct[]
   currentUser?: AppUser | null
-  onStartQcReview: (lotId: string) => void | Promise<void>
+  onStartQcReview: (
+    lotId: string,
+  ) =>
+    | { ok: true; lot: FinishedGoodsLot }
+    | { ok: false; error: string }
+    | Promise<{ ok: true; lot: FinishedGoodsLot } | { ok: false; error: string }>
   onReleaseFinishedGoodsLot: (input: {
     lotId: string
     access?: AccessStore | null
@@ -277,8 +282,12 @@ export function OtcPage({
   }
 
   async function handleReview(lot: FinishedGoodsLot) {
-    await onStartQcReview(lot.id)
-    setNotice(`${lot.batchNo}: ${t(lotQcBadgeKey('in_review'))}`)
+    const result = await onStartQcReview(lot.id)
+    setNotice(
+      result.ok
+        ? `${lot.batchNo}: ${t(lotQcBadgeKey('in_review'))}`
+        : t(result.error || 'otc.qc.error'),
+    )
   }
 
   async function handleRegrade(lot: FinishedGoodsLot) {

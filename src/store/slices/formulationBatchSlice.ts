@@ -2,10 +2,10 @@ import type { Locale } from '@/i18n/types'
 import {
   attachBatchMixConfirmedDocs,
   buildBatchMixConfirmCommand,
-  classifyBatchMixWarehouseState,
   confirmBatchMix,
   createPendingBatchMix,
   rejectBatchMix,
+  validateBatchMixAuthoritativeAck,
   withBatchMixCatalogueSnapshots,
   type PostBatchMixInput,
   type PostBatchMixOptions,
@@ -79,6 +79,9 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
       }
 
       const store = getStore()
+      const previousCriticalRevision = Number(
+        (store.production as unknown as Record<string, unknown>).g3CriticalRevision ?? 0,
+      )
       const run = (store.formulations.batchRuns ?? []).find((r) => r.id === runId)
       if (!run) return { ok: false, error: 'batch_not_found' }
       if ((run.status ?? 'confirmed') !== 'pending') {
@@ -106,15 +109,14 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
         return { ok: false, error: server.error || 'warehouse.g2.errServer' }
       }
 
-      const issueDocumentId = String(
-        (server.data as { issueDocumentId?: string }).issueDocumentId ?? '',
+      const ack = validateBatchMixAuthoritativeAck(
+        run,
+        command,
+        server.data,
+        previousCriticalRevision,
       )
-      const receiptDocumentId = String(
-        (server.data as { receiptDocumentId?: string }).receiptDocumentId ?? '',
-      )
-      if (!issueDocumentId || !receiptDocumentId) {
-        return { ok: false, error: 'warehouse.g2.errServer' }
-      }
+      if (!ack.ok) return { ok: false, error: ack.error }
+      const { issueDocumentId, receiptDocumentId } = ack
 
       let result: PostBatchMixResult = { ok: false, error: 'unknown' }
       patchStore(
@@ -151,7 +153,8 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
 
     /**
      * Orphan recovery: confirmed formulations without critical issue/receipt.
-     * Fail-closed on partial ledger; idempotent when complete.
+     * Always re-enter G2: a local posted/count projection cannot prove that the
+     * authoritative document-line-movement graph is complete and active.
      */
     async recoverOrphanBatchMixConfirm(
       runId: string,
@@ -161,32 +164,13 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
         return { ok: false, error: 'g2_required' }
       }
       const store = getStore()
+      const previousCriticalRevision = Number(
+        (store.production as unknown as Record<string, unknown>).g3CriticalRevision ?? 0,
+      )
       const run = (store.formulations.batchRuns ?? []).find((r) => r.id === runId)
       if (!run) return { ok: false, error: 'batch_not_found' }
       if ((run.status ?? '') !== 'confirmed') {
         return { ok: false, error: 'batch_not_confirmed_orphan' }
-      }
-
-      const ledger = classifyBatchMixWarehouseState(store.warehouse, runId)
-      if (ledger.state === 'complete') {
-        const attached = attachBatchMixConfirmedDocs(store.formulations, {
-          runId,
-          keeperId: keeper?.id,
-          keeperName: keeper?.name,
-          issueDocumentId: ledger.issueDocumentId!,
-          receiptDocumentId: ledger.receiptDocumentId!,
-          allowAlreadyConfirmed: true,
-        })
-        if (attached.result.ok) {
-          patchStore(setStore, (s) => ({ ...s, formulations: attached.formulations }))
-        }
-        return attached.result
-      }
-      if (ledger.state === 'partial') {
-        return {
-          ok: false,
-          error: `partial_batch_mix_docs:issue=${ledger.issueDocumentId ?? 'none'};receipt=${ledger.receiptDocumentId ?? 'none'};issueMov=${ledger.issueMovementCount};receiptMov=${ledger.receiptMovementCount}`,
-        }
       }
 
       const groupId = warehouseTransactionGroupId({
@@ -209,15 +193,14 @@ export function createFormulationBatchSlice({ setStore, getStore }: StoreSliceDe
       if (!server.ok) {
         return { ok: false, error: server.error || 'warehouse.g2.errServer' }
       }
-      const issueDocumentId = String(
-        (server.data as { issueDocumentId?: string }).issueDocumentId ?? '',
+      const ack = validateBatchMixAuthoritativeAck(
+        run,
+        command,
+        server.data,
+        previousCriticalRevision,
       )
-      const receiptDocumentId = String(
-        (server.data as { receiptDocumentId?: string }).receiptDocumentId ?? '',
-      )
-      if (!issueDocumentId || !receiptDocumentId) {
-        return { ok: false, error: 'warehouse.g2.errServer' }
-      }
+      if (!ack.ok) return { ok: false, error: ack.error }
+      const { issueDocumentId, receiptDocumentId } = ack
 
       let result: PostBatchMixResult = { ok: false, error: 'unknown' }
       patchStore(

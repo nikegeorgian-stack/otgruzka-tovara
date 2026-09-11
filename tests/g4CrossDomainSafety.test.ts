@@ -284,6 +284,22 @@ async function bootstrapFullStack() {
 
   const p = payload()
   p.domains.warehouse.locations = [{ id: PACK_WH }, { id: PACK_LOC }, { id: FG_LOC }, { id: SCRAP_LOC }]
+  p.domains.warehouse.categories = [
+    { id: 'packaging-materials', name: 'Packaging materials', sortOrder: 1 },
+  ]
+  p.domains.warehouse.items = [
+    {
+      id: MATERIAL_ITEM,
+      internalCode: 'PACK-FILM-1',
+      name: 'Packaging film',
+      categoryId: 'packaging-materials',
+      warehouseId: PACK_WH,
+      locationId: PACK_LOC,
+      unit: 'pcs',
+      active: true,
+      sortOrder: 1,
+    },
+  ]
   p.domains.warehouse.scrapLocationId = SCRAP_LOC
   p.domains.warehouse.productionLineBindings = [
     {

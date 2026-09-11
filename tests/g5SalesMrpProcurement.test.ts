@@ -408,6 +408,7 @@ describe('G5 sales lifecycle', () => {
 
     await confirmSalesOrder(svc, 'so-1', 40, 'life-confirm')
     const order = payload().domains.sales.orders.find((o: { id: string }) => o.id === 'so-1')
+    const salesLineId = order.lines[0].lineId
     expect(order.status).toBe('confirmed')
     expect(order.customerNameSnapshot).toBe('Acme')
     expect(order.lines[0].productCodeSnapshot).toBe('FP-1')
@@ -433,7 +434,7 @@ describe('G5 sales lifecycle', () => {
     const below = await cmd(
       svc,
       'sales.order.change',
-      { id: 'so-1', lines: [{ lineId: 'sol-1', quantity: 10 }] },
+      { id: 'so-1', lines: [{ lineId: salesLineId, quantity: 10 }] },
       'life-change-low',
     )
     expect(below.ok).toBe(false)
@@ -442,7 +443,7 @@ describe('G5 sales lifecycle', () => {
     const okChange = await cmd(
       svc,
       'sales.order.change',
-      { id: 'so-1', lines: [{ lineId: 'sol-1', quantity: 30 }] },
+      { id: 'so-1', lines: [{ lineId: salesLineId, quantity: 30 }] },
       'life-change-ok',
     )
     expect(okChange.ok).toBe(true)

@@ -733,7 +733,7 @@ describe('G4.1 idempotency does not duplicate decisions', () => {
     expect(dcState.critical!.revision).toBe(revisionAfterFirst)
     expect(payload().domains.production.qcDecisions.length).toBe(1)
 
-    // A fresh key on an already released lot is domain-idempotent, not a second decision.
+    // A fresh key with a different semantic payload cannot reuse the terminal lot.
     const third = await g4.executeG4Command({
       actor,
       storeId: STORE,
@@ -741,8 +741,8 @@ describe('G4.1 idempotency does not duplicate decisions', () => {
       commandType: 'qc.release',
       command: { finishedGoodsLotId: confirmed.finishedGoodsLotId, reason: 'lab ok again' },
     })
-    expect(third.ok).toBe(true)
-    expect(third.idempotent).toBe(true)
+    expect(third.ok).toBe(false)
+    expect(third.error).toBe('g4_idempotency_conflict')
     expect(payload().domains.production.qcDecisions.length).toBe(1)
     expect(qcState.decisions.length).toBe(1)
   })

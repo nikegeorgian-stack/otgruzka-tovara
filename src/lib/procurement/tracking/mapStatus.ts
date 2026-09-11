@@ -3,14 +3,16 @@ import type { CarrierTrackingEvent } from './types'
 
 const STATUS_RANK: Record<PurchaseOrderStatus, number> = {
   draft: 0,
-  ordered: 1,
-  production: 2,
-  shipped: 3,
-  in_transit: 4,
-  customs: 5,
-  arrived: 6,
-  partial: 7,
-  received: 8,
+  submitted: 1,
+  approved: 2,
+  ordered: 3,
+  production: 4,
+  shipped: 5,
+  in_transit: 6,
+  customs: 7,
+  arrived: 8,
+  partial: 9,
+  received: 10,
   cancelled: -1,
 }
 
@@ -84,6 +86,8 @@ export function shouldAutoSyncStatus(status: PurchaseOrderStatus): boolean {
   return (
     status !== 'received' &&
     status !== 'cancelled' &&
-    status !== 'draft'
+    status !== 'draft' &&
+    status !== 'submitted' &&
+    status !== 'approved'
   )
 }

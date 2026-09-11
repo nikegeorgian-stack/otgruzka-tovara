@@ -51,6 +51,8 @@ import {
   ordinaryAvailableQty,
 } from './_g2BatchAllocation.mjs'
 import { applyBatchMixConfirmCritical } from './_g2BatchMixConfirm.mjs'
+import { batchMixCommandFingerprint } from '../../src/lib/formulations/batchMixFingerprint.mjs'
+import { isStagingIsolatedRuntime } from './_dataConnectRuntime.mjs'
 
 function ok(data = {}) {
   return { ok: true, ...data }
@@ -164,7 +166,7 @@ export async function revokePrincipalAccess(input) {
   return ok({ principal: row })
 }
 
-async function loadOrInitCritical(dc, storeId, actorUid) {
+async function loadOrInitCritical(dc, storeId, actorUid, { allowInitialize = false } = {}) {
   const { data } = await getFstCriticalStore(dc, { id: storeId })
   const row = data?.fstCriticalStore ?? null
   if (row) {
@@ -177,6 +179,7 @@ async function loadOrInitCritical(dc, storeId, actorUid) {
       fingerprint: row.fingerprint,
     })
   }
+  if (!allowInitialize) return fail('critical_store_not_found', 404)
   const payload = emptyCriticalPayload()
   const payloadJson = serializeCriticalPayload(payload)
   await upsertFstCriticalStore(dc, {
@@ -247,7 +250,11 @@ async function loadReceipt(dc, idempotencyKey, storeId) {
   if (!receipt) return null
   if (receipt.storeId !== storeId) return { conflict: true }
   try {
-    return { result: JSON.parse(receipt.resultJson) }
+    return {
+      commandType: String(receipt.commandType ?? '').trim() || undefined,
+      criticalRevision: Number(receipt.criticalRevisionAfter) || undefined,
+      result: JSON.parse(receipt.resultJson),
+    }
   } catch {
     return { corrupt: true }
   }
@@ -256,7 +263,12 @@ async function loadReceipt(dc, idempotencyKey, storeId) {
 function embeddedReceipt(payload, idempotencyKey) {
   const row = payload?.commandReceipts?.[idempotencyKey]
   if (!row?.result) return null
-  return { result: row.result, criticalRevision: row.criticalRevisionAfter, embedded: true }
+  return {
+    commandType: String(row.commandType ?? '').trim() || undefined,
+    result: row.result,
+    criticalRevision: row.criticalRevisionAfter,
+    embedded: true,
+  }
 }
 
 /**
@@ -706,6 +718,11 @@ export async function executeG2Command(input) {
   }
   const needed = capabilityByCommand[commandType]
   if (!needed) return fail('unknown_command', 400)
+  const strictBatchMixReplayValidation =
+    commandType === 'warehouse.batchMix.confirm' && isStagingIsolatedRuntime()
+  const batchMixFingerprint = strictBatchMixReplayValidation
+    ? batchMixCommandFingerprint(rawCommand)
+    : undefined
 
   const perm = await requirePrincipalCapability(actor.uid, storeId, needed, actor)
   if (!perm.ok) return perm
@@ -714,13 +731,38 @@ export async function executeG2Command(input) {
   const receipt = await loadReceipt(dc, idempotencyKey, storeId)
   if (receipt?.conflict) return fail('not_found', 404)
   if (receipt?.corrupt) return fail('receipt_corrupt', 500)
-  if (receipt?.result) return ok({ ...receipt.result, idempotent: true })
+  if (
+    strictBatchMixReplayValidation &&
+    receipt?.result &&
+    ((receipt.commandType && receipt.commandType !== commandType) ||
+      (receipt.result.commandFingerprint &&
+        receipt.result.commandFingerprint !== batchMixFingerprint))
+  ) {
+    return fail('batch_mix_idempotency_conflict', 409)
+  }
+  if (receipt?.result && !strictBatchMixReplayValidation) {
+    return ok({ ...receipt.result, idempotent: true })
+  }
 
-  const critical = await loadOrInitCritical(dc, storeId, actor.uid)
+  const critical = await loadOrInitCritical(dc, storeId, actor.uid, {
+    // Only the canonical staging mixer path must attach to an already active
+    // G3 order graph. Preserve the established G2 bootstrap behavior for
+    // ordinary warehouse commands and emulator/local workflows.
+    allowInitialize: !strictBatchMixReplayValidation,
+  })
   if (!critical.ok) return critical
 
   const embedded = embeddedReceipt(critical.payload, idempotencyKey)
-  if (embedded?.result) {
+  if (
+    strictBatchMixReplayValidation &&
+    embedded?.result &&
+    ((embedded.commandType && embedded.commandType !== commandType) ||
+      (embedded.result.commandFingerprint &&
+        embedded.result.commandFingerprint !== batchMixFingerprint))
+  ) {
+    return fail('batch_mix_idempotency_conflict', 409)
+  }
+  if (embedded?.result && !strictBatchMixReplayValidation) {
     // CAS already committed earlier; external receipt missing — recover + best-effort reinsert
     await saveReceipt(
       dc,
@@ -780,12 +822,22 @@ export async function executeG2Command(input) {
   } else if (commandType === 'warehouse.period.reopen') {
     resultPayload = applyPeriodReopen(warehouse, rawCommand, actor, now)
   } else if (commandType === 'warehouse.batchMix.confirm') {
-    resultPayload = applyBatchMixConfirmCritical(warehouse, rawCommand, actor, now)
+    resultPayload = applyBatchMixConfirmCritical(warehouse, rawCommand, actor, now, {
+      enforceCanonicalLineage: isStagingIsolatedRuntime(),
+      production: critical.payload.domains.production,
+    })
   } else {
     return fail('unknown_command', 400)
   }
 
   if (!resultPayload.ok) return resultPayload
+  if (
+    strictBatchMixReplayValidation &&
+    (receipt?.result || embedded?.result) &&
+    resultPayload.result?.idempotentHint !== true
+  ) {
+    return fail('batch_mix_receipt_state_mismatch', 409)
+  }
   warehouse = resultPayload.warehouse
 
   const resultPreview = {
@@ -802,6 +854,29 @@ export async function executeG2Command(input) {
       accountingByWarehouse: warehouse.accountingByWarehouse,
       dailyIssueSessions: warehouse.dailyIssueSessions,
     },
+  }
+
+  if (
+    strictBatchMixReplayValidation &&
+    resultPayload.result?.idempotentHint === true
+  ) {
+    const result = {
+      ...resultPreview,
+      criticalRevision: critical.revision,
+      idempotent: true,
+    }
+    if (!receipt?.result) {
+      await saveReceipt(
+        dc,
+        idempotencyKey,
+        storeId,
+        commandType,
+        actor.uid,
+        result,
+        critical.revision,
+      )
+    }
+    return ok(result)
   }
 
   const committed = await casCommit(dc, storeId, critical, warehouse, actor.uid, {

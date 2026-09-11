@@ -15,12 +15,17 @@ import {
   UNIT_MISMATCH_ERROR,
   MISSING_ITEM_ID_ERROR,
 } from '@/lib/warehouse/productionReservations'
-import { computeLineMaterialBalances } from '@/lib/warehouse/productionMaterialHandoff'
+import {
+  computeLineMaterialBalances,
+  movementMatchesProductionTuple,
+} from '@/lib/warehouse/productionMaterialHandoff'
 import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 import type { WarehouseStore } from '@/lib/warehouse/types'
 import {
   postShiftReportWarehouseEffects,
   postShiftReportCorrectionReversals,
+  resolveShiftWasteRouting,
+  SHIFT_WASTE_EPSILON,
   type ShiftConfirmWarehouseResult,
 } from '@/lib/warehouse/productionShiftConsumption'
 
@@ -42,8 +47,12 @@ export type ShiftMaterialActualLine = {
   deviationQty: number
   deviationPct: number
   tolerancePct: number
+  /** The line has no approved recipe ratio; fact is recorded without inventing a norm. */
+  normSource?: 'recipe' | 'fact_only'
   deviationReason?: string
   batchNo?: string
+  /** Exact mixer lineage for the impregnation input; absent on unrelated/legacy inputs. */
+  batchRunId?: string
   expiryDate?: string
   batchOverrideReason?: string
 }
@@ -52,6 +61,8 @@ export type ShiftWasteLine = {
   lineId: string
   itemId: string
   batchNo?: string
+  /** Exact mixer lineage when the discarded input came from a mixer batch. */
+  batchRunId?: string
   expiryDate?: string
   quantity: number
   unitSnapshot: string
@@ -71,9 +82,12 @@ export type ProductionShiftReport = {
   responsibleNameSnapshot?: string
   responsibleRoleSnapshot?: AccessRoleId
   recipeNormSnapshot: RecipeNormSnapshot
+  productionWarehouseId?: string
   productionLocationId: string
+  packagingWarehouseId?: string
   packagingLocationId: string
-  scrapLocationId: string
+  /** Required only when wasteLines contains a positive quantity. */
+  scrapLocationId?: string
   materialLines: ShiftMaterialActualLine[]
   wasteLines: ShiftWasteLine[]
   outputM2: number
@@ -82,6 +96,10 @@ export type ProductionShiftReport = {
   conversionTolerancePct?: number
   conversionDeviationReason?: string
   semiFinishedItemId: string
+  semiFinishedUnitSnapshot?: string
+  wipContractVersion?: 1
+  impregnationQcDecisionId?: string
+  batchRunId?: string
   createdAt: string
   updatedAt: string
   confirmedAt?: string
@@ -91,6 +109,10 @@ export type ProductionShiftReport = {
   /** Links prior confirmed report when this is a correction addendum */
   correctsReportId?: string
   correctionReason?: string
+  /** Authoritative supersession marker on the immutable source report. */
+  correctedAt?: string
+  correctedBy?: string
+  correctionOpen?: boolean
   consumptionDocumentId?: string
   wipReceiptDocumentId?: string
   wasteTransferPairId?: string
@@ -296,13 +318,6 @@ export function confirmProductionShiftReport(
     return { production, warehouse, result: { ok: false, error: SHIFT_SETUP } }
   }
 
-  // Stable scrap location only — no name matching
-  const scrapId =
-    input.report.scrapLocationId?.trim() || warehouse.scrapLocationId?.trim() || ''
-  if (!scrapId || !warehouse.locations.some((l) => l.id === scrapId)) {
-    return { production, warehouse, result: { ok: false, error: SHIFT_SETUP } }
-  }
-
   const outputM2 = Math.max(0, input.report.outputM2)
   const rollCount = Math.max(0, input.report.rollCount)
   const m2PerRoll = order.m2PerRoll ?? input.report.m2PerRollSnapshot
@@ -330,24 +345,31 @@ export function confirmProductionShiftReport(
     }
 
     const normInfo = computeNormQtyForOutput(snapshot, raw.itemId, outputM2)
-    const normQty = normInfo?.normQty ?? raw.normQty
-    const tolerancePct = normInfo?.tolerancePct ?? raw.tolerancePct
+    const factOnly = raw.normSource === 'fact_only' && !normInfo
+    const normQty = factOnly ? raw.actualInputQty : (normInfo?.normQty ?? raw.normQty)
+    const tolerancePct = factOnly ? 0 : (normInfo?.tolerancePct ?? raw.tolerancePct)
     const actualInputQty = Math.max(0, raw.actualInputQty)
-    const wasteQty = Math.max(0, raw.wasteQty ?? 0)
+    const rawWasteQty = Number(raw.wasteQty ?? 0)
+    if (!Number.isFinite(rawWasteQty) || rawWasteQty < 0) {
+      return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_EXCEEDS } }
+    }
+    const wasteQty = rawWasteQty > SHIFT_WASTE_EPSILON ? rawWasteQty : 0
     if (wasteQty > actualInputQty + 1e-9) {
       return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_EXCEEDS } }
     }
     const processConsumedQty = actualInputQty - wasteQty
     const devQty = actualInputQty - normQty
     const devPct = deviationPct(actualInputQty, normQty)
-    if (Math.abs(devPct) > tolerancePct + 1e-9 && !raw.deviationReason?.trim()) {
+    if (!factOnly && Math.abs(devPct) > tolerancePct + 1e-9 && !raw.deviationReason?.trim()) {
       return { production, warehouse, result: { ok: false, error: SHIFT_DEVIATION_REASON } }
     }
 
     // At-line remaining check
     const atLine = computeLineMaterialBalances(warehouse, {
       productionOrderId: order.id,
+      productionWarehouseId: lineResolve.productionWarehouseId,
       productionLocationId: lineResolve.productionLocationId,
+      lineId,
       itemId: raw.itemId,
     })
     const remaining = atLine.reduce((s, r) => s + r.remainingQty, 0)
@@ -360,9 +382,13 @@ export function confirmProductionShiftReport(
     if (batchNo && !raw.batchOverrideReason?.trim()) {
       // Manual batch without reason — only allowed if FEFO would pick same
       const lots = buildBatchLotsFromMovements(
-        warehouse.movements.filter((m) => m.productionOrderId === order.id),
+        warehouse.movements.filter(
+          (m) =>
+            m.productionOrderId === order.id &&
+            movementMatchesProductionTuple(m, lineResolve),
+        ),
         raw.itemId,
-        lineResolve.productionLocationId,
+        lineResolve.productionWarehouseId,
       )
       const auto = allocateBatchesFefoFifo(lots, actualInputQty)[0]
       if (auto && auto.batchNo !== batchNo) {
@@ -373,11 +399,11 @@ export function confirmProductionShiftReport(
       const lots = buildBatchLotsFromMovements(
         warehouse.movements.filter(
           (m) =>
-            m.warehouseId === lineResolve.productionLocationId &&
+            movementMatchesProductionTuple(m, lineResolve) &&
             (m.productionOrderId === order.id || m.type === 'receipt'),
         ),
         raw.itemId,
-        lineResolve.productionLocationId,
+        lineResolve.productionWarehouseId,
       )
       // Prefer order-tagged lots via line balances
       const balRows = atLine.filter((r) => r.remainingQty > 0)
@@ -404,16 +430,27 @@ export function confirmProductionShiftReport(
       deviationQty: devQty,
       deviationPct: devPct,
       tolerancePct,
+      normSource: factOnly ? 'fact_only' : (raw.normSource ?? 'recipe'),
       deviationReason: raw.deviationReason,
       batchNo,
+      batchRunId: raw.batchRunId,
       expiryDate,
       batchOverrideReason: raw.batchOverrideReason,
     })
   }
 
+  const wasteRouting = resolveShiftWasteRouting(
+    warehouse,
+    input.report.wasteLines,
+    input.report.scrapLocationId,
+    lineResolve,
+  )
+  if (!wasteRouting.ok) {
+    return { production, warehouse, result: { ok: false, error: wasteRouting.error } }
+  }
+
   const wasteLines: ShiftWasteLine[] = []
-  for (const w of input.report.wasteLines ?? []) {
-    if (w.quantity <= 0) continue
+  for (const w of wasteRouting.wasteLines) {
     if (!w.reasonCode?.trim() && !w.comment?.trim()) {
       return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_REASON } }
     }
@@ -427,14 +464,14 @@ export function confirmProductionShiftReport(
   for (const m of materialLines) {
     const covering = wasteLines.filter((w) => w.itemId === m.itemId)
     const sum = covering.reduce((s, w) => s + w.quantity, 0)
-    if (m.wasteQty > 0) {
+    if (m.wasteQty > SHIFT_WASTE_EPSILON) {
       if (Math.abs(sum - m.wasteQty) > 1e-6) {
         return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_EXCEEDS } }
       }
       if (!covering.length || covering.some((w) => !w.reasonCode?.trim() && !w.comment?.trim())) {
         return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_REASON } }
       }
-    } else if (sum > 1e-9) {
+    } else if (sum > SHIFT_WASTE_EPSILON) {
       return { production, warehouse, result: { ok: false, error: SHIFT_WASTE_EXCEEDS } }
     }
   }
@@ -453,9 +490,11 @@ export function confirmProductionShiftReport(
     responsibleNameSnapshot: input.actor.name,
     responsibleRoleSnapshot: input.actor.roleId,
     recipeNormSnapshot: snapshot,
+    productionWarehouseId: lineResolve.productionWarehouseId,
     productionLocationId: lineResolve.productionLocationId,
+    packagingWarehouseId: packBinding.productionWarehouseId,
     packagingLocationId: packBinding.productionLocationId,
-    scrapLocationId: scrapId,
+    scrapLocationId: wasteRouting.scrapLocationId,
     materialLines,
     wasteLines,
     outputM2,
@@ -464,6 +503,10 @@ export function confirmProductionShiftReport(
     conversionTolerancePct: convTol,
     conversionDeviationReason: input.report.conversionDeviationReason,
     semiFinishedItemId: semiId,
+    semiFinishedUnitSnapshot: input.report.semiFinishedUnitSnapshot,
+    wipContractVersion: input.report.wipContractVersion,
+    impregnationQcDecisionId: input.report.impregnationQcDecisionId,
+    batchRunId: input.report.batchRunId,
     createdAt: now,
     updatedAt: now,
     confirmedAt: now,
@@ -559,6 +602,57 @@ export function confirmShiftReportCorrection(
     return { production, warehouse, result: { ok: false, error: SHIFT_IMMUTABLE } }
   }
 
+  const replay = (production.shiftReports ?? []).find(
+    (r) => r.idempotencyKey === input.idempotencyKey && r.status === 'confirmed',
+  )
+  if (replay) {
+    const sameCorrection =
+      replay.correctsReportId === original.id &&
+      replay.correctionReason === input.correctionReason.trim() &&
+      replay.productionOrderId === input.report.productionOrderId &&
+      replay.outputM2 === input.report.outputM2 &&
+      replay.rollCount === input.report.rollCount &&
+      replay.materialLines.length === input.report.materialLines.length
+    if (!sameCorrection) {
+      return {
+        production,
+        warehouse,
+        result: { ok: false, error: SHIFT_IDEMPOTENCY_CONFLICT },
+      }
+    }
+    return {
+      production,
+      warehouse,
+      result: { ok: true, idempotent: true, report: replay },
+    }
+  }
+
+  const candidateReport = {
+    ...input.report,
+    correctsReportId: original.id,
+    correctionReason: input.correctionReason.trim(),
+    scrapLocationId: input.report.scrapLocationId || original.scrapLocationId,
+    packagingLocationId: input.report.packagingLocationId || original.packagingLocationId,
+    productionLocationId: input.report.productionLocationId || original.productionLocationId,
+    semiFinishedItemId: input.report.semiFinishedItemId || original.semiFinishedItemId,
+    recipeNormSnapshot: input.report.recipeNormSnapshot || original.recipeNormSnapshot,
+  }
+  const candidateLineRoute = resolveProductionLineLocation(warehouse, candidateReport.lineId)
+  if (!candidateLineRoute.ok) {
+    return { production, warehouse, result: { ok: false, error: candidateLineRoute.error } }
+  }
+  const wasteRouting = resolveShiftWasteRouting(
+    warehouse,
+    candidateReport.wasteLines,
+    candidateReport.scrapLocationId,
+    candidateLineRoute,
+  )
+  if (!wasteRouting.ok) {
+    return { production, warehouse, result: { ok: false, error: wasteRouting.error } }
+  }
+  candidateReport.wasteLines = wasteRouting.wasteLines
+  candidateReport.scrapLocationId = wasteRouting.scrapLocationId
+
   const rev = postShiftReportCorrectionReversals(warehouse, {
     original,
     actor: input.actor,
@@ -569,17 +663,12 @@ export function confirmShiftReportCorrection(
     return { production, warehouse, result: { ok: false, error: rev.result.error } }
   }
 
-  return confirmProductionShiftReport(production, rev.store, {
+  const confirmed = confirmProductionShiftReport(production, rev.store, {
     ...input,
-    report: {
-      ...input.report,
-      correctsReportId: original.id,
-      correctionReason: input.correctionReason.trim(),
-      scrapLocationId: input.report.scrapLocationId || original.scrapLocationId,
-      packagingLocationId: input.report.packagingLocationId || original.packagingLocationId,
-      productionLocationId: input.report.productionLocationId || original.productionLocationId,
-      semiFinishedItemId: input.report.semiFinishedItemId || original.semiFinishedItemId,
-      recipeNormSnapshot: input.report.recipeNormSnapshot || original.recipeNormSnapshot,
-    },
+    report: candidateReport,
   })
+  if (!confirmed.result.ok) {
+    return { production, warehouse, result: confirmed.result }
+  }
+  return confirmed
 }

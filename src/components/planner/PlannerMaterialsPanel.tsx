@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { CreateLinkedTaskButton } from '@/components/tasks/CreateLinkedTaskButton'
 import { useI18n } from '@/context/I18nContext'
@@ -17,6 +17,10 @@ import {
   type MaterialAvailabilityRow,
 } from '@/lib/planner/materialStock'
 import type { ProductionOrder } from '@/lib/planner/types'
+import {
+  preparePlannerReservationHandoff,
+  type PlannerHandoffBlockCode,
+} from '@/lib/planner/plannerReservationHandoff'
 import { formatQty } from '@/lib/warehouse/stock'
 import type { StockMovement, WarehouseAccountingState, WarehouseDocument, WarehouseItem } from '@/lib/warehouse/types'
 import {
@@ -24,7 +28,11 @@ import {
   isLegacyBareReserveMovement,
   listReservationDocumentsForOrder,
 } from '@/lib/warehouse/productionReservations'
-import { computeLineMaterialBalances } from '@/lib/warehouse/productionMaterialHandoff'
+import {
+  computeLineMaterialBalances,
+  type HandoffResult,
+  type ProductionMaterialTransferInput,
+} from '@/lib/warehouse/productionMaterialHandoff'
 import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 
 type Props = {
@@ -37,11 +45,41 @@ type Props = {
   warehouseAccounting?: WarehouseAccountingState[]
   onReserveOrder: (orderId: string) => MaterialReserveResult
   onUnreserveOrder: (orderId: string) => boolean
+  onTransferProductionOrderMaterials?: (
+    input: ProductionMaterialTransferInput,
+  ) => Promise<HandoffResult> | HandoffResult
   onSelectOrder?: (orderId: string) => void
   onOpenWarehouseDocument?: (documentId: string) => void
   access?: AccessStore
   currentUser?: AppUser | null
   onCreateWorkTask?: (draft: WorkTaskDraft) => string
+}
+
+function handoffBlockMessage(
+  code: PlannerHandoffBlockCode,
+  lineId: string,
+  technicalDetail?: string,
+): string {
+  const detail: Record<PlannerHandoffBlockCode, string> = {
+    order_not_active: 'производственный заказ не находится в работе',
+    forbidden_role: 'нужна активная роль «Кладовщик» или системный администратор',
+    reservation_document_mismatch: 'документ не является положительным резервом этого заказа',
+    reservation_not_posted: 'документ резерва ещё не проведён',
+    reservation_not_positive: 'в документе нет положительного резерва для выдачи',
+    reservation_evidence_mismatch: 'строки документа не совпадают с его проводками резерва',
+    reservation_already_issued: 'этот документ резерва уже передан на линию',
+    reservation_partially_changed: 'остаток резерва меньше точных строк документа; нужна сверка',
+    reservation_not_remaining: 'по документу не осталось положительного резерва',
+    raw_material_not_configured: 'в заказе не выбрана точная позиция суровья',
+    raw_material_line_missing: 'в документе нет строки выбранного суровья',
+    raw_material_line_ambiguous: 'в документе несколько строк выбранного суровья; нужна сверка',
+    raw_warehouse_missing: 'исходный склад документа отсутствует в справочнике',
+    line_binding_not_unique: `для линии ${lineId} должна быть ровно одна привязка`,
+    line_binding_invalid: `привязка линии ${lineId} ссылается на отсутствующий склад или участок`,
+    warehouse_item_missing: 'одна из позиций документа отсутствует в номенклатуре',
+    unlinked_handoff_exists: 'найдена прежняя передача без ссылки на документ резерва; нужна сверка',
+  }
+  return `${detail[code]}${technicalDetail ? ` (${technicalDetail})` : ''}`
 }
 
 function StatusBadge({
@@ -99,6 +137,7 @@ export function PlannerMaterialsPanel({
   warehouseAccounting,
   onReserveOrder,
   onUnreserveOrder,
+  onTransferProductionOrderMaterials,
   onSelectOrder,
   onOpenWarehouseDocument,
   access,
@@ -108,6 +147,11 @@ export function PlannerMaterialsPanel({
   const { t, tf } = useI18n()
   const [filter, setFilter] = useState<'all' | 'shortage' | 'unreserved'>('all')
   const [notice, setNotice] = useState<string | null>(null)
+  const [pendingHandoffDocumentId, setPendingHandoffDocumentId] = useState<string | null>(null)
+  const [acknowledgedHandoffDocumentIds, setAcknowledgedHandoffDocumentIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const inFlightHandoffDocumentIds = useRef(new Set<string>())
 
   const warehouse = useMemo(
     () => ({
@@ -174,6 +218,74 @@ export function PlannerMaterialsPanel({
       setNotice(t('planner.material.unreserved'))
     } else {
       setNotice(t('planner.material.noReserve'))
+    }
+  }
+
+  async function handleMaterialHandoff(
+    order: ProductionOrder,
+    reservationDocument: WarehouseDocument,
+  ) {
+    const prepared = preparePlannerReservationHandoff({
+      order,
+      reservationDocument,
+      warehouseItems,
+      warehouseMovements,
+      warehouseDocuments,
+      warehouseLocations,
+      productionLineBindings,
+      warehouseAccounting,
+      currentUser,
+    })
+    if (!prepared.ok) {
+      setNotice(
+        `Выдача ${reservationDocument.number} заблокирована: ${handoffBlockMessage(prepared.code, order.lineId, prepared.detail)}.`,
+      )
+      return
+    }
+    if (!onTransferProductionOrderMaterials) {
+      setNotice(
+        `Выдача ${reservationDocument.number} заблокирована: authoritative-команда передачи недоступна.`,
+      )
+      return
+    }
+    if (
+      acknowledgedHandoffDocumentIds.has(reservationDocument.id) ||
+      inFlightHandoffDocumentIds.current.has(reservationDocument.id)
+    ) {
+      setNotice(`Выдача ${reservationDocument.number}: команда уже отправлена.`)
+      return
+    }
+
+    inFlightHandoffDocumentIds.current.add(reservationDocument.id)
+    setPendingHandoffDocumentId(reservationDocument.id)
+    setNotice(`Выдача ${reservationDocument.number}: ожидается authoritative-подтверждение.`)
+    try {
+      const result = await onTransferProductionOrderMaterials(prepared.input)
+      if (!result.ok) {
+        setNotice(
+          `Выдача ${reservationDocument.number} отклонена: ${result.error || 'authoritative_ack_missing'}.`,
+        )
+        return
+      }
+      setAcknowledgedHandoffDocumentIds((current) => {
+        const next = new Set(current)
+        next.add(reservationDocument.id)
+        return next
+      })
+      const effectCount = result.documentIds?.length ?? (result.documentId ? 1 : 0)
+      setNotice(
+        `Выдача ${reservationDocument.number} подтверждена${
+          result.idempotent ? ' без повторной проводки' : ''
+        }: документов ${effectCount}.`,
+      )
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unexpected_error'
+      setNotice(`Выдача ${reservationDocument.number} не выполнена: ${detail}.`)
+    } finally {
+      inFlightHandoffDocumentIds.current.delete(reservationDocument.id)
+      setPendingHandoffDocumentId((current) =>
+        current === reservationDocument.id ? null : current,
+      )
     }
   }
 
@@ -346,6 +458,7 @@ export function PlannerMaterialsPanel({
                   warehouse as import('@/lib/warehouse/types').WarehouseStore,
                   {
                     productionOrderId: order.id,
+                    productionWarehouseId: loc.productionWarehouseId,
                     productionLocationId: loc.productionLocationId,
                     lineId: order.lineId,
                   },
@@ -387,20 +500,102 @@ export function PlannerMaterialsPanel({
                 if (!docs.length && !legacy) return null
                 return (
                   <div className="border-b border-grid bg-amber-50/40 px-4 py-2 text-xs text-stone-700">
-                    <span className="font-semibold">{t('planner.material.docsTitle')}: </span>
-                    {docs.map((d) => (
-                      <button
-                        key={d.id}
-                        type="button"
-                        className="mr-2 underline hover:text-accent"
-                        onClick={() => onOpenWarehouseDocument?.(d.id)}
-                      >
-                        {d.number}
-                        {d.reservationReason ? ` (${d.reservationReason})` : ''}
-                      </button>
-                    ))}
+                    <p className="font-semibold">{t('planner.material.docsTitle')}:</p>
+                    <div className="mt-2 space-y-2">
+                      {docs.map((document) => {
+                        const prepared = preparePlannerReservationHandoff({
+                          order,
+                          reservationDocument: document,
+                          warehouseItems,
+                          warehouseMovements,
+                          warehouseDocuments,
+                          warehouseLocations,
+                          productionLineBindings,
+                          warehouseAccounting,
+                          currentUser,
+                        })
+                        const acknowledged = acknowledgedHandoffDocumentIds.has(document.id)
+                        const pending = pendingHandoffDocumentId === document.id
+                        const anotherPending =
+                          pendingHandoffDocumentId != null && !pending
+                        const unavailable = !onTransferProductionOrderMaterials
+                        const blockedDetail = !prepared.ok
+                          ? handoffBlockMessage(prepared.code, order.lineId, prepared.detail)
+                          : unavailable
+                            ? 'authoritative-команда передачи недоступна'
+                            : anotherPending
+                              ? 'ожидается подтверждение другой передачи'
+                              : null
+                        const warehouseName = warehouseLocations.find(
+                          (location) => location.id === document.warehouseId,
+                        )?.name
+                        const buttonDone =
+                          acknowledged ||
+                          (!prepared.ok && prepared.code === 'reservation_already_issued')
+                        return (
+                          <div
+                            key={document.id}
+                            className="rounded-sm border border-amber-200 bg-white/80 px-3 py-2"
+                            data-testid={`planner-reservation-handoff-${document.id}`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <button
+                                  type="button"
+                                  className="font-semibold underline hover:text-accent"
+                                  onClick={() => onOpenWarehouseDocument?.(document.id)}
+                                >
+                                  {document.number}
+                                  {document.reservationReason
+                                    ? ` (${document.reservationReason})`
+                                    : ''}
+                                </button>
+                                <span className="ml-2 text-stone-500">
+                                  склад: {warehouseName ?? 'не найден'} · строк:{' '}
+                                  {document.lines.filter((line) => line.quantity > 0).length}
+                                  {prepared.ok ? ` · к выдаче: ${formatQty(prepared.quantity)}` : ''}
+                                </span>
+                              </div>
+                              <Button
+                                variant={buttonDone ? 'success' : 'secondary'}
+                                size="sm"
+                                data-testid={`planner-handoff-submit-${document.id}`}
+                                data-command-type="production.material.issueToLine"
+                                data-reservation-document-id={document.id}
+                                disabled={
+                                  !prepared.ok ||
+                                  unavailable ||
+                                  pendingHandoffDocumentId != null ||
+                                  acknowledged
+                                }
+                                onClick={() => void handleMaterialHandoff(order, document)}
+                              >
+                                {pending
+                                  ? 'Передаётся…'
+                                  : buttonDone
+                                    ? 'Передано на линию'
+                                    : 'Передать на линию'}
+                              </Button>
+                            </div>
+                            {blockedDetail ? (
+                              <p
+                                className="mt-1 text-[11px] text-amber-900"
+                                data-testid={`planner-handoff-block-${document.id}`}
+                              >
+                                Выдача заблокирована: {blockedDetail}.
+                              </p>
+                            ) : prepared.ok ? (
+                              <p className="mt-1 text-[11px] text-stone-500">
+                                Линия {order.lineId} · передаётся только выбранное суровьё; коробки и
+                                палеты остаются в резерве упаковки.
+                              </p>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
                     {legacy ? (
-                      <span className="text-amber-800">{t('planner.material.legacyBare')}</span>
+                      <p className="mt-2 text-amber-800">{t('planner.material.legacyBare')}</p>
                     ) : null}
                   </div>
                 )

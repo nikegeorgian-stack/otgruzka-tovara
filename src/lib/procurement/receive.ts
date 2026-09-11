@@ -16,6 +16,117 @@ export type ReceiveOrderOpts = {
   date?: string
   /** lineId → qty к приёмке (не больше остатка). Без карты — всё оставшееся. */
   lineQtys?: Record<string, number>
+  locationIdByLine?: Record<string, string>
+  batchNoByLine?: Record<string, string>
+  expiryDateByLine?: Record<string, string>
+}
+
+export type AuthoritativePurchaseOrderReceiptPlan =
+  | {
+      ok: true
+      purchaseOrderId: string
+      warehouseId: string
+      date: string
+      lines: Array<{
+        lineId: string
+        itemId: string
+        quantity: number
+        unit: string
+        locationId?: string
+        batchNo?: string
+        expiryDate?: string
+        expectedReceivedQty: number
+      }>
+    }
+  | { ok: false; error: string }
+
+/**
+ * Build the strict G5 receipt command without inventing a destination or a
+ * catalogue identity. Unlike the legacy local helper, this function is pure
+ * and never auto-creates warehouse items.
+ */
+export function buildAuthoritativePurchaseOrderReceiptPlan(
+  app: AppStore,
+  orderId: string,
+  opts: ReceiveOrderOpts = {},
+): AuthoritativePurchaseOrderReceiptPlan {
+  const order = app.procurement?.orders.find((row) => row.id === orderId)
+  if (!order) return { ok: false, error: 'procurement.receive.errNotFound' }
+  if (order.status === 'cancelled') {
+    return { ok: false, error: 'procurement.receive.errCancelled' }
+  }
+  if (!['approved', 'ordered', 'partial', 'partially_received'].includes(String(order.status))) {
+    return { ok: false, error: 'procurement.receive.errDraft' }
+  }
+  const date = String(opts.date ?? new Date().toISOString().slice(0, 10)).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { ok: false, error: 'procurement.receive.errDate' }
+  }
+  const warehouseId = String(order.destinationWarehouseId ?? '').trim()
+  const destinationExists =
+    warehouseId &&
+    (app.warehouse.locations.some((location) => location.id === warehouseId) ||
+      (app.warehouse.accountingByWarehouse ?? []).some(
+        (row) =>
+          (row.warehouseId === warehouseId || row.id === warehouseId) &&
+          row.status === 'active',
+      ))
+  if (!destinationExists) {
+    return { ok: false, error: 'procurement.receive.errNoWarehouse' }
+  }
+
+  const ids = order.lines.map((line) => line.id)
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    return { ok: false, error: 'procurement.receive.errInvalidLines' }
+  }
+  const lines: Extract<AuthoritativePurchaseOrderReceiptPlan, { ok: true }>['lines'] = []
+  for (const line of order.lines) {
+    const requested = Number(line.quantity)
+    const received = Number(line.receivedQty)
+    if (
+      !Number.isFinite(requested) ||
+      requested <= 0 ||
+      !Number.isFinite(received) ||
+      received < 0 ||
+      received > requested + 1e-9
+    ) {
+      return { ok: false, error: 'procurement.receive.errInvalidLines' }
+    }
+    const remaining = Math.max(0, requested - received)
+    if (remaining <= 1e-9) continue
+    const hasExplicitQty = opts.lineQtys != null && Object.hasOwn(opts.lineQtys, line.id)
+    const quantity = hasExplicitQty ? Number(opts.lineQtys?.[line.id]) : remaining
+    if (opts.lineQtys != null && !hasExplicitQty) continue
+    if (!Number.isFinite(quantity) || quantity <= 0 || quantity > remaining + 1e-9) {
+      return { ok: false, error: 'procurement.receive.errOverRemain' }
+    }
+    const itemId = String(line.warehouseItemId ?? '').trim()
+    const item = app.warehouse.items.find((row) => row.id === itemId && row.active !== false)
+    if (!item || !itemId || !line.unit || item.unit !== line.unit) {
+      return { ok: false, error: 'procurement.receive.errCatalogueItemRequired' }
+    }
+    const locationId = String(opts.locationIdByLine?.[line.id] ?? '').trim()
+    if (locationId && !app.warehouse.locations.some((location) => location.id === locationId)) {
+      return { ok: false, error: 'procurement.receive.errNoWarehouse' }
+    }
+    const batchNo = String(opts.batchNoByLine?.[line.id] ?? '').trim()
+    const expiryDate = String(opts.expiryDateByLine?.[line.id] ?? '').trim().slice(0, 10)
+    if (expiryDate && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
+      return { ok: false, error: 'procurement.receive.errDate' }
+    }
+    lines.push({
+      lineId: line.id,
+      itemId,
+      quantity,
+      unit: line.unit,
+      ...(locationId ? { locationId } : {}),
+      ...(batchNo ? { batchNo } : {}),
+      ...(expiryDate ? { expiryDate } : {}),
+      expectedReceivedQty: received + quantity,
+    })
+  }
+  if (lines.length === 0) return { ok: false, error: 'procurement.receive.errNothing' }
+  return { ok: true, purchaseOrderId: order.id, warehouseId, date, lines }
 }
 
 /**

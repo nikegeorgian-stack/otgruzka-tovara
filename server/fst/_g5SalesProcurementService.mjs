@@ -16,6 +16,7 @@
  * via shared _g5PackagingBomHelpers.mjs (never client-forged BOM objects).
  */
 import { FST_ADMIN_EMAILS } from './_adminAuth.mjs'
+import { createHash } from 'node:crypto'
 import {
   bomComponentList,
   bomIsApprovedEffective,
@@ -62,6 +63,11 @@ import {
   stableDomainHash,
 } from './_g1CriticalHelpers.mjs'
 import { G5_CAPS, defaultG5Capabilities } from './_g5Capabilities.mjs'
+import { isStagingIsolatedRuntime } from './_dataConnectRuntime.mjs'
+import {
+  canonicalG5ShipmentCancel,
+  canonicalG5ShipmentPost,
+} from '../../src/lib/warehouse/g5ShipmentIntegrityCore.mjs'
 
 const EPS = 1e-9
 const OPEN_SALES = new Set([
@@ -121,6 +127,7 @@ const CAP_BY_COMMAND = Object.freeze({
   'planning.productionRecommendation.createManual': G5_CAPS.PLANNING_MANUAL_PRODUCTION,
 
   'procurement.generateDraftsFromMrp': G5_CAPS.PROCUREMENT_DRAFT_EDIT,
+  'procurement.draft.create': G5_CAPS.PROCUREMENT_DRAFT_EDIT,
   'procurement.draft.edit': G5_CAPS.PROCUREMENT_DRAFT_EDIT,
   'procurement.order.change': G5_CAPS.PROCUREMENT_ORDER_APPROVE,
   'procurement.order.submit': G5_CAPS.PROCUREMENT_ORDER_SUBMIT,
@@ -170,10 +177,15 @@ function contentHash(value) {
 
 /** Deterministic JSON for fingerprints (sorted object keys). */
 function stableJson(value) {
+  if (value === undefined) return 'undefined'
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map((v) => stableJson(v)).join(',')}]`
-  const keys = Object.keys(value).sort()
+  const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort()
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(',')}}`
+}
+
+function sha256Stable(value) {
+  return createHash('sha256').update(stableJson(value)).digest('hex')
 }
 
 function markPlanningRunsStaleForBom(planning, finishedProductId, nextRef) {
@@ -322,11 +334,12 @@ export async function requirePrincipal(uid, storeId, capKey, { actor, emergencyR
 // Critical store + CAS
 // ---------------------------------------------------------------------------
 
-async function loadCritical(storeId, actorUid) {
+async function loadCritical(storeId, actorUid, { allowInitialize = false } = {}) {
   const dc = getG1DataConnect()
   const { data } = await getFstCriticalStore(dc, { id: storeId })
   const row = data?.fstCriticalStore
   if (!row) {
+    if (!allowInitialize) return fail('critical_store_missing', 409)
     const payload = emptyCriticalPayload()
     const json = serializeCriticalPayload(payload)
     await upsertFstCriticalStore(dc, {
@@ -350,7 +363,11 @@ async function loadReceipt(dc, idempotencyKey, storeId) {
   if (!row) return null
   if (row.storeId !== storeId) return { conflict: true }
   try {
-    return { result: JSON.parse(row.resultJson), criticalRevision: row.criticalRevisionAfter }
+    return {
+      commandType: str(row.commandType),
+      result: JSON.parse(row.resultJson),
+      criticalRevision: row.criticalRevisionAfter,
+    }
   } catch {
     return { corrupt: true }
   }
@@ -360,9 +377,196 @@ function embeddedReceipt(payload, idempotencyKey) {
   const row = payload?.commandReceipts?.[idempotencyKey]
   if (!row?.result) return null
   return {
+    commandType: str(row.commandType),
     result: row.result,
     criticalRevision: row.criticalRevisionAfter,
     embedded: true,
+  }
+}
+
+const G5_REPLAY_GUARD_VERSION = 'g5-replay-guard-v1'
+const G5_REPLAY_DOMAINS = Object.freeze([
+  'masterData',
+  'sales',
+  'planning',
+  'procurement',
+  'warehouse',
+  'production',
+])
+
+function compactReceiptResult(result) {
+  if (!result || typeof result !== 'object') return result
+  const {
+    masterData: _masterData,
+    sales: _sales,
+    planning: _planning,
+    procurement: _procurement,
+    warehouse: _warehouse,
+    production: _production,
+    ...compact
+  } = result
+  return compact
+}
+
+function collectionRowsById(value) {
+  if (!Array.isArray(value)) return null
+  const rows = value.filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+  if (rows.length !== value.length) return null
+  const ids = rows.map((row) => str(row.id))
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) return null
+  return new Map(rows.map((row, index) => [ids[index], row]))
+}
+
+function buildG5ReplayGuard(beforeDomains, afterDomains) {
+  const entries = []
+  for (const domain of G5_REPLAY_DOMAINS) {
+    const before = beforeDomains?.[domain] ?? {}
+    const after = afterDomains?.[domain] ?? {}
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)])
+    keys.delete('auditLog')
+    for (const key of [...keys].sort()) {
+      if (stableJson(before?.[key]) === stableJson(after?.[key])) continue
+      const beforeRows = collectionRowsById(before?.[key])
+      const afterRows = collectionRowsById(after?.[key])
+      if (beforeRows && afterRows) {
+        const ids = new Set([...beforeRows.keys(), ...afterRows.keys()])
+        for (const id of [...ids].sort()) {
+          const beforeRow = beforeRows.get(id)
+          const afterRow = afterRows.get(id)
+          if (stableJson(beforeRow) === stableJson(afterRow)) continue
+          entries.push({
+            kind: 'row',
+            domain,
+            key,
+            id,
+            present: afterRow !== undefined,
+            hash: afterRow === undefined ? null : sha256Stable(afterRow),
+          })
+        }
+      } else {
+        entries.push({
+          kind: 'field',
+          domain,
+          key,
+          hash: sha256Stable(after?.[key]),
+        })
+      }
+    }
+  }
+  return { version: G5_REPLAY_GUARD_VERSION, entries }
+}
+
+function appendG5ReplayDependencies(guard, dependencies) {
+  if (!Array.isArray(dependencies) || dependencies.length === 0) return guard
+  const entries = [...guard.entries]
+  const seen = new Set(entries.map((entry) => stableJson(entry)))
+  for (const dependency of dependencies) {
+    const encoded = stableJson(dependency)
+    if (seen.has(encoded)) continue
+    seen.add(encoded)
+    entries.push(dependency)
+  }
+  return { ...guard, entries }
+}
+
+function activationReplayGuard(domain) {
+  return {
+    version: G5_REPLAY_GUARD_VERSION,
+    entries: [{ kind: 'activation', domain }],
+  }
+}
+
+function validateG5ReplayGuard(payload, guard) {
+  if (
+    guard?.version !== G5_REPLAY_GUARD_VERSION ||
+    !Array.isArray(guard.entries) ||
+    guard.entries.length === 0
+  ) {
+    return false
+  }
+  for (const entry of guard.entries) {
+    if (entry?.kind === 'activation') {
+      const active =
+        entry.domain === 'masterData'
+          ? isMasterDataDomainActive(payload)
+          : entry.domain === 'salesPlanning'
+            ? isSalesPlanningActive(payload)
+            : entry.domain === 'procurement'
+              ? isProcurementDomainActive(payload)
+              : false
+      if (!active) return false
+      continue
+    }
+    if (
+      !entry ||
+      !G5_REPLAY_DOMAINS.includes(entry.domain) ||
+      !str(entry.key) ||
+      str(entry.key) === 'auditLog'
+    ) {
+      return false
+    }
+    const domain = payload?.domains?.[entry.domain] ?? {}
+    if (entry.kind === 'salesProductionLink') {
+      if (entry.domain !== 'production' || entry.key !== 'orders') return false
+      const rows = collectionRowsById(domain.orders)
+      const order = rows?.get(str(entry.id))
+      if (
+        !order ||
+        Number(order.wipContractVersion) !== 1 ||
+        str(order.finishedProductId) !== str(entry.finishedProductId) ||
+        (str(order.salesOrderId) && str(order.salesOrderId) !== str(entry.salesOrderId)) ||
+        (str(order.salesLineId) && str(order.salesLineId) !== str(entry.salesLineId))
+      ) {
+        return false
+      }
+      continue
+    }
+    if (entry.kind === 'row') {
+      const rows = collectionRowsById(domain?.[entry.key])
+      if (!rows || !str(entry.id)) return false
+      const matches = rows.has(str(entry.id)) ? [rows.get(str(entry.id))] : []
+      if (entry.present !== true) {
+        if (matches.length !== 0 || entry.hash !== null) return false
+        continue
+      }
+      if (
+        matches.length !== 1 ||
+        !/^[a-f0-9]{64}$/.test(str(entry.hash)) ||
+        sha256Stable(matches[0]) !== entry.hash
+      ) {
+        return false
+      }
+      continue
+    }
+    if (
+      entry.kind !== 'field' ||
+      !/^[a-f0-9]{64}$/.test(str(entry.hash)) ||
+      sha256Stable(domain?.[entry.key]) !== entry.hash
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function currentG5ReplayProjection(receiptResult, critical, commandFingerprint, recovered) {
+  const current = critical.payload.domains
+  return {
+    ...compactReceiptResult(receiptResult),
+    commandFingerprint,
+    criticalRevision: critical.revision,
+    masterDataActive: isMasterDataDomainActive(critical.payload),
+    salesPlanningActive: isSalesPlanningActive(critical.payload),
+    procurementActive: isProcurementDomainActive(critical.payload),
+    packagingQcActive: isPackagingQcFeatureActive(critical.payload),
+    productionActive: isProductionDomainActive(critical.payload, critical.revision),
+    warehouseActive: isWarehouseDomainActive(critical.payload, critical.revision),
+    masterData: current.masterData,
+    sales: current.sales,
+    planning: current.planning,
+    procurement: current.procurement,
+    idempotent: true,
+    ...(recovered ? { recoveredFromEmbeddedReceipt: true } : {}),
   }
 }
 
@@ -373,7 +577,7 @@ async function saveReceipt(dc, idempotencyKey, storeId, commandType, actorUid, r
       storeId,
       commandType,
       actorUid,
-      resultJson: JSON.stringify(result),
+      resultJson: JSON.stringify(compactReceiptResult(result)),
       criticalRevisionAfter: criticalRevision,
     })
   } catch (err) {
@@ -452,7 +656,7 @@ async function casCommitG5(
           actorUid,
           at: new Date().toISOString(),
           criticalRevisionAfter: nextRevision,
-          result: { ...result, criticalRevision: nextRevision },
+          result: compactReceiptResult({ ...result, criticalRevision: nextRevision }),
         },
       },
     }
@@ -501,6 +705,23 @@ function codeTaken(list, code, exceptId) {
   return (list ?? []).some((x) => x.id !== exceptId && str(x.code).toLowerCase() === c)
 }
 
+function nextWarehouseItemCode(items) {
+  let max = 0
+  const used = new Set()
+  for (const item of items ?? []) {
+    const code = str(item?.code).toUpperCase()
+    if (!code) continue
+    used.add(code)
+    const match = code.match(/^FC-(\d{6})$/)
+    if (match) max = Math.max(max, Number(match[1]) || 0)
+  }
+  for (let n = max + 1; n <= max + (items?.length ?? 0) + 10_000; n += 1) {
+    const candidate = `FC-${String(n).padStart(6, '0')}`
+    if (!used.has(candidate)) return candidate
+  }
+  return ''
+}
+
 function upsertById(list, entity) {
   const idx = (list ?? []).findIndex((x) => x.id === entity.id)
   if (idx < 0) return [...(list ?? []), entity]
@@ -525,23 +746,55 @@ function archiveById(list, id, now, actorUid) {
   return { ok: true, list: upsertById(list, entity), entity }
 }
 
-function applyItemUpsert(masterData, command, actor, now) {
+export function applyItemUpsert(
+  masterData,
+  command,
+  actor,
+  now,
+  { strict = false, warehouse = undefined } = {},
+) {
   const id = str(command.id) || `item-${crypto.randomUUID()}`
-  const code = str(command.code)
+  const existing = findById(masterData.items, id)
+  const code = str(command.code) || str(existing?.code) || nextWarehouseItemCode(masterData.items)
   const name = str(command.name)
   const baseUnit = str(command.baseUnit)
   if (!code || !name || !baseUnit) return fail('invalid_input', 400)
   if (codeTaken(masterData.items, code, id)) return fail('duplicate_code', 409)
-  const existing = findById(masterData.items, id)
   if (existing && existing.archived === true && command.unarchive !== true) {
     return fail('archived', 409)
+  }
+  const categoryId =
+    command.categoryId != null ? str(command.categoryId) : str(existing?.categoryId)
+  const warehouseId =
+    command.warehouseId != null ? str(command.warehouseId) : str(existing?.warehouseId)
+  if (strict) {
+    if (command.active === false) return fail('masterdata_item_active_required', 409)
+    if (!categoryId) return fail('masterdata_item_category_required', 409)
+    if (!warehouseId) return fail('masterdata_item_warehouse_required', 409)
+    const categoryMatches = (warehouse?.categories ?? []).filter(
+      (row) => str(row?.id) === categoryId,
+    )
+    if (categoryMatches.length === 0) return fail('masterdata_item_category_unavailable', 409)
+    if (categoryMatches.length !== 1) return fail('masterdata_item_category_ambiguous', 409)
+    if (categoryMatches[0].archived === true || categoryMatches[0].active === false) {
+      return fail('masterdata_item_category_unavailable', 409)
+    }
+    const warehouseMatches = (warehouse?.locations ?? []).filter(
+      (row) => str(row?.id) === warehouseId,
+    )
+    if (warehouseMatches.length === 0) return fail('masterdata_item_warehouse_unavailable', 409)
+    if (warehouseMatches.length !== 1) return fail('masterdata_item_warehouse_ambiguous', 409)
+    if (warehouseMatches[0].archived === true || warehouseMatches[0].active === false) {
+      return fail('masterdata_item_warehouse_unavailable', 409)
+    }
   }
   const item = {
     ...(existing ?? {}),
     id,
     code,
     name,
-    categoryId: command.categoryId != null ? str(command.categoryId) || undefined : existing?.categoryId,
+    categoryId: categoryId || undefined,
+    warehouseId: warehouseId || undefined,
     baseUnit,
     conversions: Array.isArray(command.conversions) ? command.conversions : existing?.conversions,
     batchTracking: command.batchTracking ?? existing?.batchTracking,
@@ -566,16 +819,39 @@ function applyItemUpsert(masterData, command, actor, now) {
   }
   let next = { ...masterData, items: upsertById(masterData.items, item) }
   next = appendAudit(next, auditEntry('masterdata_item_upsert', actor, now, id))
-  return ok({ masterData: next, result: { id, code } })
+  return ok({ masterData: next, result: { id, code, item } })
 }
 
-function applyProductUpsert(masterData, command, actor, now) {
+function isAreaWarehouseUnit(unit) {
+  return new Set(['m2', 'м2', 'м²', 'sqm']).has(str(unit).toLowerCase())
+}
+
+function applyProductUpsert(masterData, command, actor, now, { strict = false } = {}) {
   const id = str(command.id) || `fp-${crypto.randomUUID()}`
   const code = str(command.code)
   const name = str(command.name)
   if (!code || !name) return fail('invalid_input', 400)
   if (codeTaken(masterData.finishedProducts, code, id)) return fail('duplicate_code', 409)
   const existing = findById(masterData.finishedProducts, id)
+  const warehouseItemId =
+    command.warehouseItemId != null
+      ? str(command.warehouseItemId) || undefined
+      : existing?.warehouseItemId
+  if (strict && !warehouseItemId) return fail('finished_goods_mapping_required', 409)
+  if (warehouseItemId) {
+    const itemMatches = (masterData.items ?? []).filter(
+      (row) => str(row?.id) === warehouseItemId,
+    )
+    if (itemMatches.length === 0) return fail('finished_goods_item_unavailable', 409)
+    if (itemMatches.length !== 1) return fail('finished_goods_item_ambiguous', 409)
+    const item = itemMatches[0]
+    if (item.archived === true || item.active === false) {
+      return fail('finished_goods_item_unavailable', 409)
+    }
+    if (!isAreaWarehouseUnit(item.baseUnit ?? item.unit)) {
+      return fail('finished_goods_item_area_unit_required', 409)
+    }
+  }
   const validProductionLineIds = Array.isArray(command.validProductionLineIds)
     ? command.validProductionLineIds.map(str).filter(Boolean)
     : existing?.validProductionLineIds
@@ -592,6 +868,7 @@ function applyProductUpsert(masterData, command, actor, now) {
     code,
     name,
     baseUnit: 'm2',
+    warehouseItemId,
     validProductionLineIds,
     validPackagingLineIds,
     validLineIds,
@@ -614,7 +891,7 @@ function applyProductUpsert(masterData, command, actor, now) {
   }
   let next = { ...masterData, finishedProducts: upsertById(masterData.finishedProducts, product) }
   next = appendAudit(next, auditEntry('masterdata_product_upsert', actor, now, id))
-  return ok({ masterData: next, result: { id, code } })
+  return ok({ masterData: next, result: { id, code, warehouseItemId } })
 }
 
 function applyCustomerUpsert(masterData, command, actor, now) {
@@ -937,8 +1214,93 @@ function applyMasterArchive(masterData, kind, command, actor, now) {
 // Sales
 // ---------------------------------------------------------------------------
 
-function normalizeDraftLines(lines, masterData) {
+const SALES_ORDER_CONTRACT_VERSION = 'g5-sales-order-v1'
+const SALES_ORDER_NUMBER_RE = /^ЗК-(\d{4})-(\d{3,})$/
+const SALES_PRIORITY = new Set([1, 10])
+
+function validIsoDate(value) {
+  const raw = str(value)
+  if (!DATE_RE.test(raw)) return false
+  const [year, month, day] = raw.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
+function nextSalesOrderNumber(orders, orderDate) {
+  const year = Number(str(orderDate).slice(0, 4))
+  let max = 0
+  for (const order of orders ?? []) {
+    const match = str(order?.orderNumber).match(SALES_ORDER_NUMBER_RE)
+    if (!match || Number(match[1]) !== year) continue
+    max = Math.max(max, Number(match[2]) || 0)
+  }
+  return `ЗК-${year}-${String(max + 1).padStart(3, '0')}`
+}
+
+function normalizeSalesPriority(value, fallback = 1) {
+  if (value == null || value === '') return SALES_PRIORITY.has(Number(fallback)) ? Number(fallback) : 1
+  const priority = num(value)
+  return SALES_PRIORITY.has(priority) ? priority : null
+}
+
+function validateSalesProductionLinks(value, production, expected) {
+  if (value == null) return { ok: true, ids: [] }
+  if (!Array.isArray(value)) return { ok: false, error: 'invalid_production_links', status: 400 }
+  const ids = value.map(str)
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    return { ok: false, error: 'invalid_production_links', status: 400 }
+  }
+  for (const id of ids) {
+    const matches = (production?.orders ?? []).filter((order) => str(order?.id) === id)
+    if (matches.length === 0) {
+      return { ok: false, error: 'production_order_not_found', status: 404 }
+    }
+    if (matches.length !== 1) {
+      return { ok: false, error: 'production_order_link_ambiguous', status: 409 }
+    }
+    const order = matches[0]
+    if (
+      Number(order.wipContractVersion) !== 1 ||
+      str(order.finishedProductId) !== str(expected.finishedProductId)
+    ) {
+      return { ok: false, error: 'production_order_lineage_mismatch', status: 409 }
+    }
+    if (
+      (str(order.salesOrderId) && str(order.salesOrderId) !== str(expected.salesOrderId)) ||
+      (str(order.salesLineId) && str(order.salesLineId) !== str(expected.salesLineId))
+    ) {
+      return { ok: false, error: 'production_order_sales_link_mismatch', status: 409 }
+    }
+  }
+  return { ok: true, ids }
+}
+
+function salesProductionReplayDependencies(lines, salesOrderId) {
+  return (lines ?? []).flatMap((line) =>
+    (line.linkedProductionOrderIds ?? []).map((id) => ({
+      kind: 'salesProductionLink',
+      domain: 'production',
+      key: 'orders',
+      id,
+      finishedProductId: line.finishedProductId,
+      salesOrderId,
+      salesLineId: line.lineId,
+    })),
+  )
+}
+
+function normalizeDraftLines(lines, masterData, production, existing, salesOrderId) {
   if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'empty_lines' }
+  const suppliedIds = lines.map((line) => str(line?.lineId)).filter(Boolean)
+  if (new Set(suppliedIds).size !== suppliedIds.length) {
+    return { ok: false, error: 'duplicate_line_id' }
+  }
+  const existingById = new Map((existing?.lines ?? []).map((line) => [str(line.lineId), line]))
+  const assignedIds = new Set()
   const out = []
   for (const ln of lines) {
     const finishedProductId = str(ln.finishedProductId)
@@ -949,47 +1311,99 @@ function normalizeDraftLines(lines, masterData) {
       return { ok: false, error: 'product_not_found' }
     }
     if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, error: 'invalid_quantity' }
-    out.push({
-      lineId: str(ln.lineId) || `sol-${crypto.randomUUID()}`,
+    const roundedQuantity = roundQty(quantity)
+    if (!finitePositive(roundedQuantity)) return { ok: false, error: 'invalid_quantity' }
+    const canonicalUnit = str(product.baseUnit) || 'm2'
+    const requestedUnit = str(ln.unit)
+    if (requestedUnit && requestedUnit !== canonicalUnit) {
+      return { ok: false, error: 'unit_mismatch' }
+    }
+    const requestedShipDate = ln.requestedShipDate != null ? str(ln.requestedShipDate) : ''
+    if (requestedShipDate && !validIsoDate(requestedShipDate)) {
+      return { ok: false, error: 'invalid_date' }
+    }
+    const linePriority = normalizeSalesPriority(ln.priority, undefined)
+    if (ln.priority != null && linePriority == null) {
+      return { ok: false, error: 'invalid_priority' }
+    }
+    const suppliedId = str(ln.lineId)
+    const previous = suppliedId ? existingById.get(suppliedId) : null
+    // Only an already-authoritative line id may be reused on edit. New ids are
+    // allocated by the server; a browser-provided id is correlation input only.
+    const lineId = previous ? suppliedId : `sol-${crypto.randomUUID()}`
+    if (assignedIds.has(lineId)) return { ok: false, error: 'duplicate_line_id' }
+    assignedIds.add(lineId)
+    const linked = validateSalesProductionLinks(ln.linkedProductionOrderIds, production, {
       finishedProductId,
-      productCodeSnapshot: undefined,
-      productNameSnapshot: undefined,
-      unit: str(ln.unit) || product.baseUnit || 'm2',
-      quantity: roundQty(quantity),
-      requestedShipDate: ln.requestedShipDate != null ? str(ln.requestedShipDate).slice(0, 10) : undefined,
-      priority: ln.priority != null ? num(ln.priority) : undefined,
-      linkedProductionOrderIds: Array.isArray(ln.linkedProductionOrderIds)
-        ? ln.linkedProductionOrderIds.map(str).filter(Boolean)
-        : [],
-      producedQty: roundQty(num(ln.producedQty) || 0),
-      releasedQty: roundQty(num(ln.releasedQty) || 0),
-      shippedQty: roundQty(num(ln.shippedQty) || 0),
-      remainingQty: roundQty(quantity),
+      salesOrderId,
+      salesLineId: lineId,
+    })
+    if (!linked.ok) return linked
+    out.push({
+      lineId,
+      finishedProductId,
+      productCodeSnapshot: str(product.code),
+      productNameSnapshot: str(product.name),
+      unit: canonicalUnit,
+      quantity: roundedQuantity,
+      requestedShipDate: requestedShipDate || undefined,
+      priority: linePriority ?? undefined,
+      // Linkage is accepted only after the server validation above. Progress is
+      // always initialized by the server and never copied from the draft form.
+      linkedProductionOrderIds: linked.ids,
+      producedQty: 0,
+      releasedQty: 0,
+      shippedQty: 0,
+      remainingQty: roundedQuantity,
     })
   }
   return { ok: true, lines: out }
 }
 
-function applySalesDraftSave(sales, masterData, command, actor, now) {
+function applySalesDraftSave(sales, masterData, production, command, actor, now) {
   const id = str(command.id) || `so-${crypto.randomUUID()}`
   const existing = findById(sales.orders, id)
   if (existing && existing.status !== 'draft') return fail('not_draft', 409)
   const customerId = str(command.customerId)
   if (!customerId) return fail('customer_required', 400)
   const customer = findById(masterData.customers, customerId)
-  if (!customer || customer.archived === true) return fail('customer_not_found', 404)
-  const linesIn = normalizeDraftLines(command.lines, masterData)
-  if (!linesIn.ok) return fail(linesIn.error, 400)
+  if (!customer || customer.archived === true || customer.active === false) {
+    return fail('customer_not_found', 404)
+  }
+  const linesIn = normalizeDraftLines(command.lines, masterData, production, existing, id)
+  if (!linesIn.ok) return fail(linesIn.error, linesIn.status ?? 400)
+  const explicitOrderDate = str(command.orderDate)
+  if (explicitOrderDate && !validIsoDate(explicitOrderDate)) return fail('invalid_date', 400)
+  const shipDates = [...new Set(linesIn.lines.map((line) => str(line.requestedShipDate)).filter(Boolean))]
+  const orderDate = explicitOrderDate || (shipDates.length === 1 ? shipDates[0] : now.slice(0, 10))
+  if (!validIsoDate(orderDate)) return fail('invalid_date', 400)
+  const priority = normalizeSalesPriority(command.priority, existing?.priority)
+  if (priority == null) return fail('invalid_priority', 400)
+  const existingOrderNumber = str(existing?.orderNumber)
+  if (existingOrderNumber && !SALES_ORDER_NUMBER_RE.test(existingOrderNumber)) {
+    return fail('sales_order_number_invalid', 409)
+  }
+  const orderNumber = existingOrderNumber || nextSalesOrderNumber(sales.orders, orderDate)
+  if (
+    (sales.orders ?? []).some(
+      (candidate) => candidate.id !== id && str(candidate.orderNumber) === orderNumber,
+    )
+  ) {
+    return fail('duplicate_order_number', 409)
+  }
 
   const order = {
     ...(existing ?? {}),
+    salesOrderContractVersion: SALES_ORDER_CONTRACT_VERSION,
     id,
+    orderNumber,
     status: 'draft',
     customerId,
-    customerCodeSnapshot: undefined,
-    customerNameSnapshot: undefined,
-    priority: command.priority != null ? num(command.priority) : existing?.priority,
-    revision: existing?.revision ?? 0,
+    customerCodeSnapshot: str(customer.code),
+    customerNameSnapshot: str(customer.name),
+    priority,
+    orderDate,
+    revision: existing ? (Number(existing.revision) || 0) + 1 : 0,
     lines: linesIn.lines,
     updatedAt: now,
     updatedBy: actor.uid,
@@ -998,7 +1412,17 @@ function applySalesDraftSave(sales, masterData, command, actor, now) {
   }
   let next = { ...sales, orders: upsertById(sales.orders, order) }
   next = appendAudit(next, auditEntry('sales_order_draft_save', actor, now, id))
-  return ok({ sales: next, result: { id, status: 'draft' } })
+  return ok({
+    sales: next,
+    replayDependencies: salesProductionReplayDependencies(order.lines, id),
+    result: {
+      id,
+      orderNumber,
+      status: 'draft',
+      revision: order.revision,
+      order,
+    },
+  })
 }
 
 function applySalesDraftDelete(sales, command, actor, now) {
@@ -1038,7 +1462,7 @@ function supersedeOpenRecommendations(planning, salesOrderId, now) {
   return { ...planning, productionRecommendations: list }
 }
 
-function applySalesConfirm(sales, masterData, planning, command, actor, now) {
+function applySalesConfirm(sales, masterData, planning, production, command, actor, now) {
   const id = str(command.id)
   if (!id) return fail('invalid_input', 400)
   const existing = findById(sales.orders, id)
@@ -1046,31 +1470,95 @@ function applySalesConfirm(sales, masterData, planning, command, actor, now) {
   if (existing.status === 'confirmed' || OPEN_SALES.has(existing.status)) {
     // Idempotent confirm
     if (existing.status !== 'draft' && existing.status !== 'cancelled') {
+      for (const line of existing.lines ?? []) {
+        const linked = validateSalesProductionLinks(
+          line.linkedProductionOrderIds,
+          production,
+          {
+            finishedProductId: line.finishedProductId,
+            salesOrderId: id,
+            salesLineId: line.lineId,
+          },
+        )
+        if (!linked.ok) return fail(linked.error, linked.status ?? 409)
+      }
       return ok({
         sales,
         planning,
-        result: { id, status: existing.status, idempotent: true },
+        result: {
+          id,
+          orderNumber: existing.orderNumber,
+          status: existing.status,
+          revision: existing.revision,
+          order: existing,
+          idempotent: true,
+        },
       })
     }
   }
   if (existing.status !== 'draft') return fail('not_draft', 409)
 
   const customer = findById(masterData.customers, existing.customerId)
-  if (!customer || customer.archived === true) return fail('customer_not_found', 404)
+  if (!customer || customer.archived === true || customer.active === false) {
+    return fail('customer_not_found', 404)
+  }
+
+  // Resolve referential targets before reporting a structural legacy-row error.
+  // This keeps a planted/corrupt draft's first actionable blocker deterministic.
+  for (const ln of existing.lines ?? []) {
+    const product = findById(masterData.finishedProducts, ln.finishedProductId)
+    if (!product || product.archived === true || product.active === false) {
+      return fail('product_not_found', 404)
+    }
+  }
+  if (
+    !SALES_ORDER_NUMBER_RE.test(str(existing.orderNumber)) ||
+    !validIsoDate(existing.orderDate) ||
+    normalizeSalesPriority(existing.priority, undefined) == null ||
+    !hasUniqueNonEmptyIds(existing.lines ?? [], (line) => line?.lineId)
+  ) {
+    return fail('sales_order_schema_mismatch', 409)
+  }
+  if (
+    (sales.orders ?? []).some(
+      (candidate) =>
+        candidate.id !== id && str(candidate.orderNumber) === str(existing.orderNumber),
+    )
+  ) {
+    return fail('duplicate_order_number', 409)
+  }
 
   const lines = []
   let nextPlanning = planning
   for (const ln of existing.lines ?? []) {
     const product = findById(masterData.finishedProducts, ln.finishedProductId)
-    if (!product || product.archived === true) return fail('product_not_found', 404)
+    if (!product || product.archived === true || product.active === false) {
+      return fail('product_not_found', 404)
+    }
     const qty = roundQty(num(ln.quantity))
+    const canonicalUnit = str(product.baseUnit) || 'm2'
+    if (
+      !finitePositive(qty) ||
+      str(ln.unit) !== canonicalUnit ||
+      (ln.requestedShipDate != null && !validIsoDate(ln.requestedShipDate))
+    ) {
+      return fail('sales_order_schema_mismatch', 409)
+    }
+    const linked = validateSalesProductionLinks(ln.linkedProductionOrderIds, production, {
+      finishedProductId: ln.finishedProductId,
+      salesOrderId: id,
+      salesLineId: ln.lineId,
+    })
+    if (!linked.ok) return fail(linked.error, linked.status ?? 409)
     const line = {
       ...ln,
       productCodeSnapshot: product.code,
       productNameSnapshot: product.name,
-      producedQty: roundQty(num(ln.producedQty) || 0),
-      releasedQty: roundQty(num(ln.releasedQty) || 0),
-      shippedQty: roundQty(num(ln.shippedQty) || 0),
+      unit: canonicalUnit,
+      linkedProductionOrderIds: linked.ids,
+      producedQty: 0,
+      releasedQty: 0,
+      shippedQty: 0,
       remainingQty: qty,
     }
     lines.push(line)
@@ -1123,7 +1611,14 @@ function applySalesConfirm(sales, masterData, planning, command, actor, now) {
   return ok({
     sales: nextSales,
     planning: nextPlanning,
-    result: { id, status: 'confirmed', revision: order.revision },
+    replayDependencies: salesProductionReplayDependencies(order.lines, id),
+    result: {
+      id,
+      orderNumber: order.orderNumber,
+      status: 'confirmed',
+      revision: order.revision,
+      order,
+    },
   })
 }
 
@@ -1150,12 +1645,18 @@ function applySalesChange(sales, masterData, planning, command, actor, now) {
     if (quantity + EPS < (prev.shippedQty || 0)) return fail('qty_below_shipped', 409)
     const product = findById(masterData.finishedProducts, prev.finishedProductId)
     if (!product) return fail('product_not_found', 404)
+    const requestedShipDate =
+      ln.requestedShipDate != null ? str(ln.requestedShipDate) : str(prev.requestedShipDate)
+    if (requestedShipDate && !validIsoDate(requestedShipDate)) {
+      return fail('invalid_date', 400)
+    }
+    const linePriority = normalizeSalesPriority(ln.priority, prev.priority ?? existing.priority)
+    if (linePriority == null) return fail('invalid_priority', 400)
     const line = {
       ...prev,
       quantity,
-      requestedShipDate:
-        ln.requestedShipDate != null ? str(ln.requestedShipDate).slice(0, 10) : prev.requestedShipDate,
-      priority: ln.priority != null ? num(ln.priority) : prev.priority,
+      requestedShipDate: requestedShipDate || undefined,
+      priority: linePriority,
       remainingQty: roundQty(Math.max(0, quantity - (prev.shippedQty || 0))),
     }
     lines.push(line)
@@ -1176,10 +1677,12 @@ function applySalesChange(sales, masterData, planning, command, actor, now) {
     })
   }
 
+  const priority = normalizeSalesPriority(command.priority, existing.priority)
+  if (priority == null) return fail('invalid_priority', 400)
   const order = {
     ...existing,
     lines,
-    priority: command.priority != null ? num(command.priority) : existing.priority,
+    priority,
     revision: (existing.revision ?? 0) + 1,
     updatedAt: now,
     updatedBy: actor.uid,
@@ -1224,8 +1727,8 @@ function applySalesPriority(sales, command, actor, now) {
   if (!id) return fail('invalid_input', 400)
   const existing = findById(sales.orders, id)
   if (!existing) return fail('not_found', 404)
-  const priority = num(command.priority)
-  if (!Number.isFinite(priority)) return fail('invalid_priority', 400)
+  const priority = normalizeSalesPriority(command.priority, undefined)
+  if (priority == null) return fail('invalid_priority', 400)
   const order = { ...existing, priority, updatedAt: now, updatedBy: actor.uid }
   let next = { ...sales, orders: upsertById(sales.orders, order) }
   next = appendAudit(next, auditEntry('sales_order_priority', actor, now, id, { priority }))
@@ -2124,6 +2627,282 @@ function applyManualRecommendation(planning, masterData, command, actor, now) {
 // Procurement
 // ---------------------------------------------------------------------------
 
+const PROCUREMENT_ORDER_NUMBER_RE = /^ЗЗ-(\d{4})-(\d+)$/
+
+function nextProcurementOrderNumber(orders, dateValue, additionalOrders = []) {
+  const date = str(dateValue)
+  const year = DATE_RE.test(date) ? Number(date.slice(0, 4)) : new Date().getUTCFullYear()
+  let max = 0
+  for (const order of [...(orders ?? []), ...(additionalOrders ?? [])]) {
+    const match = str(order?.orderNumber).match(PROCUREMENT_ORDER_NUMBER_RE)
+    if (!match || Number(match[1]) !== year) continue
+    max = Math.max(max, Number(match[2]) || 0)
+  }
+  return `ЗЗ-${year}-${String(max + 1).padStart(4, '0')}`
+}
+
+function procurementCreateSemantic(command) {
+  const orderDate = str(command.orderDate)
+  const lines = (Array.isArray(command.lines) ? command.lines : [])
+    .map((line) => ({
+      itemId: str(line?.itemId),
+      requestedQty: num(line?.requestedQty ?? line?.quantity),
+      unit: str(line?.unit),
+      ...(line?.requiredDate != null
+        ? { requiredDate: str(line.requiredDate).slice(0, 10) }
+        : {}),
+      ...(line?.unitPrice != null ? { unitPrice: num(line.unitPrice) } : {}),
+    }))
+    .sort((left, right) =>
+      stableJson(left).localeCompare(stableJson(right)),
+    )
+  return {
+    id: str(command.id),
+    supplierId: str(command.supplierId),
+    destinationWarehouseId: str(command.destinationWarehouseId ?? command.warehouseId),
+    orderDate: orderDate ? orderDate.slice(0, 10) : '',
+    ...(command.requestedDeliveryDate != null
+      ? { requestedDeliveryDate: str(command.requestedDeliveryDate).slice(0, 10) }
+      : {}),
+    ...(command.scope != null ? { scope: str(command.scope) } : {}),
+    ...(command.category != null ? { category: str(command.category) } : {}),
+    ...(command.categoryId != null ? { categoryId: str(command.categoryId) } : {}),
+    ...(command.currency != null ? { currency: str(command.currency) } : {}),
+    lines,
+  }
+}
+
+function procurementReceiptSemantic(command) {
+  const lines = (Array.isArray(command.lines) ? command.lines : [])
+    .map((line) => ({
+      lineId: str(line?.lineId),
+      ...(line?.itemId != null ? { itemId: str(line.itemId) } : {}),
+      quantity: num(line?.quantity ?? line?.receivedQty),
+      ...(line?.unit != null ? { unit: str(line.unit) } : {}),
+      ...(line?.locationId != null ? { locationId: str(line.locationId) } : {}),
+      ...(line?.batchNo != null ? { batchNo: str(line.batchNo) } : {}),
+      ...(line?.expiryDate != null
+        ? { expiryDate: str(line.expiryDate).slice(0, 10) }
+        : {}),
+    }))
+    .sort((left, right) => left.lineId.localeCompare(right.lineId))
+  return {
+    purchaseOrderId: str(command.purchaseOrderId ?? command.orderId ?? command.id),
+    warehouseId: str(command.warehouseId),
+    date: str(command.date).slice(0, 10),
+    lines,
+  }
+}
+
+function explicitProcurementCommandFingerprint(commandType, command) {
+  const semantic =
+    commandType === 'procurement.draft.create'
+      ? procurementCreateSemantic(command)
+      : commandType === 'procurement.receipt.post'
+        ? procurementReceiptSemantic(command)
+        : null
+  return semantic
+    ? `procurement:${commandType}:v1:sha256:${sha256Stable(semantic)}`
+    : null
+}
+
+function procurementDestinationKnown(warehouse, destinationWarehouseId) {
+  const id = str(destinationWarehouseId)
+  if (!id) return false
+  if (
+    (warehouse.locations ?? []).some(
+      (location) => str(location.id) === id || str(location.warehouseId) === id,
+    )
+  ) {
+    return true
+  }
+  return (warehouse.accountingByWarehouse ?? []).some(
+    (row) =>
+      str(row.warehouseId ?? row.id) === id &&
+      row.status !== 'inactive' &&
+      row.active !== false,
+  )
+}
+
+function validProcurementOrderNumber(value) {
+  return PROCUREMENT_ORDER_NUMBER_RE.test(str(value))
+}
+
+function procurementDraftMatchesSemantic(order, semantic, commandFingerprint) {
+  if (
+    order?.status !== 'draft' ||
+    str(order.commandFingerprint) !== commandFingerprint ||
+    str(order.supplierId) !== semantic.supplierId ||
+    str(order.destinationWarehouseId) !== semantic.destinationWarehouseId ||
+    str(order.orderDate).slice(0, 10) !== semantic.orderDate ||
+    !validProcurementOrderNumber(order.orderNumber)
+  ) {
+    return false
+  }
+  const rows = Array.isArray(order.lines) ? order.lines : []
+  if (!hasUniqueNonEmptyIds(rows, (line) => line?.lineId) || rows.length !== semantic.lines.length) {
+    return false
+  }
+  const actual = rows
+    .map((line) => ({
+      itemId: str(line.itemId),
+      requestedQty: num(line.requestedQty),
+      unit: str(line.unit),
+      ...(line.requiredDate != null
+        ? { requiredDate: str(line.requiredDate).slice(0, 10) }
+        : {}),
+      ...(line.unitPrice != null ? { unitPrice: num(line.unitPrice) } : {}),
+    }))
+    .sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+  if (
+    actual.some(
+      (line) =>
+        !line.itemId ||
+        !line.unit ||
+        !finitePositive(line.requestedQty),
+    )
+  ) {
+    return false
+  }
+  return stableJson(actual) === stableJson(semantic.lines)
+}
+
+function applyProcurementDraftCreate(procurement, warehouse, masterData, command, actor, now) {
+  const semantic = procurementCreateSemantic(command)
+  const commandFingerprint = explicitProcurementCommandFingerprint(
+    'procurement.draft.create',
+    command,
+  )
+  if (
+    !semantic.id ||
+    !semantic.supplierId ||
+    !semantic.destinationWarehouseId ||
+    !DATE_RE.test(semantic.orderDate) ||
+    semantic.lines.length === 0 ||
+    !commandFingerprint
+  ) {
+    return fail('invalid_input', 400)
+  }
+
+  const existingMatches = (procurement.orders ?? []).filter(
+    (order) => str(order.id) === semantic.id,
+  )
+  if (existingMatches.length > 0) {
+    if (
+      existingMatches.length !== 1 ||
+      !procurementDraftMatchesSemantic(existingMatches[0], semantic, commandFingerprint)
+    ) {
+      return fail('procurement_draft_create_idempotency_conflict', 409)
+    }
+    return ok({
+      procurement,
+      result: {
+        id: semantic.id,
+        orderNumber: existingMatches[0].orderNumber,
+        status: 'draft',
+        revision: existingMatches[0].revision,
+        order: existingMatches[0],
+        commandFingerprint,
+        idempotent: true,
+      },
+    })
+  }
+
+  const supplier = findById(masterData.suppliers, semantic.supplierId)
+  if (!supplier || supplier.archived === true || supplier.active === false) {
+    return fail('supplier_not_found', 404)
+  }
+  if (!procurementDestinationKnown(warehouse, semantic.destinationWarehouseId)) {
+    return fail('warehouse_not_found', 404)
+  }
+
+  const seenItems = new Set()
+  const lines = []
+  for (const line of semantic.lines) {
+    if (
+      !line.itemId ||
+      !line.unit ||
+      !finitePositive(line.requestedQty) ||
+      (line.unitPrice != null && !finiteNonNegative(line.unitPrice)) ||
+      (line.requiredDate != null && !DATE_RE.test(line.requiredDate))
+    ) {
+      return fail('invalid_quantity', 400)
+    }
+    if (seenItems.has(line.itemId)) return fail('duplicate_item_line', 409)
+    seenItems.add(line.itemId)
+    const item = findById(masterData.items, line.itemId)
+    if (!item || item.archived === true || item.active === false) {
+      return fail('item_not_found', 404)
+    }
+    if (!str(item.baseUnit) || str(item.baseUnit) !== line.unit) {
+      return fail('unit_mismatch', 409)
+    }
+    const suppliedItemIds = Array.isArray(supplier.suppliedItemIds)
+      ? supplier.suppliedItemIds.map(str).filter(Boolean)
+      : []
+    if (suppliedItemIds.length > 0 && !suppliedItemIds.includes(line.itemId)) {
+      return fail('supplier_item_mismatch', 409)
+    }
+    lines.push({
+      lineId: `pol-${crypto.randomUUID()}`,
+      itemId: line.itemId,
+      itemCodeSnapshot: item.code,
+      itemNameSnapshot: item.name,
+      unit: line.unit,
+      requestedQty: roundQty(line.requestedQty),
+      receivedQty: 0,
+      requiredDate: line.requiredDate,
+      unitPrice: line.unitPrice != null ? roundQty(line.unitPrice) : undefined,
+      sourceShortageIds: [],
+    })
+  }
+
+  const orderNumber = nextProcurementOrderNumber(
+    procurement.orders,
+    semantic.orderDate,
+  )
+  const order = {
+    id: semantic.id,
+    orderNumber,
+    status: 'draft',
+    supplierId: semantic.supplierId,
+    supplierNameSnapshot: supplier.name,
+    destinationWarehouseId: semantic.destinationWarehouseId,
+    orderDate: semantic.orderDate,
+    requestedDeliveryDate: semantic.requestedDeliveryDate,
+    scope: semantic.scope || 'domestic',
+    category: semantic.category || 'raw_material',
+    categoryId: semantic.categoryId || undefined,
+    currency: semantic.currency || undefined,
+    lines,
+    revision: 0,
+    commandFingerprint,
+    createdAt: now,
+    createdBy: actor.uid,
+    updatedAt: now,
+    updatedBy: actor.uid,
+  }
+  let next = { ...procurement, orders: [...(procurement.orders ?? []), order] }
+  next = appendAudit(
+    next,
+    auditEntry('procurement_draft_create', actor, now, semantic.id, {
+      orderNumber,
+      commandFingerprint,
+    }),
+  )
+  return ok({
+    procurement: next,
+    result: {
+      id: semantic.id,
+      orderNumber,
+      status: 'draft',
+      revision: order.revision,
+      order,
+      commandFingerprint,
+    },
+  })
+}
+
 function roundUpMultiple(qty, multiple, moq) {
   let q = Math.max(qty, moq || 0)
   const m = Number(multiple) || 0
@@ -2215,11 +2994,29 @@ function applyGenerateDraftsFromMrp(procurement, planning, masterData, command, 
       })
     }
     if (lines.length === 0) continue
+    const destinations = [
+      ...new Set(
+        lines
+          .map((line) => str(findById(masterData.items, line.itemId)?.warehouseId))
+          .filter(Boolean),
+      ),
+    ]
+    const orderNumber = nextProcurementOrderNumber(
+      procurement.orders,
+      now.slice(0, 10),
+      drafts,
+    )
     drafts.push({
       id: `po-${crypto.randomUUID()}`,
+      orderNumber,
       status: 'draft',
       supplierId: g.supplierId,
       supplierNameSnapshot: supplier?.name,
+      scope: 'domestic',
+      category: 'raw_material',
+      orderDate: now.slice(0, 10),
+      requestedDeliveryDate: g.requiredDate,
+      destinationWarehouseId: destinations.length === 1 ? destinations[0] : undefined,
       lines,
       sourcePlanningRunId: runId,
       revision: 0,
@@ -2256,7 +3053,7 @@ function applyGenerateDraftsFromMrp(procurement, planning, masterData, command, 
   })
 }
 
-function applyProcurementDraftEdit(procurement, masterData, command, actor, now) {
+function applyProcurementDraftEdit(procurement, warehouse, masterData, command, actor, now) {
   const id = str(command.id)
   if (!id) return fail('invalid_input', 400)
   const existing = findById(procurement.orders, id)
@@ -2268,29 +3065,52 @@ function applyProcurementDraftEdit(procurement, masterData, command, actor, now)
     return fail('free_text_supplier_forbidden', 400)
   }
   const supplierId = command.supplierId != null ? str(command.supplierId) : existing.supplierId
-  if (supplierId && !findById(masterData.suppliers, supplierId)) {
+  const supplier = supplierId ? findById(masterData.suppliers, supplierId) : null
+  if (!supplier || supplier.archived === true || supplier.active === false) {
     return fail('supplier_not_found', 404)
+  }
+
+  const destinationWarehouseId =
+    command.destinationWarehouseId != null
+      ? str(command.destinationWarehouseId)
+      : str(existing.destinationWarehouseId)
+  if (!procurementDestinationKnown(warehouse, destinationWarehouseId)) {
+    return fail('warehouse_not_found', 404)
   }
 
   let lines = existing.lines
   if (Array.isArray(command.lines)) {
     lines = []
+    const seenLineIds = new Set()
+    const seenItemIds = new Set()
     for (const ln of command.lines) {
+      const lineId = str(ln.lineId)
+      if (!lineId || seenLineIds.has(lineId)) return fail('duplicate_line_id', 409)
+      seenLineIds.add(lineId)
       const itemId = str(ln.itemId)
       if (!itemId) return fail('item_required', 400)
       const item = findById(masterData.items, itemId)
-      if (!item || item.archived === true) return fail('item_not_found', 404)
+      if (!item || item.archived === true || item.active === false) return fail('item_not_found', 404)
+      if (seenItemIds.has(itemId)) return fail('duplicate_item_line', 409)
+      seenItemIds.add(itemId)
       if (ln.itemName && !ln.itemId) return fail('free_text_item_forbidden', 400)
       const requestedQty = roundQty(num(ln.requestedQty))
       if (!Number.isFinite(requestedQty) || requestedQty <= 0) return fail('invalid_quantity', 400)
+      const unit = str(ln.unit) || str(item.baseUnit)
+      if (!unit || unit !== str(item.baseUnit)) return fail('unit_mismatch', 409)
+      const previousLine = (existing.lines ?? []).find((row) => str(row.lineId) === lineId)
+      if (!previousLine || str(previousLine.itemId) !== itemId) {
+        return fail('po_line_not_found', 404)
+      }
       lines.push({
-        lineId: str(ln.lineId) || `pol-${crypto.randomUUID()}`,
+        ...previousLine,
+        lineId,
         itemId,
         itemCodeSnapshot: item.code,
         itemNameSnapshot: item.name,
-        unit: str(ln.unit) || item.baseUnit,
+        unit,
         requestedQty,
-        receivedQty: roundQty(num(ln.receivedQty) || 0),
+        receivedQty: roundQty(num(previousLine.receivedQty) || 0),
         requiredDate: ln.requiredDate != null ? str(ln.requiredDate).slice(0, 10) : undefined,
         proposedOrderDate: ln.proposedOrderDate != null ? str(ln.proposedOrderDate).slice(0, 10) : undefined,
         unitPrice: ln.unitPrice != null ? num(ln.unitPrice) : undefined,
@@ -2299,11 +3119,17 @@ function applyProcurementDraftEdit(procurement, masterData, command, actor, now)
     }
   }
 
-  const supplier = supplierId ? findById(masterData.suppliers, supplierId) : null
   const order = {
     ...existing,
     supplierId,
     supplierNameSnapshot: supplier?.name ?? existing.supplierNameSnapshot,
+    destinationWarehouseId,
+    orderDate:
+      command.orderDate != null ? str(command.orderDate).slice(0, 10) : existing.orderDate,
+    requestedDeliveryDate:
+      command.requestedDeliveryDate != null
+        ? str(command.requestedDeliveryDate).slice(0, 10)
+        : existing.requestedDeliveryDate,
     currency: command.currency != null ? str(command.currency) : existing.currency,
     lines,
     revision: (existing.revision ?? 0) + 1,
@@ -2312,7 +3138,10 @@ function applyProcurementDraftEdit(procurement, masterData, command, actor, now)
   }
   let next = { ...procurement, orders: upsertById(procurement.orders, order) }
   next = appendAudit(next, auditEntry('procurement_draft_edit', actor, now, id))
-  return ok({ procurement: next, result: { id, revision: order.revision } })
+  return ok({
+    procurement: next,
+    result: { id, orderNumber: order.orderNumber, status: order.status, revision: order.revision, order },
+  })
 }
 
 /**
@@ -2383,7 +3212,17 @@ function applyProcurementOrderChange(procurement, masterData, command, actor, no
   }
   let next = { ...procurement, orders: upsertById(procurement.orders, order) }
   next = appendAudit(next, auditEntry('procurement_order_change', actor, now, id, { reason }))
-  return ok({ procurement: next, result: { id, revision: order.revision, reason } })
+  return ok({
+    procurement: next,
+    result: {
+      id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      revision: order.revision,
+      order,
+      reason,
+    },
+  })
 }
 
 function applyProcurementStatus(procurement, command, actor, now, nextStatus, fromStatuses) {
@@ -2392,12 +3231,23 @@ function applyProcurementStatus(procurement, command, actor, now, nextStatus, fr
   const existing = findById(procurement.orders, id)
   if (!existing) return fail('not_found', 404)
   if (existing.status === nextStatus) {
-    return ok({ procurement, result: { id, status: nextStatus, idempotent: true } })
+    return ok({
+      procurement,
+      result: {
+        id,
+        orderNumber: existing.orderNumber,
+        status: nextStatus,
+        revision: existing.revision,
+        order: existing,
+        idempotent: true,
+      },
+    })
   }
   if (!fromStatuses.has(existing.status)) return fail('invalid_status', 409)
   const order = {
     ...existing,
     status: nextStatus,
+    revision: (existing.revision ?? 0) + 1,
     updatedAt: now,
     updatedBy: actor.uid,
     ...(nextStatus === 'submitted' ? { submittedAt: now, submittedBy: actor.uid } : {}),
@@ -2407,7 +3257,16 @@ function applyProcurementStatus(procurement, command, actor, now, nextStatus, fr
   }
   let next = { ...procurement, orders: upsertById(procurement.orders, order) }
   next = appendAudit(next, auditEntry(`procurement_order_${nextStatus}`, actor, now, id))
-  return ok({ procurement: next, result: { id, status: nextStatus } })
+  return ok({
+    procurement: next,
+    result: {
+      id,
+      orderNumber: order.orderNumber,
+      status: nextStatus,
+      revision: order.revision,
+      order,
+    },
+  })
 }
 
 function warehouseIdKnown(warehouse, warehouseId) {
@@ -2433,36 +3292,245 @@ function locationIdKnown(warehouse, locationId) {
   return locations.some((loc) => str(loc.id) === id || str(loc.locationId) === id)
 }
 
+function procurementReceiptStateMismatch(detail) {
+  return fail('procurement_receipt_authoritative_state_mismatch', 409, { detail })
+}
+
+function validateExistingProcurementReceipt(
+  procurement,
+  warehouse,
+  semantic,
+  commandFingerprint,
+) {
+  const poMatches = (procurement.orders ?? []).filter(
+    (row) => str(row.id) === semantic.purchaseOrderId,
+  )
+  if (poMatches.length !== 1) return procurementReceiptStateMismatch('po_cardinality')
+  const po = poMatches[0]
+  const poLines = Array.isArray(po.lines) ? po.lines : []
+  if (!hasUniqueNonEmptyIds(poLines, (row) => row?.lineId)) {
+    return procurementReceiptStateMismatch('po_line_cardinality')
+  }
+
+  const documentMatches = (warehouse.documents ?? []).filter(
+    (row) =>
+      str(row.purchaseOrderId) === semantic.purchaseOrderId &&
+      str(row.commandFingerprint) === commandFingerprint,
+  )
+  if (documentMatches.length !== 1) {
+    return procurementReceiptStateMismatch('document_cardinality')
+  }
+  const document = documentMatches[0]
+  const documentLines = Array.isArray(document.lines) ? document.lines : []
+  if (
+    document.status !== 'posted' ||
+    document.type !== 'receipt' ||
+    document.purpose !== 'purchase' ||
+    document.docRole !== 'procurement_receipt' ||
+    str(document.warehouseId) !== semantic.warehouseId ||
+    str(document.date).slice(0, 10) !== semantic.date ||
+    !str(document.id) ||
+    !str(document.number) ||
+    documentLines.length !== semantic.lines.length ||
+    !hasUniqueNonEmptyIds(documentLines, (row) => row?.lineId)
+  ) {
+    return procurementReceiptStateMismatch('document_tuple')
+  }
+
+  const expectedByPoLine = new Map(semantic.lines.map((line) => [line.lineId, line]))
+  const seenPoLines = new Set()
+  for (const line of documentLines) {
+    const purchaseOrderLineId = str(line.purchaseOrderLineId)
+    const expected = expectedByPoLine.get(purchaseOrderLineId)
+    const poLine = poLines.find((row) => str(row.lineId) === purchaseOrderLineId)
+    if (
+      !expected ||
+      !poLine ||
+      seenPoLines.has(purchaseOrderLineId) ||
+      str(line.itemId) !== str(poLine.itemId) ||
+      (expected.itemId != null && str(line.itemId) !== expected.itemId) ||
+      !finitePositive(line.quantity) ||
+      !qtyEqual(line.quantity, expected.quantity) ||
+      str(line.unitSnapshot) !== str(poLine.unit) ||
+      str(line.locationId) !== str(expected.locationId) ||
+      str(line.batchNo) !== str(expected.batchNo) ||
+      str(line.expiryDate) !== str(expected.expiryDate)
+    ) {
+      return procurementReceiptStateMismatch('document_line_tuple')
+    }
+    seenPoLines.add(purchaseOrderLineId)
+  }
+  if (seenPoLines.size !== semantic.lines.length) {
+    return procurementReceiptStateMismatch('document_line_cardinality')
+  }
+
+  const movements = (warehouse.movements ?? []).filter(
+    (row) => str(row.documentId) === str(document.id),
+  )
+  if (
+    movements.length !== documentLines.length ||
+    !hasUniqueNonEmptyIds(movements) ||
+    movements.some((row) => row.cancelled === true)
+  ) {
+    return procurementReceiptStateMismatch('movement_cardinality')
+  }
+  for (const documentLine of documentLines) {
+    const movementMatches = movements.filter(
+      (row) => str(row.documentLineId) === str(documentLine.lineId),
+    )
+    if (movementMatches.length !== 1) {
+      return procurementReceiptStateMismatch('movement_document_line')
+    }
+    const movement = movementMatches[0]
+    if (
+      movement.type !== 'receipt' ||
+      str(movement.purchaseOrderId) !== semantic.purchaseOrderId ||
+      str(movement.purchaseOrderLineId) !== str(documentLine.purchaseOrderLineId) ||
+      str(movement.warehouseId) !== semantic.warehouseId ||
+      str(movement.itemId) !== str(documentLine.itemId) ||
+      str(movement.locationId) !== str(documentLine.locationId) ||
+      str(movement.batchNo) !== str(documentLine.batchNo) ||
+      str(movement.expiryDate) !== str(documentLine.expiryDate) ||
+      str(movement.unitSnapshot) !== str(documentLine.unitSnapshot) ||
+      str(movement.date).slice(0, 10) !== semantic.date ||
+      str(movement.commandFingerprint) !== commandFingerprint ||
+      !finitePositive(movement.quantity) ||
+      !qtyEqual(movement.quantity, documentLine.quantity)
+    ) {
+      return procurementReceiptStateMismatch('movement_tuple')
+    }
+  }
+
+  for (const poLine of poLines) {
+    const totalReceived = roundQty(
+      (warehouse.movements ?? [])
+        .filter(
+          (movement) =>
+            movement.cancelled !== true &&
+            movement.type === 'receipt' &&
+            str(movement.purchaseOrderId) === semantic.purchaseOrderId &&
+            str(movement.purchaseOrderLineId) === str(poLine.lineId),
+        )
+        .reduce((sum, movement) => sum + num(movement.quantity), 0),
+    )
+    if (
+      !finiteNonNegative(poLine.receivedQty) ||
+      !finitePositive(poLine.requestedQty) ||
+      !qtyEqual(totalReceived, poLine.receivedQty) ||
+      totalReceived > num(poLine.requestedQty) + EPS
+    ) {
+      return procurementReceiptStateMismatch('po_received_conservation')
+    }
+  }
+
+  const allReceived = poLines.every(
+    (line) => num(line.receivedQty) + EPS >= num(line.requestedQty),
+  )
+  const anyReceived = poLines.some((line) => num(line.receivedQty) > EPS)
+  const expectedStatus = allReceived
+    ? 'received'
+    : anyReceived
+      ? 'partially_received'
+      : po.status
+  if (po.status !== expectedStatus) {
+    return procurementReceiptStateMismatch('po_status')
+  }
+
+  return ok({
+    procurement,
+    warehouse,
+    result: {
+      purchaseOrderId: semantic.purchaseOrderId,
+      documentId: str(document.id),
+      number: str(document.number),
+      status: po.status,
+      movementsCount: movements.length,
+      movementIds: movements.map((movement) => str(movement.id)),
+      order: po,
+      document,
+      movements,
+      commandFingerprint,
+      idempotent: true,
+    },
+  })
+}
+
 function applyProcurementReceipt(procurement, warehouse, masterData, command, actor, now) {
   const purchaseOrderId = str(command.purchaseOrderId ?? command.id)
   if (!purchaseOrderId) return fail('invalid_input', 400)
   const po = findById(procurement.orders, purchaseOrderId)
   if (!po) return fail('not_found', 404)
-  if (!OPEN_PO.has(po.status)) {
-    return fail('invalid_status', 409)
-  }
   const warehouseId = str(command.warehouseId)
   if (!warehouseId) return fail('warehouse_required', 400)
-  if (!warehouseIdKnown(warehouse, warehouseId)) return fail('warehouse_not_found', 404)
+  if (
+    isStagingIsolatedRuntime()
+      ? !procurementDestinationKnown(warehouse, warehouseId)
+      : !warehouseIdKnown(warehouse, warehouseId)
+  ) {
+    return fail('warehouse_not_found', 404)
+  }
   const date = str(command.date ?? now).slice(0, 10)
+  if (!DATE_RE.test(date)) return fail('invalid_date', 400)
   if (isPeriodClosed(warehouse, date)) return fail('period_closed', 403)
+
+  if (
+    str(po.destinationWarehouseId) &&
+    str(po.destinationWarehouseId) !== warehouseId
+  ) {
+    return fail('warehouse_mismatch', 409)
+  }
 
   const recvLines = Array.isArray(command.lines) ? command.lines : []
   if (recvLines.length === 0) return fail('empty_lines', 400)
 
+  const semantic = procurementReceiptSemantic({ ...command, purchaseOrderId, warehouseId, date })
+  const commandFingerprint = explicitProcurementCommandFingerprint(
+    'procurement.receipt.post',
+    { ...command, purchaseOrderId, warehouseId, date },
+  )
+  if (!commandFingerprint) return fail('invalid_input', 400)
+  const existingReceiptDocuments = (warehouse.documents ?? []).filter(
+    (row) =>
+      str(row.purchaseOrderId) === purchaseOrderId &&
+      str(row.commandFingerprint) === commandFingerprint,
+  )
+  if (existingReceiptDocuments.length > 0) {
+    return validateExistingProcurementReceipt(
+      procurement,
+      warehouse,
+      semantic,
+      commandFingerprint,
+    )
+  }
+  if (!OPEN_PO.has(po.status)) {
+    return fail('invalid_status', 409)
+  }
+
   const poLineById = new Map((po.lines ?? []).map((l) => [l.lineId, l]))
   const docLines = []
   const receivedByLine = new Map()
+  const seenLineIds = new Set()
 
   for (const rl of recvLines) {
     const lineId = str(rl.lineId)
+    if (!lineId || seenLineIds.has(lineId)) return fail('duplicate_line_id', 409)
+    seenLineIds.add(lineId)
     const poLine = poLineById.get(lineId)
     if (!poLine) return fail('po_line_not_found', 404)
     const qty = roundQty(num(rl.quantity ?? rl.receivedQty))
     if (!Number.isFinite(qty) || qty <= 0) return fail('invalid_quantity', 400)
 
-    if (rl.itemId != null && str(rl.itemId) !== str(poLine.itemId)) {
+    if (
+      (isStagingIsolatedRuntime() || rl.itemId != null) &&
+      str(rl.itemId) !== str(poLine.itemId)
+    ) {
       return fail('item_mismatch', 400)
+    }
+    if (
+      (isStagingIsolatedRuntime() || rl.unit != null) &&
+      str(rl.unit) !== str(poLine.unit)
+    ) {
+      return fail('unit_mismatch', 409)
     }
 
     const openQty = roundQty(
@@ -2484,15 +3552,25 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     }
 
     const locationId = rl.locationId != null ? str(rl.locationId) : undefined
-    if (locationId && !locationIdKnown(warehouse, locationId)) {
+    if (
+      locationId &&
+      (isStagingIsolatedRuntime()
+        ? !(warehouse.locations ?? []).some(
+            (location) => str(location.id ?? location.locationId) === locationId,
+          )
+        : !locationIdKnown(warehouse, locationId))
+    ) {
       return fail('location_not_found', 404)
     }
 
     docLines.push({
       lineId: `wdl-${crypto.randomUUID()}`,
+      purchaseOrderLineId: lineId,
       itemId: poLine.itemId,
       quantity: qty,
-      unit: poLine.unit,
+      itemCodeSnapshot: item.code,
+      itemNameSnapshot: item.name,
+      unitSnapshot: poLine.unit,
       batchNo,
       expiryDate,
       locationId,
@@ -2502,6 +3580,10 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
 
   const sanitized = sanitizeDocumentLines(docLines)
   if (!sanitized.ok) return fail(sanitized.error, 400)
+  const authoritativeLines = sanitized.lines.map((line, index) => ({
+    ...line,
+    purchaseOrderLineId: docLines[index].purchaseOrderLineId,
+  }))
 
   const documentId = `wh-doc-${crypto.randomUUID()}`
   const number = nextServerDocumentNumber(warehouse.documents, 'receipt', warehouseId, date)
@@ -2513,9 +3595,10 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     warehouseId,
     date,
     number,
-    lines: sanitized.lines,
+    lines: authoritativeLines,
     status: 'posted',
     purchaseOrderId,
+    commandFingerprint,
     postedAt: now,
     postedBy: actor.uid,
     postedByName: actor.email ?? actor.uid,
@@ -2524,7 +3607,7 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     updatedAt: now,
     updatedBy: actor.uid,
   }
-  const movements = sanitized.lines.map((line) => ({
+  const movements = authoritativeLines.map((line) => ({
     id: `mov-${crypto.randomUUID()}`,
     documentId,
     documentLineId: line.lineId,
@@ -2538,8 +3621,11 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     actorUid: actor.uid,
     batchNo: line.batchNo,
     expiryDate: line.expiryDate,
+    unitSnapshot: line.unitSnapshot,
     locationId: line.locationId,
     purchaseOrderId,
+    purchaseOrderLineId: line.purchaseOrderLineId,
+    commandFingerprint,
   }))
 
   let nextWh = {
@@ -2567,6 +3653,9 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     ...po,
     lines: nextPoLines,
     status,
+    warehouseDocumentIds: [
+      ...new Set([...(Array.isArray(po.warehouseDocumentIds) ? po.warehouseDocumentIds : []), documentId]),
+    ],
     revision: (po.revision ?? 0) + 1,
     updatedAt: now,
     updatedBy: actor.uid,
@@ -2577,16 +3666,17 @@ function applyProcurementReceipt(procurement, warehouse, masterData, command, ac
     auditEntry('procurement_receipt_applied', actor, now, purchaseOrderId, { documentId, status }),
   )
 
+  const validated = validateExistingProcurementReceipt(
+    nextProc,
+    nextWh,
+    semantic,
+    commandFingerprint,
+  )
+  if (!validated.ok) return validated
   return ok({
     procurement: nextProc,
     warehouse: nextWh,
-    result: {
-      purchaseOrderId,
-      documentId,
-      number,
-      status,
-      movementsCount: movements.length,
-    },
+    result: { ...validated.result, idempotent: false },
   })
 }
 
@@ -2653,6 +3743,694 @@ function lotHistoryEntry(lot, entry) {
   return [...(lot.history ?? []), entry]
 }
 
+function qtyEqual(left, right) {
+  const a = num(left)
+  const b = num(right)
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(roundQty(a) - roundQty(b)) <= EPS
+}
+
+function finiteNonNegative(value) {
+  if (value == null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) {
+    return false
+  }
+  const parsed = num(value)
+  return Number.isFinite(parsed) && parsed >= 0
+}
+
+function finitePositive(value) {
+  if (value == null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) {
+    return false
+  }
+  const parsed = num(value)
+  return Number.isFinite(parsed) && parsed > EPS
+}
+
+function hasUniqueNonEmptyIds(rows, idOf = (row) => row?.id) {
+  const ids = (rows ?? []).map((row) => str(idOf(row)))
+  return ids.every(Boolean) && new Set(ids).size === ids.length
+}
+
+function shipmentCommandFingerprint(canonical) {
+  return sha256Stable(canonical)
+}
+
+function explicitShipmentCommandFingerprint(commandType, command) {
+  if (commandType === 'sales.shipment.post') {
+    const canonical = canonicalG5ShipmentPost(command)
+    if (
+      !canonical.shipmentId ||
+      !canonical.salesOrderId ||
+      !canonical.salesLineId ||
+      !canonical.finishedProductId ||
+      !canonical.finishedGoodsLotId ||
+      canonical.quantity == null ||
+      !canonical.warehouseId ||
+      !canonical.date ||
+      !canonical.counterpartyId
+    ) {
+      return null
+    }
+    return shipmentCommandFingerprint(canonical)
+  }
+  if (commandType === 'sales.shipment.cancel') {
+    const canonical = canonicalG5ShipmentCancel(command)
+    if (!canonical.shipmentId || !canonical.reason || !canonical.date) return null
+    return shipmentCommandFingerprint(canonical)
+  }
+  return null
+}
+
+function effectiveShipmentPostSemantic(command, { shipment, order, line, lot, now }) {
+  return canonicalG5ShipmentPost({
+    shipmentId: str(command.shipmentId) || str(shipment?.id),
+    salesOrderId: str(command.salesOrderId) || str(shipment?.salesOrderId),
+    salesLineId: str(command.salesLineId) || str(shipment?.salesLineId),
+    finishedProductId:
+      str(command.finishedProductId) ||
+      str(shipment?.finishedProductId) ||
+      str(line?.finishedProductId),
+    finishedGoodsLotId:
+      str(command.finishedGoodsLotId ?? command.lotId) || str(shipment?.finishedGoodsLotId),
+    quantity: command.quantity ?? shipment?.quantity,
+    warehouseId:
+      str(command.warehouseId) || str(shipment?.warehouseId) || str(lot?.warehouseId),
+    date: str(command.date) || str(shipment?.date) || str(now).slice(0, 10),
+    counterpartyId:
+      str(command.counterpartyId) || str(shipment?.counterpartyId) || str(order?.customerId),
+  })
+}
+
+function effectiveShipmentCancelSemantic(command, shipment, now) {
+  return canonicalG5ShipmentCancel({
+    shipmentId: str(command.shipmentId) || str(shipment?.id),
+    reason: str(command.reason ?? command.cancellationReason) || str(shipment?.cancellationReason),
+    date:
+      str(command.date) ||
+      str(shipment?.cancellationDate) ||
+      str(shipment?.cancelledAt).slice(0, 10) ||
+      str(now).slice(0, 10),
+  })
+}
+
+function expectedShipmentSalesStatus(lines) {
+  if (
+    !Array.isArray(lines) ||
+    lines.length === 0 ||
+    lines.some(
+      (line) =>
+        !finiteNonNegative(line?.quantity) ||
+        !finiteNonNegative(line?.shippedQty) ||
+        !finiteNonNegative(line?.remainingQty) ||
+        num(line.shippedQty) > num(line.quantity) + EPS ||
+        !qtyEqual(line.remainingQty, Math.max(0, num(line.quantity) - num(line.shippedQty))),
+    )
+  ) {
+    return null
+  }
+  const allShipped = lines.every(
+    (line) => num(line.shippedQty) + EPS >= num(line.quantity),
+  )
+  if (allShipped) return 'fulfilled'
+  if (lines.some((line) => num(line.shippedQty) > EPS)) {
+    return 'partially_shipped'
+  }
+  return 'confirmed'
+}
+
+function shipmentStateMismatch(detail) {
+  return fail('sales_shipment_authoritative_state_mismatch', 409, { detail })
+}
+
+function validatePostedShipmentState(domains, semantic, commandFingerprint, { idempotent = false } = {}) {
+  const { sales, production, warehouse } = domains
+  const shipments = (warehouse.loadingShipments ?? []).filter(
+    (row) => str(row.id) === semantic.shipmentId,
+  )
+  if (shipments.length !== 1) return shipmentStateMismatch('shipment_cardinality')
+  const shipment = shipments[0]
+  if (
+    shipment.status !== 'posted' ||
+    !str(shipment.warehouseItemId) ||
+    !str(shipment.unitSnapshot) ||
+    !str(shipment.lotNumber) ||
+    !finitePositive(shipment.quantity)
+  ) {
+    return shipmentStateMismatch('shipment_status')
+  }
+  const storedFingerprint = str(shipment.postCommandFingerprint ?? shipment.commandFingerprint)
+  if (!storedFingerprint || storedFingerprint !== commandFingerprint) {
+    return fail('sales_shipment_idempotency_conflict', 409)
+  }
+  if (
+    str(shipment.salesOrderId) !== semantic.salesOrderId ||
+    str(shipment.salesLineId) !== semantic.salesLineId ||
+    str(shipment.finishedProductId) !== semantic.finishedProductId ||
+    str(shipment.finishedGoodsLotId) !== semantic.finishedGoodsLotId ||
+    !qtyEqual(shipment.quantity, semantic.quantity) ||
+    str(shipment.warehouseId) !== semantic.warehouseId ||
+    str(shipment.date).slice(0, 10) !== semantic.date ||
+    str(shipment.counterpartyId) !== semantic.counterpartyId
+  ) {
+    return shipmentStateMismatch('shipment_tuple')
+  }
+
+  const orderMatches = (sales.orders ?? []).filter((row) => str(row.id) === semantic.salesOrderId)
+  if (orderMatches.length !== 1) return shipmentStateMismatch('sales_order_cardinality')
+  const order = orderMatches[0]
+  const lineMatches = (order.lines ?? []).filter(
+    (row) => str(row.lineId ?? row.id) === semantic.salesLineId,
+  )
+  if (
+    lineMatches.length !== 1 ||
+    !hasUniqueNonEmptyIds(order.lines, (row) => row?.lineId ?? row?.id)
+  ) {
+    return shipmentStateMismatch('sales_line_cardinality')
+  }
+  const line = lineMatches[0]
+  if (str(line.finishedProductId) !== semantic.finishedProductId) {
+    return shipmentStateMismatch('sales_line_product')
+  }
+
+  const lotMatches = (production.finishedGoodsLots ?? production.lots ?? []).filter(
+    (row) => str(row.id) === semantic.finishedGoodsLotId,
+  )
+  if (lotMatches.length !== 1) return shipmentStateMismatch('lot_cardinality')
+  const lot = lotMatches[0]
+  if (
+    str(lot.finishedProductId) !== semantic.finishedProductId ||
+    str(lot.warehouseId) !== semantic.warehouseId ||
+    str(lot.warehouseItemId ?? lot.itemId ?? semantic.finishedProductId) !==
+      str(shipment.warehouseItemId) ||
+    str(lot.locationId) !== str(shipment.locationId) ||
+    str(lot.lotNumber) !== str(shipment.lotNumber) ||
+    lot.qcStatus !== 'released' ||
+    str(lot.currentDecisionId) !== str(shipment.qcDecisionId) ||
+    !Number.isInteger(Number(lot.lotRevision)) ||
+    Number(lot.lotRevision) <= 0 ||
+    !Number.isInteger(Number(shipment.lotRevisionAtPost)) ||
+    Number(shipment.lotRevisionAtPost) <= 0 ||
+    Number(lot.lotRevision) !== Number(shipment.lotRevisionAtPost)
+  ) {
+    return shipmentStateMismatch('lot_tuple')
+  }
+
+  const decisionMatches = (production.qcDecisions ?? []).filter(
+    (row) => str(row.id) === str(shipment.qcDecisionId),
+  )
+  if (
+    decisionMatches.length !== 1 ||
+    decisionMatches[0].status !== 'released' ||
+    str(decisionMatches[0].lotId) !== semantic.finishedGoodsLotId ||
+    Number(decisionMatches[0].lotRevision) !== Number(shipment.lotRevisionAtPost)
+  ) {
+    return shipmentStateMismatch('qc_decision')
+  }
+
+  const documentIds = Array.isArray(shipment.documentIds)
+    ? shipment.documentIds.map(str).filter(Boolean)
+    : []
+  if (documentIds.length !== 1 || new Set(documentIds).size !== 1) {
+    return shipmentStateMismatch('shipment_document_cardinality')
+  }
+  const documentMatches = (warehouse.documents ?? []).filter(
+    (row) => str(row.id) === documentIds[0],
+  )
+  const shipmentDocuments = (warehouse.documents ?? []).filter(
+    (row) => str(row.shipmentId) === semantic.shipmentId,
+  )
+  if (
+    documentMatches.length !== 1 ||
+    shipmentDocuments.length !== 1 ||
+    str(shipmentDocuments[0].id) !== documentIds[0]
+  ) {
+    return shipmentStateMismatch('shipment_document_missing')
+  }
+  const document = documentMatches[0]
+  const documentLines = Array.isArray(document.lines) ? document.lines : []
+  if (
+    document.status !== 'posted' ||
+    document.type !== 'issue' ||
+    document.docRole !== 'finished_goods_shipment' ||
+    str(document.shipmentId) !== semantic.shipmentId ||
+    str(document.salesOrderId) !== semantic.salesOrderId ||
+    str(document.salesLineId) !== semantic.salesLineId ||
+    str(document.finishedGoodsLotId) !== semantic.finishedGoodsLotId ||
+    str(document.warehouseId) !== semantic.warehouseId ||
+    str(document.date).slice(0, 10) !== semantic.date ||
+    str(document.counterpartyId) !== semantic.counterpartyId ||
+    str(document.commandFingerprint) !== commandFingerprint ||
+    documentLines.length !== 1
+  ) {
+    return shipmentStateMismatch('shipment_document_tuple')
+  }
+  const documentLine = documentLines[0]
+  if (
+    !str(documentLine.lineId) ||
+    str(documentLine.itemId) !== str(lot.warehouseItemId ?? lot.itemId ?? semantic.finishedProductId) ||
+    !qtyEqual(documentLine.quantity, semantic.quantity) ||
+    str(documentLine.batchNo) !== str(lot.lotNumber) ||
+    str(documentLine.locationId) !== str(lot.locationId) ||
+    str(documentLine.unitSnapshot) !== str(shipment.unitSnapshot)
+  ) {
+    return shipmentStateMismatch('shipment_document_line')
+  }
+
+  const movements = (warehouse.movements ?? []).filter(
+    (row) => str(row.documentId) === str(document.id),
+  )
+  const shipmentMovements = (warehouse.movements ?? []).filter(
+    (row) => str(row.shipmentId) === semantic.shipmentId,
+  )
+  if (
+    movements.length !== 1 ||
+    shipmentMovements.length !== 1 ||
+    str(shipmentMovements[0].id) !== str(movements[0].id) ||
+    movements[0].cancelled === true
+  ) {
+    return shipmentStateMismatch('shipment_movement_cardinality')
+  }
+  const movement = movements[0]
+  const movementIdentityMatches = (warehouse.movements ?? []).filter(
+    (row) => str(row.id) === str(movement.id),
+  )
+  if (
+    !str(movement.id) ||
+    movementIdentityMatches.length !== 1 ||
+    movement.type !== 'issue' ||
+    str(movement.documentLineId) !== str(documentLine.lineId) ||
+    str(movement.shipmentId) !== semantic.shipmentId ||
+    str(movement.salesOrderId) !== semantic.salesOrderId ||
+    str(movement.salesLineId) !== semantic.salesLineId ||
+    str(movement.finishedGoodsLotId) !== semantic.finishedGoodsLotId ||
+    str(movement.warehouseId) !== semantic.warehouseId ||
+    str(movement.locationId) !== str(lot.locationId) ||
+    str(movement.itemId) !== str(documentLine.itemId) ||
+    str(movement.batchNo) !== str(lot.lotNumber) ||
+    str(movement.unitSnapshot) !== str(shipment.unitSnapshot) ||
+    str(movement.date).slice(0, 10) !== semantic.date ||
+    !qtyEqual(movement.quantity, semantic.quantity) ||
+    str(movement.commandFingerprint) !== commandFingerprint
+  ) {
+    return shipmentStateMismatch('shipment_movement_tuple')
+  }
+
+  const postedLotQuantity = roundQty(
+    (warehouse.loadingShipments ?? [])
+      .filter(
+        (row) =>
+          row.status === 'posted' &&
+          str(row.finishedGoodsLotId) === semantic.finishedGoodsLotId,
+      )
+      .reduce((sum, row) => sum + (num(row.quantity) || 0), 0),
+  )
+  const postedLineQuantity = roundQty(
+    (warehouse.loadingShipments ?? [])
+      .filter(
+        (row) =>
+          row.status === 'posted' &&
+          str(row.salesOrderId) === semantic.salesOrderId &&
+          str(row.salesLineId) === semantic.salesLineId,
+      )
+      .reduce((sum, row) => sum + (num(row.quantity) || 0), 0),
+  )
+  const quantityReleased = roundQty(num(lot.quantityQcReleased) || 0)
+  const quantityShipped = roundQty(num(lot.quantityShipped) || 0)
+  const quantityRemaining = roundQty(num(lot.quantityRemaining) || 0)
+  const salesLineShipped = roundQty(num(line.shippedQty) || 0)
+  const salesLineRemaining = roundQty(num(line.remainingQty) || 0)
+  const postedLotShipments = (warehouse.loadingShipments ?? []).filter(
+    (row) => row.status === 'posted' && str(row.finishedGoodsLotId) === semantic.finishedGoodsLotId,
+  )
+  const postedLineShipments = (warehouse.loadingShipments ?? []).filter(
+    (row) =>
+      row.status === 'posted' &&
+      str(row.salesOrderId) === semantic.salesOrderId &&
+      str(row.salesLineId) === semantic.salesLineId,
+  )
+  if (
+    !hasUniqueNonEmptyIds(postedLotShipments) ||
+    !hasUniqueNonEmptyIds(postedLineShipments) ||
+    postedLotShipments.some((row) => !finitePositive(row.quantity)) ||
+    postedLineShipments.some((row) => !finitePositive(row.quantity)) ||
+    !finiteNonNegative(lot.quantityQcReleased) ||
+    !finiteNonNegative(lot.quantityShipped) ||
+    !finiteNonNegative(lot.quantityRemaining) ||
+    !finiteNonNegative(line.quantity) ||
+    !finiteNonNegative(line.shippedQty) ||
+    !finiteNonNegative(line.remainingQty) ||
+    !qtyEqual(postedLotQuantity, quantityShipped) ||
+    !qtyEqual(quantityRemaining, quantityReleased - quantityShipped) ||
+    !qtyEqual(postedLineQuantity, salesLineShipped) ||
+    !qtyEqual(salesLineRemaining, Math.max(0, (num(line.quantity) || 0) - salesLineShipped)) ||
+    !expectedShipmentSalesStatus(order.lines) ||
+    order.status !== expectedShipmentSalesStatus(order.lines)
+  ) {
+    return shipmentStateMismatch('shipment_conservation')
+  }
+
+  return ok({
+    sales,
+    production,
+    warehouse,
+    result: {
+      shipmentId: semantic.shipmentId,
+      status: 'posted',
+      salesOrderId: semantic.salesOrderId,
+      salesLineId: semantic.salesLineId,
+      finishedProductId: semantic.finishedProductId,
+      finishedGoodsLotId: semantic.finishedGoodsLotId,
+      warehouseItemId: str(lot.warehouseItemId ?? lot.itemId ?? semantic.finishedProductId),
+      unitSnapshot: str(shipment.unitSnapshot),
+      lotNumber: str(lot.lotNumber),
+      warehouseId: semantic.warehouseId,
+      locationId: str(lot.locationId) || undefined,
+      counterpartyId: semantic.counterpartyId || undefined,
+      date: semantic.date,
+      quantity: semantic.quantity,
+      quantityQcReleased: quantityReleased,
+      quantityShipped,
+      quantityRemaining,
+      salesLineQuantity: roundQty(num(line.quantity) || 0),
+      salesLineQuantityShipped: salesLineShipped,
+      salesLineQuantityRemaining: salesLineRemaining,
+      salesStatus: order.status,
+      qcDecisionId: str(shipment.qcDecisionId),
+      lotRevisionAtPost: Number(shipment.lotRevisionAtPost),
+      documentId: str(document.id),
+      movementIds: [str(movement.id)],
+      commandFingerprint,
+      idempotent,
+    },
+  })
+}
+
+function validateCancelledShipmentState(domains, semantic, commandFingerprint, { idempotent = false } = {}) {
+  const { sales, production, warehouse } = domains
+  const shipmentMatches = (warehouse.loadingShipments ?? []).filter(
+    (row) => str(row.id) === semantic.shipmentId,
+  )
+  if (shipmentMatches.length !== 1) return shipmentStateMismatch('shipment_cardinality')
+  const shipment = shipmentMatches[0]
+  if (
+    shipment.status !== 'cancelled' ||
+    !str(shipment.salesOrderId) ||
+    !str(shipment.salesLineId) ||
+    !str(shipment.finishedProductId) ||
+    !str(shipment.finishedGoodsLotId) ||
+    !str(shipment.warehouseId) ||
+    !str(shipment.warehouseItemId) ||
+    !str(shipment.unitSnapshot) ||
+    !str(shipment.lotNumber) ||
+    !finitePositive(shipment.quantity)
+  ) {
+    return shipmentStateMismatch('shipment_status')
+  }
+  if (str(shipment.cancelCommandFingerprint) !== commandFingerprint) {
+    return fail('sales_shipment_cancel_idempotency_conflict', 409)
+  }
+  if (
+    str(shipment.cancellationReason) !== semantic.reason ||
+    str(shipment.cancellationDate).slice(0, 10) !== semantic.date
+  ) {
+    return shipmentStateMismatch('shipment_cancel_tuple')
+  }
+
+  const postFingerprint = str(shipment.postCommandFingerprint ?? shipment.commandFingerprint)
+  if (!/^[a-f0-9]{64}$/.test(postFingerprint)) {
+    return shipmentStateMismatch('shipment_post_fingerprint')
+  }
+  const sourceIds = Array.isArray(shipment.documentIds)
+    ? shipment.documentIds.map(str).filter(Boolean)
+    : []
+  const reversalIds = Array.isArray(shipment.reversalDocumentIds)
+    ? shipment.reversalDocumentIds.map(str).filter(Boolean)
+    : []
+  if (
+    sourceIds.length !== 1 ||
+    reversalIds.length !== 1 ||
+    new Set(sourceIds).size !== 1 ||
+    new Set(reversalIds).size !== 1
+  ) {
+    return shipmentStateMismatch('shipment_cancel_document_cardinality')
+  }
+  const sourceMatches = (warehouse.documents ?? []).filter((row) => str(row.id) === sourceIds[0])
+  const reversalMatches = (warehouse.documents ?? []).filter(
+    (row) => str(row.id) === reversalIds[0],
+  )
+  const shipmentDocuments = (warehouse.documents ?? []).filter(
+    (row) => str(row.shipmentId) === semantic.shipmentId,
+  )
+  if (
+    sourceMatches.length !== 1 ||
+    reversalMatches.length !== 1 ||
+    shipmentDocuments.length !== 2 ||
+    !shipmentDocuments.every(
+      (row) => str(row.id) === sourceIds[0] || str(row.id) === reversalIds[0],
+    )
+  ) {
+    return shipmentStateMismatch('shipment_cancel_document_missing')
+  }
+  const source = sourceMatches[0]
+  const reversal = reversalMatches[0]
+  const sourceLines = Array.isArray(source.lines) ? source.lines : []
+  const reversalLines = Array.isArray(reversal.lines) ? reversal.lines : []
+  if (
+    source.status !== 'posted' ||
+    source.type !== 'issue' ||
+    source.docRole !== 'finished_goods_shipment' ||
+    str(source.shipmentId) !== semantic.shipmentId ||
+    str(source.salesOrderId) !== str(shipment.salesOrderId) ||
+    str(source.salesLineId) !== str(shipment.salesLineId) ||
+    str(source.finishedGoodsLotId) !== str(shipment.finishedGoodsLotId) ||
+    str(source.warehouseId) !== str(shipment.warehouseId) ||
+    str(source.date).slice(0, 10) !== str(shipment.date).slice(0, 10) ||
+    str(source.counterpartyId) !== str(shipment.counterpartyId) ||
+    str(source.commandFingerprint) !== postFingerprint ||
+    sourceLines.length !== 1 ||
+    reversal.status !== 'posted' ||
+    reversal.type !== 'receipt' ||
+    reversal.docRole !== 'finished_goods_shipment_cancel' ||
+    str(reversal.reversesDocumentId) !== str(source.id) ||
+    str(reversal.shipmentId) !== semantic.shipmentId ||
+    str(reversal.salesOrderId) !== str(shipment.salesOrderId) ||
+    str(reversal.salesLineId) !== str(shipment.salesLineId) ||
+    str(reversal.finishedGoodsLotId) !== str(shipment.finishedGoodsLotId) ||
+    str(reversal.warehouseId) !== str(shipment.warehouseId) ||
+    str(reversal.cancellationReason) !== semantic.reason ||
+    str(reversal.date).slice(0, 10) !== semantic.date ||
+    str(reversal.commandFingerprint) !== commandFingerprint ||
+    reversalLines.length !== 1
+  ) {
+    return shipmentStateMismatch('shipment_cancel_document_tuple')
+  }
+  if (
+    !str(sourceLines[0].lineId) ||
+    !str(reversalLines[0].lineId) ||
+    str(reversalLines[0].lineId) === str(sourceLines[0].lineId) ||
+    str(sourceLines[0].itemId) !== str(shipment.warehouseItemId) ||
+    str(sourceLines[0].batchNo) !== str(shipment.lotNumber) ||
+    str(sourceLines[0].locationId) !== str(shipment.locationId) ||
+    str(reversalLines[0].itemId) !== str(sourceLines[0].itemId) ||
+    str(reversalLines[0].batchNo) !== str(sourceLines[0].batchNo) ||
+    str(reversalLines[0].locationId) !== str(sourceLines[0].locationId) ||
+    str(reversalLines[0].unitSnapshot) !== str(sourceLines[0].unitSnapshot) ||
+    str(sourceLines[0].unitSnapshot) !== str(shipment.unitSnapshot) ||
+    !qtyEqual(reversalLines[0].quantity, sourceLines[0].quantity) ||
+    !qtyEqual(reversalLines[0].quantity, shipment.quantity)
+  ) {
+    return shipmentStateMismatch('shipment_cancel_document_line')
+  }
+
+  const sourceMovements = (warehouse.movements ?? []).filter(
+    (row) => str(row.documentId) === str(source.id),
+  )
+  const reversalMovements = (warehouse.movements ?? []).filter(
+    (row) => str(row.documentId) === str(reversal.id),
+  )
+  const shipmentMovements = (warehouse.movements ?? []).filter(
+    (row) => str(row.shipmentId) === semantic.shipmentId,
+  )
+  if (
+    sourceMovements.length !== 1 ||
+    reversalMovements.length !== 1 ||
+    shipmentMovements.length !== 2 ||
+    sourceMovements[0].cancelled === true ||
+    reversalMovements[0].cancelled === true ||
+    !shipmentMovements.every(
+      (row) =>
+        str(row.id) === str(sourceMovements[0].id) ||
+        str(row.id) === str(reversalMovements[0].id),
+    )
+  ) {
+    return shipmentStateMismatch('shipment_cancel_movement_cardinality')
+  }
+  const sourceMovement = sourceMovements[0]
+  const reversalMovement = reversalMovements[0]
+  const sourceMovementIdentityMatches = (warehouse.movements ?? []).filter(
+    (row) => str(row.id) === str(sourceMovement.id),
+  )
+  const reversalMovementIdentityMatches = (warehouse.movements ?? []).filter(
+    (row) => str(row.id) === str(reversalMovement.id),
+  )
+  if (
+    !str(sourceMovement.id) ||
+    !str(reversalMovement.id) ||
+    str(reversalMovement.id) === str(sourceMovement.id) ||
+    sourceMovementIdentityMatches.length !== 1 ||
+    reversalMovementIdentityMatches.length !== 1 ||
+    sourceMovement.type !== 'issue' ||
+    str(sourceMovement.documentLineId) !== str(sourceLines[0].lineId) ||
+    str(sourceMovement.shipmentId) !== semantic.shipmentId ||
+    str(sourceMovement.salesOrderId) !== str(shipment.salesOrderId) ||
+    str(sourceMovement.salesLineId) !== str(shipment.salesLineId) ||
+    str(sourceMovement.finishedGoodsLotId) !== str(shipment.finishedGoodsLotId) ||
+    str(sourceMovement.warehouseId) !== str(shipment.warehouseId) ||
+    str(sourceMovement.locationId) !== str(shipment.locationId) ||
+    str(sourceMovement.itemId) !== str(shipment.warehouseItemId) ||
+    str(sourceMovement.batchNo) !== str(shipment.lotNumber) ||
+    str(sourceMovement.unitSnapshot) !== str(shipment.unitSnapshot) ||
+    str(sourceMovement.date).slice(0, 10) !== str(shipment.date).slice(0, 10) ||
+    !qtyEqual(sourceMovement.quantity, shipment.quantity) ||
+    str(sourceMovement.commandFingerprint) !== postFingerprint ||
+    reversalMovement.type !== 'receipt' ||
+    str(reversalMovement.documentLineId) !== str(reversalLines[0].lineId) ||
+    str(reversalMovement.reversesMovementId) !== str(sourceMovement.id) ||
+    str(reversalMovement.shipmentId) !== semantic.shipmentId ||
+    str(reversalMovement.finishedGoodsLotId) !== str(shipment.finishedGoodsLotId) ||
+    str(reversalMovement.salesOrderId) !== str(shipment.salesOrderId) ||
+    str(reversalMovement.salesLineId) !== str(shipment.salesLineId) ||
+    str(reversalMovement.warehouseId) !== str(shipment.warehouseId) ||
+    str(reversalMovement.locationId) !== str(shipment.locationId) ||
+    str(reversalMovement.itemId) !== str(shipment.warehouseItemId) ||
+    str(reversalMovement.batchNo) !== str(shipment.lotNumber) ||
+    str(reversalMovement.unitSnapshot) !== str(shipment.unitSnapshot) ||
+    str(reversalMovement.date).slice(0, 10) !== semantic.date ||
+    !qtyEqual(reversalMovement.quantity, shipment.quantity) ||
+    str(reversalMovement.commandFingerprint) !== commandFingerprint
+  ) {
+    return shipmentStateMismatch('shipment_cancel_movement_tuple')
+  }
+
+  const lotMatches = (production.finishedGoodsLots ?? production.lots ?? []).filter(
+    (row) => str(row.id) === str(shipment.finishedGoodsLotId),
+  )
+  if (lotMatches.length !== 1) return shipmentStateMismatch('lot_cardinality')
+  const lot = lotMatches[0]
+  const orderMatches = (sales.orders ?? []).filter((row) => str(row.id) === str(shipment.salesOrderId))
+  if (orderMatches.length !== 1) return shipmentStateMismatch('sales_order_cardinality')
+  const order = orderMatches[0]
+  const lineMatches = (order.lines ?? []).filter(
+    (row) => str(row.lineId ?? row.id) === str(shipment.salesLineId),
+  )
+  if (
+    lineMatches.length !== 1 ||
+    !hasUniqueNonEmptyIds(order.lines, (row) => row?.lineId ?? row?.id)
+  ) {
+    return shipmentStateMismatch('sales_line_cardinality')
+  }
+  const line = lineMatches[0]
+  if (
+    str(lot.finishedProductId) !== str(shipment.finishedProductId) ||
+    str(lot.warehouseId) !== str(shipment.warehouseId) ||
+    str(lot.warehouseItemId ?? lot.itemId ?? shipment.finishedProductId) !==
+      str(shipment.warehouseItemId) ||
+    str(lot.locationId) !== str(shipment.locationId) ||
+    str(lot.lotNumber) !== str(shipment.lotNumber) ||
+    lot.qcStatus !== 'released' ||
+    str(line.finishedProductId) !== str(shipment.finishedProductId)
+  ) {
+    return shipmentStateMismatch('shipment_cancel_business_tuple')
+  }
+
+  const postedLotQuantity = roundQty(
+    (warehouse.loadingShipments ?? [])
+      .filter(
+        (row) => row.status === 'posted' && str(row.finishedGoodsLotId) === str(lot.id),
+      )
+      .reduce((sum, row) => sum + (num(row.quantity) || 0), 0),
+  )
+  const postedLineQuantity = roundQty(
+    (warehouse.loadingShipments ?? [])
+      .filter(
+        (row) =>
+          row.status === 'posted' &&
+          str(row.salesOrderId) === str(shipment.salesOrderId) &&
+          str(row.salesLineId) === str(shipment.salesLineId),
+      )
+      .reduce((sum, row) => sum + (num(row.quantity) || 0), 0),
+  )
+  const quantityReleased = roundQty(num(lot.quantityQcReleased) || 0)
+  const quantityShipped = roundQty(num(lot.quantityShipped) || 0)
+  const quantityRemaining = roundQty(num(lot.quantityRemaining) || 0)
+  const salesLineShipped = roundQty(num(line.shippedQty) || 0)
+  const salesLineRemaining = roundQty(num(line.remainingQty) || 0)
+  const postedLotShipments = (warehouse.loadingShipments ?? []).filter(
+    (row) => row.status === 'posted' && str(row.finishedGoodsLotId) === str(lot.id),
+  )
+  const postedLineShipments = (warehouse.loadingShipments ?? []).filter(
+    (row) =>
+      row.status === 'posted' &&
+      str(row.salesOrderId) === str(shipment.salesOrderId) &&
+      str(row.salesLineId) === str(shipment.salesLineId),
+  )
+  if (
+    !hasUniqueNonEmptyIds(postedLotShipments) ||
+    !hasUniqueNonEmptyIds(postedLineShipments) ||
+    postedLotShipments.some((row) => !finitePositive(row.quantity)) ||
+    postedLineShipments.some((row) => !finitePositive(row.quantity)) ||
+    !finiteNonNegative(lot.quantityQcReleased) ||
+    !finiteNonNegative(lot.quantityShipped) ||
+    !finiteNonNegative(lot.quantityRemaining) ||
+    !finiteNonNegative(line.quantity) ||
+    !finiteNonNegative(line.shippedQty) ||
+    !finiteNonNegative(line.remainingQty) ||
+    !qtyEqual(postedLotQuantity, quantityShipped) ||
+    !qtyEqual(quantityRemaining, quantityReleased - quantityShipped) ||
+    !qtyEqual(postedLineQuantity, salesLineShipped) ||
+    !qtyEqual(salesLineRemaining, Math.max(0, (num(line.quantity) || 0) - salesLineShipped)) ||
+    !expectedShipmentSalesStatus(order.lines) ||
+    order.status !== expectedShipmentSalesStatus(order.lines)
+  ) {
+    return shipmentStateMismatch('shipment_cancel_conservation')
+  }
+
+  return ok({
+    sales,
+    production,
+    warehouse,
+    result: {
+      shipmentId: semantic.shipmentId,
+      status: 'cancelled',
+      salesOrderId: str(shipment.salesOrderId),
+      salesLineId: str(shipment.salesLineId),
+      finishedProductId: str(shipment.finishedProductId),
+      finishedGoodsLotId: str(shipment.finishedGoodsLotId),
+      warehouseItemId: str(shipment.warehouseItemId),
+      unitSnapshot: str(shipment.unitSnapshot),
+      lotNumber: str(shipment.lotNumber),
+      warehouseId: str(shipment.warehouseId),
+      locationId: str(shipment.locationId) || undefined,
+      counterpartyId: str(shipment.counterpartyId) || undefined,
+      date: semantic.date,
+      quantity: roundQty(shipment.quantity),
+      quantityQcReleased: quantityReleased,
+      quantityShipped,
+      quantityRemaining,
+      salesLineQuantity: roundQty(num(line.quantity) || 0),
+      salesLineQuantityShipped: salesLineShipped,
+      salesLineQuantityRemaining: salesLineRemaining,
+      salesStatus: order.status,
+      documentId: str(source.id),
+      reversalDocumentIds: [str(reversal.id)],
+      reversalMovementIds: [str(reversalMovement.id)],
+      reason: semantic.reason,
+      commandFingerprint,
+      postCommandFingerprint: postFingerprint,
+      idempotent,
+    },
+  })
+}
+
 function balanceAtLot(movements, { warehouseId, locationId, itemId, batchNo }) {
   const filtered = (movements ?? []).filter((m) => {
     if (m.cancelled) return false
@@ -2712,8 +4490,12 @@ function postSalesIssueDoc(warehouse, spec, actor, now) {
     actorUid: actor.uid,
     batchNo: line.batchNo,
     expiryDate: line.expiryDate,
+    unitSnapshot: line.unitSnapshot,
     shipmentId: spec.shipmentId,
     finishedGoodsLotId: spec.finishedGoodsLotId,
+    salesOrderId: spec.salesOrderId,
+    salesLineId: spec.salesLineId,
+    commandFingerprint: spec.commandFingerprint,
     isFinishedGoods: true,
   }))
   return {
@@ -2733,8 +4515,13 @@ function reverseMovementType(type) {
   return null
 }
 
-function reverseSalesShipmentDoc(warehouse, doc, actor, now, { reason } = {}) {
-  const date = now.slice(0, 10)
+function reverseSalesShipmentDoc(
+  warehouse,
+  doc,
+  actor,
+  now,
+  { reason, date = now.slice(0, 10), commandFingerprint } = {},
+) {
   const documentId = `wh-doc-${crypto.randomUUID()}`
   const related = (warehouse.movements ?? []).filter((m) => m.documentId === doc.id && !m.cancelled)
   const reversed = []
@@ -2748,6 +4535,15 @@ function reverseSalesShipmentDoc(warehouse, doc, actor, now, { reason } = {}) {
   if (reversed.length === 0) {
     return { warehouse, reverseDocumentId: null, skipped: true }
   }
+  const reversalLines = reversed.map((r) => ({
+    lineId: `wdl-${crypto.randomUUID()}`,
+    itemId: r.mov.itemId,
+    quantity: r.quantity,
+    batchNo: r.mov.batchNo,
+    expiryDate: r.mov.expiryDate,
+    locationId: r.mov.locationId,
+    unitSnapshot: r.mov.unitSnapshot,
+  }))
   const revDoc = {
     id: documentId,
     type: doc.type === 'issue' ? 'receipt' : doc.type,
@@ -2756,14 +4552,7 @@ function reverseSalesShipmentDoc(warehouse, doc, actor, now, { reason } = {}) {
     warehouseId: doc.warehouseId,
     date,
     number: `${doc.number || 'DOC'}-R`,
-    lines: reversed.map((r) => ({
-      lineId: `wdl-${crypto.randomUUID()}`,
-      itemId: r.mov.itemId,
-      quantity: r.quantity,
-      batchNo: r.mov.batchNo,
-      expiryDate: r.mov.expiryDate,
-      locationId: r.mov.locationId,
-    })),
+    lines: reversalLines,
     status: 'posted',
     postedAt: now,
     postedBy: actor.uid,
@@ -2771,12 +4560,16 @@ function reverseSalesShipmentDoc(warehouse, doc, actor, now, { reason } = {}) {
     createdAt: now,
     reversesDocumentId: doc.id,
     shipmentId: doc.shipmentId,
+    salesOrderId: doc.salesOrderId,
+    salesLineId: doc.salesLineId,
+    finishedGoodsLotId: doc.finishedGoodsLotId,
     cancellationReason: reason,
+    commandFingerprint,
   }
-  const movements = reversed.map((r) => ({
+  const movements = reversed.map((r, index) => ({
     id: `mov-${crypto.randomUUID()}`,
     documentId,
-    documentLineId: crypto.randomUUID(),
+    documentLineId: reversalLines[index].lineId,
     warehouseId: doc.warehouseId,
     locationId: r.mov.locationId,
     itemId: r.mov.itemId,
@@ -2787,9 +4580,13 @@ function reverseSalesShipmentDoc(warehouse, doc, actor, now, { reason } = {}) {
     actorUid: actor.uid,
     batchNo: r.mov.batchNo,
     expiryDate: r.mov.expiryDate,
+    unitSnapshot: r.mov.unitSnapshot,
     reversesMovementId: r.mov.id,
     shipmentId: doc.shipmentId,
     finishedGoodsLotId: r.mov.finishedGoodsLotId,
+    salesOrderId: r.mov.salesOrderId ?? doc.salesOrderId,
+    salesLineId: r.mov.salesLineId ?? doc.salesLineId,
+    commandFingerprint,
     isFinishedGoods: true,
   }))
   return {
@@ -2806,54 +4603,102 @@ function applySalesShipmentPost(domains, command, actor, now) {
   const { sales, production, warehouse } = domains
   const salesOrderId = str(command.salesOrderId)
   const salesLineId = str(command.salesLineId)
-  const shipmentId = str(command.shipmentId) || `shp-${crypto.randomUUID()}`
-  if (!salesOrderId || !salesLineId) return fail('invalid_input', 400)
+  const shipmentId = str(command.shipmentId)
+  if (!shipmentId || !salesOrderId || !salesLineId) return fail('invalid_input', 400)
 
-  const existingShp = findLoadingShipment(warehouse, shipmentId)
-  if (existingShp?.status === 'posted') {
-    return ok({
-      sales,
-      production,
-      warehouse,
-      result: {
-        shipmentId,
-        status: 'posted',
-        salesOrderId,
-        salesLineId,
-        idempotent: true,
-      },
+  const existingMatches = (warehouse.loadingShipments ?? []).filter(
+    (row) => str(row.id) === shipmentId,
+  )
+  if (existingMatches.length > 1) return shipmentStateMismatch('shipment_cardinality')
+  const existingShp = existingMatches[0] ?? null
+  if (existingShp?.status === 'posted' || existingShp?.status === 'cancelled') {
+    const existingOrder = findById(sales.orders, existingShp.salesOrderId)
+    const existingLine = (existingOrder?.lines ?? []).find(
+      (line) => str(line.lineId ?? line.id) === str(existingShp.salesLineId),
+    )
+    const existingLot = findFgLot(production, existingShp.finishedGoodsLotId)
+    const replaySemantic = effectiveShipmentPostSemantic(command, {
+      shipment: existingShp,
+      order: existingOrder,
+      line: existingLine,
+      lot: existingLot,
+      now,
     })
+    const replayFingerprint = shipmentCommandFingerprint(replaySemantic)
+    if (existingShp.status === 'posted') {
+      return validatePostedShipmentState(domains, replaySemantic, replayFingerprint, {
+        idempotent: true,
+      })
+    }
+    if (
+      str(existingShp.postCommandFingerprint ?? existingShp.commandFingerprint) !==
+      replayFingerprint
+    ) {
+      return fail('sales_shipment_idempotency_conflict', 409)
+    }
+    return fail('shipment_immutable', 409)
   }
-  if (existingShp?.status === 'cancelled') return fail('shipment_immutable', 409)
 
   const order = findById(sales.orders, salesOrderId)
   if (!order) return fail('sales_order_not_found', 404)
-  if (order.status === 'draft' || order.status === 'cancelled' || order.status === 'fulfilled') {
-    return fail('invalid_status', 409)
-  }
   const line = (order.lines ?? []).find((l) => str(l.lineId) === salesLineId)
   if (!line) return fail('sales_line_not_found', 404)
+  if (
+    !finiteNonNegative(line.quantity) ||
+    !finiteNonNegative(line.shippedQty) ||
+    !finiteNonNegative(line.remainingQty)
+  ) {
+    return shipmentStateMismatch('sales_line_quantities')
+  }
 
   const finishedProductId = str(command.finishedProductId || line.finishedProductId)
   const lotId = str(command.finishedGoodsLotId ?? command.lotId)
   const quantityRaw = num(command.quantity)
   if (!finishedProductId || !lotId) return fail('invalid_input', 400)
+
+  const lot = findFgLot(production, lotId)
+  if (!lot) return fail('lot_not_found', 404)
+  if (
+    !finiteNonNegative(lot.quantityQcReleased) ||
+    !finiteNonNegative(lot.quantityShipped) ||
+    !finiteNonNegative(lot.quantityRemaining)
+  ) {
+    return shipmentStateMismatch('lot_quantities')
+  }
+  const semantic = effectiveShipmentPostSemantic(command, {
+    shipment: existingShp,
+    order,
+    line,
+    lot,
+    now,
+  })
+  const commandFingerprint = shipmentCommandFingerprint(semantic)
+  if (!semantic.counterpartyId || semantic.counterpartyId !== str(order.customerId)) {
+    return fail('counterparty_mismatch', 400)
+  }
+
+  if (order.status === 'draft' || order.status === 'cancelled' || order.status === 'fulfilled') {
+    return fail('invalid_status', 409)
+  }
   if (!Number.isFinite(quantityRaw) || quantityRaw <= 0) return fail('invalid_quantity', 400)
   const quantity = roundQty(quantityRaw)
+  if (quantity <= EPS) return fail('invalid_quantity', 400)
+  if (!DATE_RE.test(semantic.date)) return fail('invalid_date', 400)
 
   if (str(line.finishedProductId) !== finishedProductId) {
     return fail('finished_product_mismatch', 400)
   }
 
+  const explicitRemaining = num(line.remainingQty)
   const remainLine = roundQty(
-    num(line.remainingQty) ?? Math.max(0, (num(line.quantity) || 0) - (num(line.shippedQty) || 0)),
+    Number.isFinite(explicitRemaining)
+      ? explicitRemaining
+      : Math.max(0, (num(line.quantity) || 0) - (num(line.shippedQty) || 0)),
   )
   if (quantity > remainLine + EPS) {
     return fail('quantity_exceeds_sales_remaining', 400, { remaining: remainLine })
   }
 
-  const lot = findFgLot(production, lotId)
-  if (!lot) return fail('lot_not_found', 404)
   if (str(lot.finishedProductId) !== finishedProductId) return fail('lot_item_mismatch', 400)
 
   if (lot.qcStatus !== 'released') return fail('lot_not_released', 400, { qcStatus: lot.qcStatus })
@@ -2875,14 +4720,16 @@ function applySalesShipmentPost(domains, command, actor, now) {
     return fail('quantity_exceeds_remaining', 400, { remaining: remainingLot })
   }
 
-  const date = str(command.date ?? now).slice(0, 10)
+  const date = semantic.date
   if (isPeriodClosed(warehouse, date)) return fail('period_closed', 403)
 
-  const warehouseId = str(command.warehouseId ?? lot.warehouseId)
+  const warehouseId = semantic.warehouseId
   if (!warehouseId) return fail('invalid_warehouse', 400)
   if (warehouseId !== str(lot.warehouseId)) return fail('lot_warehouse_mismatch', 400)
   const locationId = str(lot.locationId) || undefined
   const stockItemId = str(lot.warehouseItemId || lot.itemId || finishedProductId)
+  const stockItem = findById(warehouse.items, stockItemId)
+  const unitSnapshot = str(lot.unitSnapshot ?? stockItem?.unit ?? stockItem?.baseUnit) || 'm2'
   const onHand = balanceAtLot(warehouse.movements, {
     warehouseId,
     locationId,
@@ -2902,18 +4749,21 @@ function applySalesShipmentPost(domains, command, actor, now) {
       salesOrderId,
       salesLineId,
       finishedGoodsLotId: lot.id,
+      commandFingerprint,
       lines: [
         {
           itemId: stockItemId,
           quantity,
           batchNo: lot.lotNumber,
           locationId,
+          unitSnapshot,
         },
       ],
       docExtra: {
         qcDecisionId: decision.id,
         isFinishedGoods: true,
-        counterpartyId: str(command.counterpartyId || order.customerId) || undefined,
+        counterpartyId: semantic.counterpartyId || undefined,
+        commandFingerprint,
       },
     },
     actor,
@@ -2948,14 +4798,17 @@ function applySalesShipmentPost(domains, command, actor, now) {
     locationId,
     finishedProductId,
     warehouseItemId: stockItemId,
+    unitSnapshot,
     finishedGoodsLotId: lot.id,
     lotNumber: lot.lotNumber,
     quantity,
     salesOrderId,
     salesLineId,
-    counterpartyId: str(command.counterpartyId || order.customerId) || undefined,
+    counterpartyId: semantic.counterpartyId || undefined,
     qcDecisionId: decision.id,
     lotRevisionAtPost: Number(lot.lotRevision) || 1,
+    commandFingerprint,
+    postCommandFingerprint: commandFingerprint,
     documentIds: [posted.documentId],
     createdAt: existingShp?.createdAt ?? now,
     createdBy: existingShp?.createdBy ?? actor.uid,
@@ -3004,22 +4857,11 @@ function applySalesShipmentPost(domains, command, actor, now) {
     auditEntry('sales_shipment_post', actor, now, salesOrderId, { shipmentId, salesLineId, quantity }),
   )
 
-  return ok({
-    sales: nextSales,
-    production: prod,
-    warehouse: wh,
-    result: {
-      shipmentId,
-      status: 'posted',
-      salesOrderId,
-      salesLineId,
-      finishedGoodsLotId: lot.id,
-      quantity,
-      salesStatus: nextStatus,
-      quantityShipped: nextShippedLot,
-      documentId: posted.documentId,
-    },
-  })
+  return validatePostedShipmentState(
+    { sales: nextSales, production: prod, warehouse: wh },
+    semantic,
+    commandFingerprint,
+  )
 }
 
 function applySalesShipmentCancel(domains, command, actor, now) {
@@ -3029,26 +4871,30 @@ function applySalesShipmentCancel(domains, command, actor, now) {
   if (!shipmentId) return fail('invalid_input', 400)
   if (!reason) return fail('cancel_reason_required', 400)
 
-  const shipment = findLoadingShipment(warehouse, shipmentId)
-  if (!shipment) return fail('not_found', 404)
+  const shipmentMatches = (warehouse.loadingShipments ?? []).filter(
+    (row) => str(row.id) === shipmentId,
+  )
+  if (shipmentMatches.length === 0) return fail('not_found', 404)
+  if (shipmentMatches.length !== 1) return shipmentStateMismatch('shipment_cardinality')
+  const shipment = shipmentMatches[0]
+  const semantic = effectiveShipmentCancelSemantic(command, shipment, now)
+  const commandFingerprint = shipmentCommandFingerprint(semantic)
   if (shipment.status === 'cancelled') {
-    return ok({
-      sales,
-      production,
-      warehouse,
-      result: { shipmentId, status: 'cancelled', idempotent: true },
+    return validateCancelledShipmentState(domains, semantic, commandFingerprint, {
+      idempotent: true,
     })
   }
   if (shipment.status !== 'posted') return fail('shipment_not_posted', 409)
 
-  const date = str(command.date ?? now).slice(0, 10)
+  const date = semantic.date
+  if (!DATE_RE.test(date)) return fail('invalid_date', 400)
   if (isPeriodClosed(warehouse, shipment.date || date) || isPeriodClosed(warehouse, date)) {
     return fail('period_closed', 403)
   }
 
   const lot = findFgLot(production, shipment.finishedGoodsLotId)
   if (!lot) return fail('lot_not_found', 404)
-  if (lot.qcStatus === 'written_off' || lot.qcStatus === 'scrap_pending') {
+  if (lot.qcStatus !== 'released') {
     return fail('shipment_cancel_incompatible', 409, { qcStatus: lot.qcStatus })
   }
   const quantity = roundQty(num(shipment.quantity) || 0)
@@ -3056,19 +4902,59 @@ function applySalesShipmentCancel(domains, command, actor, now) {
   const shipped = Math.max(0, roundQty(num(lot.quantityShipped) || 0))
   if (quantity > shipped + EPS) return fail('quantity_exceeds_shipped', 400)
 
-  let wh = warehouse
-  const reversalDocumentIds = []
-  const docIds = new Set([...(Array.isArray(shipment.documentIds) ? shipment.documentIds : [])])
-  for (const doc of warehouse.documents ?? []) {
-    if (doc.shipmentId !== shipmentId && !docIds.has(doc.id)) continue
-    if (doc.status !== 'posted') continue
-    if (doc.reversesDocumentId) continue
-    if (doc.docRole === 'finished_goods_shipment_cancel') continue
-    const rev = reverseSalesShipmentDoc(wh, doc, actor, now, { reason })
-    wh = rev.warehouse
-    if (rev.reverseDocumentId) reversalDocumentIds.push(rev.reverseDocumentId)
+  const documentIds = Array.isArray(shipment.documentIds)
+    ? shipment.documentIds.map(str).filter(Boolean)
+    : []
+  if (documentIds.length !== 1 || new Set(documentIds).size !== 1) {
+    return fail('sales_shipment_single_lot_required', 409)
   }
-  if (reversalDocumentIds.length === 0) return fail('shipment_documents_missing', 409)
+  const sourceDocuments = (warehouse.documents ?? []).filter(
+    (doc) => str(doc.id) === documentIds[0] && str(doc.shipmentId) === shipmentId,
+  )
+  const shipmentDocuments = (warehouse.documents ?? []).filter(
+    (doc) => str(doc.shipmentId) === shipmentId,
+  )
+  if (
+    sourceDocuments.length !== 1 ||
+    shipmentDocuments.length !== 1 ||
+    str(shipmentDocuments[0].id) !== documentIds[0] ||
+    sourceDocuments[0].status !== 'posted' ||
+    sourceDocuments[0].docRole !== 'finished_goods_shipment' ||
+    (warehouse.documents ?? []).some((doc) => str(doc.reversesDocumentId) === documentIds[0])
+  ) {
+    return fail('shipment_documents_missing', 409)
+  }
+  const sourceMovements = (warehouse.movements ?? []).filter(
+    (movement) => str(movement.documentId) === documentIds[0],
+  )
+  const shipmentMovements = (warehouse.movements ?? []).filter(
+    (movement) => str(movement.shipmentId) === shipmentId,
+  )
+  if (
+    sourceMovements.length !== 1 ||
+    shipmentMovements.length !== 1 ||
+    str(shipmentMovements[0].id) !== str(sourceMovements[0].id) ||
+    sourceMovements[0].cancelled === true ||
+    !finitePositive(sourceMovements[0].quantity)
+  ) {
+    return fail('sales_shipment_single_lot_required', 409)
+  }
+
+  const salesOrderId = str(shipment.salesOrderId)
+  const salesLineId = str(shipment.salesLineId)
+  const order = findById(sales.orders, salesOrderId)
+  if (!order || order.status === 'cancelled') return shipmentStateMismatch('sales_order')
+  const salesLine = (order.lines ?? []).find((line) => str(line.lineId ?? line.id) === salesLineId)
+  if (!salesLine) return shipmentStateMismatch('sales_line')
+
+  const rev = reverseSalesShipmentDoc(warehouse, sourceDocuments[0], actor, now, {
+    reason,
+    date,
+    commandFingerprint,
+  })
+  if (!rev.reverseDocumentId) return fail('shipment_documents_missing', 409)
+  let wh = rev.warehouse
+  const reversalDocumentIds = [rev.reverseDocumentId]
 
   const released = roundQty(num(lot.quantityQcReleased) || 0)
   const nextShippedLot = roundQty(shipped - quantity)
@@ -3094,6 +4980,8 @@ function applySalesShipmentCancel(domains, command, actor, now) {
     cancelledBy: actor.uid,
     cancelledByName: actor.email ?? actor.uid,
     cancellationReason: reason,
+    cancellationDate: date,
+    cancelCommandFingerprint: commandFingerprint,
     updatedAt: now,
   }
   wh = replaceLoadingShipment(wh, cancelled)
@@ -3102,57 +4990,34 @@ function applySalesShipmentCancel(domains, command, actor, now) {
   let prod = replaceFgLot(production, nextLot)
   prod = appendAudit(prod, auditEntry('sales_shipment_cancel', actor, now, shipmentId, { reason }))
 
-  let nextSales = sales
-  const salesOrderId = str(shipment.salesOrderId)
-  const salesLineId = str(shipment.salesLineId)
-  if (salesOrderId && salesLineId) {
-    const order = findById(sales.orders, salesOrderId)
-    if (order && order.status !== 'cancelled') {
-      const nextLines = (order.lines ?? []).map((ln) => {
-        if (str(ln.lineId) !== salesLineId) return ln
-        const nextShipped = roundQty(Math.max(0, (num(ln.shippedQty) || 0) - quantity))
-        return {
-          ...ln,
-          shippedQty: nextShipped,
-          remainingQty: roundQty(Math.max(0, (num(ln.quantity) || 0) - nextShipped)),
-        }
-      })
-      const allShipped = nextLines.every(
-        (l) => (num(l.shippedQty) || 0) + EPS >= (num(l.quantity) || 0),
-      )
-      const anyShipped = nextLines.some((l) => (num(l.shippedQty) || 0) > EPS)
-      let nextStatus = order.status
-      if (allShipped) nextStatus = 'fulfilled'
-      else if (anyShipped) nextStatus = 'partially_shipped'
-      else if (order.status === 'fulfilled' || order.status === 'partially_shipped') {
-        nextStatus = 'confirmed'
-      }
-      const nextOrder = {
-        ...order,
-        lines: nextLines,
-        status: nextStatus,
-        updatedAt: now,
-        updatedBy: actor.uid,
-      }
-      nextSales = { ...sales, orders: upsertById(sales.orders, nextOrder) }
-      nextSales = appendAudit(
-        nextSales,
-        auditEntry('sales_shipment_cancel', actor, now, salesOrderId, { shipmentId, reason }),
-      )
+  const nextLines = (order.lines ?? []).map((ln) => {
+    if (str(ln.lineId ?? ln.id) !== salesLineId) return ln
+    const nextShipped = roundQty(Math.max(0, (num(ln.shippedQty) || 0) - quantity))
+    return {
+      ...ln,
+      shippedQty: nextShipped,
+      remainingQty: roundQty(Math.max(0, (num(ln.quantity) || 0) - nextShipped)),
     }
-  }
-
-  return ok({
-    sales: nextSales,
-    production: prod,
-    warehouse: wh,
-    result: {
-      shipmentId,
-      status: 'cancelled',
-      quantity,
-      reversalDocumentIds,
-    },
   })
+  const nextStatus = expectedShipmentSalesStatus(nextLines)
+  const nextOrder = {
+    ...order,
+    lines: nextLines,
+    status: nextStatus,
+    updatedAt: now,
+    updatedBy: actor.uid,
+  }
+  let nextSales = { ...sales, orders: upsertById(sales.orders, nextOrder) }
+  nextSales = appendAudit(
+    nextSales,
+    auditEntry('sales_shipment_cancel', actor, now, salesOrderId, { shipmentId, reason }),
+  )
+
+  return validateCancelledShipmentState(
+    { sales: nextSales, production: prod, warehouse: wh },
+    semantic,
+    commandFingerprint,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -3162,6 +5027,39 @@ function applySalesShipmentCancel(domains, command, actor, now) {
 function applyActivate(domain, label, actor, now, reason) {
   let next = appendAudit(domain, auditEntry(`${label}_domain_activate`, actor, now, reason || 'activate'))
   return next
+}
+
+function genericG5CommandFingerprint(commandType, command) {
+  return `g5:${commandType}:v1:sha256:${sha256Stable(command)}`
+}
+
+function g5ReplayConflictError(commandType) {
+  if (commandType === 'sales.shipment.cancel') return 'sales_shipment_cancel_idempotency_conflict'
+  if (commandType === 'sales.shipment.post') return 'sales_shipment_idempotency_conflict'
+  if (commandType === 'procurement.draft.create') {
+    return 'procurement_draft_create_idempotency_conflict'
+  }
+  if (commandType === 'procurement.receipt.post') {
+    return 'procurement_receipt_idempotency_conflict'
+  }
+  return 'g5_idempotency_conflict'
+}
+
+function g5ReceiptMatches(receipt, commandType, commandFingerprint) {
+  if (
+    (commandType === 'sales.shipment.post' || commandType === 'sales.shipment.cancel') &&
+    !commandFingerprint
+  ) {
+    // Some visible UI commands omit authority-owned tuple fields (for example
+    // counterpartyId). The shipment revalidator derives and compares the full
+    // canonical fingerprint from current state below.
+    return receipt?.commandType === commandType
+  }
+  return (
+    receipt?.commandType === commandType &&
+    Boolean(commandFingerprint) &&
+    receipt?.result?.commandFingerprint === commandFingerprint
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -3175,6 +5073,22 @@ export async function executeG5Command(input) {
   const idempotencyKey = str(input.idempotencyKey)
   const commandType = str(input.commandType)
   const rawCommand = stripClientTrusted(input.command)
+  const strictShipmentReplay =
+    commandType === 'sales.shipment.post' || commandType === 'sales.shipment.cancel'
+  const strictProcurementReplay =
+    commandType === 'procurement.draft.create' ||
+    commandType === 'procurement.receipt.post'
+  const explicitShipmentFingerprint = strictShipmentReplay
+    ? explicitShipmentCommandFingerprint(commandType, rawCommand)
+    : null
+  const explicitProcurementFingerprint = strictProcurementReplay
+    ? explicitProcurementCommandFingerprint(commandType, rawCommand)
+    : null
+  const expectedCommandFingerprint = strictShipmentReplay
+    ? explicitShipmentFingerprint
+    : strictProcurementReplay
+      ? explicitProcurementFingerprint
+      : genericG5CommandFingerprint(commandType, rawCommand)
 
   if (!storeId || !idempotencyKey || !commandType) return fail('invalid_input', 400)
   if (input.payloadJson != null || input.warehousePatch != null || input.fullStore != null) {
@@ -3197,28 +5111,46 @@ export async function executeG5Command(input) {
   const receipt = await loadReceipt(dc, idempotencyKey, storeId)
   if (receipt?.conflict) return fail('not_found', 404)
   if (receipt?.corrupt) return fail('receipt_corrupt', 500)
-  if (receipt?.result) return ok({ ...receipt.result, idempotent: true })
+  if (receipt?.result && !g5ReceiptMatches(receipt, commandType, expectedCommandFingerprint)) {
+    return fail(g5ReplayConflictError(commandType), 409)
+  }
 
-  const critical = await loadCritical(storeId, actor.uid)
+  const critical = await loadCritical(storeId, actor.uid, {
+    allowInitialize:
+      commandType === 'masterdata.domain.activate' ||
+      commandType === 'sales.domain.activate' ||
+      commandType === 'procurement.domain.activate',
+  })
   if (!critical.ok) return critical
 
   const embedded = embeddedReceipt(critical.payload, idempotencyKey)
-  if (embedded?.result) {
-    await saveReceipt(
-      dc,
-      idempotencyKey,
-      storeId,
-      commandType,
-      actor.uid,
-      embedded.result,
-      embedded.criticalRevision ?? critical.revision,
+  if (embedded?.result && !g5ReceiptMatches(embedded, commandType, expectedCommandFingerprint)) {
+    return fail(g5ReplayConflictError(commandType), 409)
+  }
+  if (!strictShipmentReplay && !strictProcurementReplay && (receipt?.result || embedded?.result)) {
+    const source = receipt?.result ?? embedded?.result
+    if (!validateG5ReplayGuard(critical.payload, source?.replayGuard)) {
+      return fail('g5_receipt_state_mismatch', 409)
+    }
+    const recovered = !receipt?.result && Boolean(embedded?.result)
+    const result = currentG5ReplayProjection(
+      source,
+      critical,
+      expectedCommandFingerprint,
+      recovered,
     )
-    return ok({
-      ...embedded.result,
-      criticalRevision: embedded.result.criticalRevision ?? embedded.criticalRevision,
-      idempotent: true,
-      recoveredFromEmbeddedReceipt: true,
-    })
+    if (recovered) {
+      await saveReceipt(
+        dc,
+        idempotencyKey,
+        storeId,
+        commandType,
+        actor.uid,
+        result,
+        critical.revision,
+      )
+    }
+    return ok(result)
   }
 
   let warehouse = structuredClone(critical.payload.domains.warehouse)
@@ -3273,7 +5205,13 @@ export async function executeG5Command(input) {
       })
     }
     masterData = applyActivate(masterData, 'masterdata', actor, now, reason)
-    const resultPreview = { masterDataActive: true, reason: reason || undefined, masterData }
+    const resultPreview = {
+      masterDataActive: true,
+      reason: reason || undefined,
+      commandFingerprint: expectedCommandFingerprint,
+      replayGuard: activationReplayGuard('masterData'),
+      masterData,
+    }
     const committed = await casCommitG5(dc, storeId, critical, actor.uid, {
       masterData,
       warehouse,
@@ -3309,6 +5247,8 @@ export async function executeG5Command(input) {
     const resultPreview = {
       salesPlanningActive: true,
       reason: reason || undefined,
+      commandFingerprint: expectedCommandFingerprint,
+      replayGuard: activationReplayGuard('salesPlanning'),
       sales,
       planning,
     }
@@ -3342,7 +5282,13 @@ export async function executeG5Command(input) {
       })
     }
     procurement = applyActivate(procurement, 'procurement', actor, now, reason)
-    const resultPreview = { procurementActive: true, reason: reason || undefined, procurement }
+    const resultPreview = {
+      procurementActive: true,
+      reason: reason || undefined,
+      commandFingerprint: expectedCommandFingerprint,
+      replayGuard: activationReplayGuard('procurement'),
+      procurement,
+    }
     const committed = await casCommitG5(dc, storeId, critical, actor.uid, {
       masterData,
       warehouse,
@@ -3398,11 +5344,16 @@ export async function executeG5Command(input) {
   let activateFlags = {}
 
   if (commandType === 'masterdata.item.upsert') {
-    applied = applyItemUpsert(masterData, rawCommand, actor, now)
+    applied = applyItemUpsert(masterData, rawCommand, actor, now, {
+      strict: isStagingIsolatedRuntime(),
+      warehouse,
+    })
   } else if (commandType === 'masterdata.item.archive') {
     applied = applyMasterArchive(masterData, 'item', rawCommand, actor, now)
   } else if (commandType === 'masterdata.product.upsert') {
-    applied = applyProductUpsert(masterData, rawCommand, actor, now)
+    applied = applyProductUpsert(masterData, rawCommand, actor, now, {
+      strict: isStagingIsolatedRuntime(),
+    })
   } else if (commandType === 'masterdata.product.archive') {
     applied = applyMasterArchive(masterData, 'product', rawCommand, actor, now)
   } else if (commandType === 'masterdata.customer.upsert') {
@@ -3420,11 +5371,11 @@ export async function executeG5Command(input) {
   } else if (commandType === 'masterdata.bom.archive' || commandType === 'masterdata.bom.retire') {
     applied = applyBomArchive(masterData, rawCommand, actor, now)
   } else if (commandType === 'sales.order.draft.save') {
-    applied = applySalesDraftSave(sales, masterData, rawCommand, actor, now)
+    applied = applySalesDraftSave(sales, masterData, production, rawCommand, actor, now)
   } else if (commandType === 'sales.order.draft.delete') {
     applied = applySalesDraftDelete(sales, rawCommand, actor, now)
   } else if (commandType === 'sales.order.confirm') {
-    applied = applySalesConfirm(sales, masterData, planning, rawCommand, actor, now)
+    applied = applySalesConfirm(sales, masterData, planning, production, rawCommand, actor, now)
   } else if (commandType === 'sales.order.change') {
     applied = applySalesChange(sales, masterData, planning, rawCommand, actor, now)
   } else if (commandType === 'sales.order.cancel') {
@@ -3469,8 +5420,17 @@ export async function executeG5Command(input) {
     applied = applyManualRecommendation(planning, masterData, rawCommand, actor, now)
   } else if (commandType === 'procurement.generateDraftsFromMrp') {
     applied = applyGenerateDraftsFromMrp(procurement, planning, masterData, rawCommand, actor, now)
+  } else if (commandType === 'procurement.draft.create') {
+    applied = applyProcurementDraftCreate(
+      procurement,
+      warehouse,
+      masterData,
+      rawCommand,
+      actor,
+      now,
+    )
   } else if (commandType === 'procurement.draft.edit') {
-    applied = applyProcurementDraftEdit(procurement, masterData, rawCommand, actor, now)
+    applied = applyProcurementDraftEdit(procurement, warehouse, masterData, rawCommand, actor, now)
   } else if (commandType === 'procurement.order.change') {
     applied = applyProcurementOrderChange(procurement, masterData, rawCommand, actor, now)
   } else if (commandType === 'procurement.order.submit') {
@@ -3511,7 +5471,17 @@ export async function executeG5Command(input) {
     return fail('unknown_command', 400)
   }
 
-  if (!applied.ok) return applied
+  if (!applied.ok) {
+    if (
+      strictShipmentReplay &&
+      (receipt?.result || embedded?.result) &&
+      applied.error !== 'sales_shipment_idempotency_conflict' &&
+      applied.error !== 'sales_shipment_cancel_idempotency_conflict'
+    ) {
+      return fail('sales_shipment_receipt_state_mismatch', 409)
+    }
+    return applied
+  }
 
   if (applied.masterData) masterData = applied.masterData
   if (applied.sales) sales = applied.sales
@@ -3529,9 +5499,24 @@ export async function executeG5Command(input) {
   const warehouseBeforeHash = stableDomainHash(critical.payload.domains.warehouse)
   const touchesWarehouse =
     touchWarehouse || warehouseBeforeHash !== stableDomainHash(warehouse)
+  const replayGuard = appendG5ReplayDependencies(
+    buildG5ReplayGuard(critical.payload.domains, {
+      ...critical.payload.domains,
+      warehouse,
+      production,
+      masterData,
+      sales,
+      planning,
+      procurement,
+    }),
+    applied.replayDependencies,
+  )
 
   const resultPreview = {
     ...applied.result,
+    commandFingerprint:
+      applied.result?.commandFingerprint ?? expectedCommandFingerprint,
+    replayGuard,
     masterDataActive: masterActive || activateFlags.activateMasterData,
     salesPlanningActive: salesActive,
     procurementActive: procActive,
@@ -3554,6 +5539,89 @@ export async function executeG5Command(input) {
           },
         }
       : {}),
+  }
+
+  if (
+    !strictShipmentReplay &&
+    !strictProcurementReplay &&
+    applied.result?.idempotent === true &&
+    replayGuard.entries.length === 0
+  ) {
+    return ok(
+      currentG5ReplayProjection(
+        resultPreview,
+        critical,
+        expectedCommandFingerprint,
+        false,
+      ),
+    )
+  }
+
+  const shipmentReplayReceipt = strictShipmentReplay
+    ? (receipt?.result ?? embedded?.result)
+    : null
+  if (
+    shipmentReplayReceipt?.commandFingerprint &&
+    applied.result?.commandFingerprint &&
+    shipmentReplayReceipt.commandFingerprint !== applied.result.commandFingerprint
+  ) {
+    return fail(
+      commandType === 'sales.shipment.cancel'
+        ? 'sales_shipment_cancel_idempotency_conflict'
+        : 'sales_shipment_idempotency_conflict',
+      409,
+    )
+  }
+
+  const procurementReplayReceipt = strictProcurementReplay
+    ? (receipt?.result ?? embedded?.result)
+    : null
+  if (
+    procurementReplayReceipt?.commandFingerprint &&
+    applied.result?.commandFingerprint &&
+    procurementReplayReceipt.commandFingerprint !== applied.result.commandFingerprint
+  ) {
+    return fail(
+      commandType === 'procurement.draft.create'
+        ? 'procurement_draft_create_idempotency_conflict'
+        : 'procurement_receipt_idempotency_conflict',
+      409,
+    )
+  }
+
+  if ((strictShipmentReplay || strictProcurementReplay) && applied.result?.idempotent === true) {
+    const result = {
+      ...resultPreview,
+      criticalRevision: critical.revision,
+      touchesWarehouse:
+        strictShipmentReplay || commandType === 'procurement.receipt.post',
+      idempotent: true,
+      ...(embedded?.result && !receipt?.result ? { recoveredFromEmbeddedReceipt: true } : {}),
+    }
+    if (!receipt?.result) {
+      await saveReceipt(
+        dc,
+        idempotencyKey,
+        storeId,
+        commandType,
+        actor.uid,
+        result,
+        critical.revision,
+      )
+    }
+    return ok(result)
+  }
+
+  if (
+    (strictShipmentReplay || strictProcurementReplay) &&
+    (receipt?.result || embedded?.result)
+  ) {
+    return fail(
+      strictShipmentReplay
+        ? 'sales_shipment_receipt_state_mismatch'
+        : 'procurement_receipt_state_mismatch',
+      409,
+    )
   }
 
   const committed = await casCommitG5(dc, storeId, critical, actor.uid, {
@@ -3620,6 +5688,7 @@ export async function getAuthoritativeG5Domains(storeId) {
 
 export {
   G5_CAPS,
+  applyProductUpsert,
   defaultG5Capabilities,
   casCommitG5,
   contentHash,

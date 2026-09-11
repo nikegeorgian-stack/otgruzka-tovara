@@ -20,6 +20,7 @@ export type PackagingBomComponent = {
   unit: string
   conversionFactor?: number
   wasteFactor?: number
+  tolerance?: number
   note?: string
 }
 
@@ -58,6 +59,46 @@ export type PackagingComponentNorm = {
   deviation?: number
   tolerance?: number
   overTolerance?: boolean
+}
+
+const PACKAGING_QTY_EPS = 1e-9
+
+function roundPackagingQty(value: number): number {
+  return Math.round(value * 1e9) / 1e9
+}
+
+/**
+ * Explode the immutable order snapshot for a concrete finished-goods quantity.
+ * This mirrors the server calculation; the server snapshot remains authoritative.
+ */
+export function computePackagingSnapshotRequirements(
+  snapshot: PackagingBomSnapshot,
+  outputQty: number,
+): PackagingRequirementLine[] {
+  const baseOutputQty = Math.max(PACKAGING_QTY_EPS, Number(snapshot.baseOutputQty) || 1)
+  const scale = roundPackagingQty(Number(outputQty) || 0) / baseOutputQty
+  return (snapshot.components ?? [])
+    .map((component) => {
+      const itemId = String(component.warehouseItemId || component.itemId || '').trim()
+      const conversion = Number.isFinite(Number(component.conversionFactor))
+        ? Number(component.conversionFactor)
+        : 1
+      const waste = Number.isFinite(Number(component.wasteFactor))
+        ? Number(component.wasteFactor)
+        : 0
+      return {
+        itemId,
+        warehouseItemId: itemId,
+        unit: String(component.unit || 'pcs'),
+        normQty: roundPackagingQty(
+          (Number(component.quantity) || 0) * scale * conversion * (1 + waste),
+        ),
+        tolerance: Number.isFinite(Number(component.tolerance))
+          ? Number(component.tolerance)
+          : undefined,
+      }
+    })
+    .filter((line) => line.itemId && line.normQty > PACKAGING_QTY_EPS)
 }
 
 /** Short display for sha256 content hashes in tables. */

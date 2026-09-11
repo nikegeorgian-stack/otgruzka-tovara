@@ -24,6 +24,7 @@ export type CriticalPullSnapshot = {
     qcDecisions?: unknown[]
   }
   sales?: { orders?: unknown[] }
+  procurement?: { orders?: unknown[] }
   capacity?: unknown
   domainMeta?: unknown
   revision: number
@@ -101,14 +102,25 @@ export async function applyCriticalDomainOverlays(
       }
     } else if (g4Overlay.authoritativeBlocked) {
       console.warn('FST G4 packaging overlay blocked — not treating legacy as truth')
+      next = {
+        ...next,
+        production: g4Overlay.production as typeof next.production,
+      }
     }
   } else if (packagingQcActive) {
     next = {
       ...next,
       production: {
         ...next.production,
-        g4PackagingQcActive: true,
+        packagingReports: [],
+        finishedGoodsLots: [],
+        qcDecisions: [],
+        g4PackagingReports: [],
+        g4FinishedGoodsLots: [],
+        g4QcDecisions: [],
+        g4PackagingQcActive: false,
         g4CriticalRevision: g1.revision,
+        g4AuthoritativeBlocked: true,
       } as typeof next.production,
     }
   } else {
@@ -135,9 +147,20 @@ export async function applyCriticalDomainOverlays(
     })
     if (salesPlanningActive && Array.isArray(g1.sales?.orders)) {
       next = mirrorG5Ack(next, {
+        criticalRevision: g1.revision,
         salesPlanningActive: true,
         replaceSalesOrders: true,
         sales: g1.sales,
+      })
+    }
+    const procurementActive =
+      g1.procurementActive === true || fromMeta.procurementActive
+    if (procurementActive && Array.isArray(g1.procurement?.orders)) {
+      next = mirrorG5Ack(next, {
+        criticalRevision: g1.revision,
+        procurementActive: true,
+        replaceProcurementOrders: true,
+        procurement: g1.procurement,
       })
     }
   }

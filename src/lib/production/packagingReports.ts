@@ -14,6 +14,8 @@ import {
   UNIT_MISMATCH_ERROR,
   MISSING_ITEM_ID_ERROR,
 } from '@/lib/warehouse/productionReservations'
+import { computeItemBalance, toBaseQty } from '@/lib/warehouse/stock'
+import { INSUFFICIENT_STOCK_ERROR } from '@/lib/warehouse/stockSafety'
 import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
 import {
   postPackagingReportWarehouseEffects,
@@ -60,13 +62,17 @@ export type ProductionPackagingReport = {
   shiftDate: string
   shift: ProductionShift
   packagingLocationId: string
-  /** Soft/G4 hint — warehouse that owns the pack location (when bindings empty in critical). */
+  /** Warehouse that owns packagingLocationId; absent only on collapsed legacy tuples. */
   packagingWarehouseId?: string
   finishedProductId: string
   warehouseItemId: string
   semiFinishedItemId: string
   materialLines: PackagingMaterialLine[]
   wipLines: PackagingWipLine[]
+  /** Canonical G3 lineage frozen by the G4 server for WIP contract v1. */
+  sourceShiftReportIds?: string[]
+  sourceWipBatchIds?: string[]
+  wipContractVersion?: 1
   outputM2: number
   rollCount: number
   palletCount: number
@@ -81,6 +87,8 @@ export type ProductionPackagingReport = {
   confirmedBy?: string
   confirmedByName?: string
   idempotencyKey: string
+  /** Server-owned full confirm-payload fingerprint for conflict-safe replay. */
+  idempotencyFingerprint?: string
   finishedGoodsLotId?: string
   fgReceiptDocumentId?: string
   transactionGroupId?: string
@@ -163,11 +171,125 @@ function calcDeviationPct(actual: number, expected: number): number {
   return ((actual - expected) / Math.abs(expected)) * 100
 }
 
+type PackagingStockTuple = {
+  warehouseId: string
+  locationId: string
+  /** Read compatibility for pre-tuple rows that booked warehouseId=locationId. */
+  allowLegacyCollapsedTuple: boolean
+}
+
+function resolvePackagingStockTupleForRead(
+  warehouse: WarehouseStore,
+  packagingLocationId: string,
+  packagingWarehouseId?: string,
+): PackagingStockTuple {
+  const locationId = packagingLocationId.trim()
+  const explicitWarehouseId = packagingWarehouseId?.trim()
+  if (explicitWarehouseId) {
+    return {
+      warehouseId: explicitWarehouseId,
+      locationId,
+      allowLegacyCollapsedTuple: explicitWarehouseId === locationId,
+    }
+  }
+
+  const packBinding = resolveProductionLineLocation(warehouse, 'pack')
+  if (packBinding.ok && packBinding.productionLocationId === locationId) {
+    return {
+      warehouseId: packBinding.productionWarehouseId,
+      locationId,
+      allowLegacyCollapsedTuple: packBinding.productionWarehouseId === locationId,
+    }
+  }
+
+  return {
+    warehouseId: locationId,
+    locationId,
+    allowLegacyCollapsedTuple: true,
+  }
+}
+
+function matchesPackagingTuple(
+  row: { warehouseId?: string; locationId?: string },
+  tuple: PackagingStockTuple,
+): boolean {
+  const warehouseId = String(row.warehouseId ?? '').trim()
+  const locationId = String(row.locationId ?? '').trim()
+  const canonical = warehouseId === tuple.warehouseId && locationId === tuple.locationId
+  if (canonical) return true
+  return (
+    tuple.allowLegacyCollapsedTuple &&
+    warehouseId === tuple.locationId &&
+    (!locationId || locationId === tuple.locationId)
+  )
+}
+
+function movementsAtPackagingTuple(
+  warehouse: WarehouseStore,
+  tuple: PackagingStockTuple,
+): WarehouseStore['movements'] {
+  return warehouse.movements.filter((movement) => matchesPackagingTuple(movement, tuple))
+}
+
+function isPostedWipConsumptionDocument(
+  document: WarehouseStore['documents'][number] | undefined,
+): boolean {
+  return Boolean(
+    document &&
+      document.status !== 'cancelled' &&
+      (document.purpose === 'production_wip_pack_consumption' ||
+        document.docRole === 'production_wip_pack_consumption'),
+  )
+}
+
+function movementConsumesWipSource(
+  movement: WarehouseStore['movements'][number],
+  source: WarehouseStore['documents'][number]['lines'][number],
+  sourceDocumentId: string,
+  productionOrderId: string,
+  allowLegacyCollapsedTuple: boolean,
+): boolean {
+  const lineage = movement as typeof movement & {
+    sourceDocumentId?: string
+    sourceDocumentLineId?: string
+    sourceWipBatchId?: string
+  }
+  if (lineage.sourceDocumentId && lineage.sourceDocumentId !== sourceDocumentId) {
+    return false
+  }
+  if (
+    movement.productionOrderId !== productionOrderId &&
+    !(allowLegacyCollapsedTuple && !movement.productionOrderId)
+  ) {
+    return false
+  }
+  if (
+    source.lineId &&
+    lineage.sourceDocumentLineId &&
+    lineage.sourceDocumentLineId !== source.lineId
+  ) {
+    return false
+  }
+  if (source.batchNo && lineage.sourceWipBatchId && lineage.sourceWipBatchId !== source.batchNo) {
+    return false
+  }
+  if (source.batchNo && movement.batchNo !== source.batchNo) return false
+  if (source.expiryDate && movement.expiryDate !== source.expiryDate) return false
+  return true
+}
+
 export function listAvailableWipAtPackaging(
   production: ProductionStore,
   warehouse: WarehouseStore,
   packagingLocationId: string,
+  packagingWarehouseId?: string,
+  productionOrderId?: string,
 ): PackagingWipLine[] {
+  const tuple = resolvePackagingStockTupleForRead(
+    warehouse,
+    packagingLocationId,
+    packagingWarehouseId,
+  )
   const reports = new Map((production.shiftReports ?? []).map((r) => [r.id, r]))
   const docsById = new Map(warehouse.documents.map((d) => [d.id, d]))
   const rows: PackagingWipLine[] = []
@@ -187,28 +309,40 @@ export function listAvailableWipAtPackaging(
     ) {
       continue
     }
-    // Accept docs booked on production warehouse with pack location on lines,
-    // or legacy docs where warehouseId itself is the packaging location id.
-    const lineAtPack = doc.lines.some(
-      (l) => String((l as { locationId?: string }).locationId ?? '') === packagingLocationId,
-    )
-    const warehouseIsPack = doc.warehouseId === packagingLocationId
-    if (!lineAtPack && !warehouseIsPack) continue
-
     const shiftReport = reports.get(doc.shiftReportId)
     if (!shiftReport || shiftReport.status !== 'confirmed') continue
+    const sourceProductionOrderId =
+      shiftReport.productionOrderId ||
+      (shiftReport as { orderId?: string }).orderId ||
+      ''
+    if (productionOrderId && sourceProductionOrderId !== productionOrderId) continue
 
     for (const line of doc.lines) {
+      if (
+        !matchesPackagingTuple(
+          { warehouseId: doc.warehouseId, locationId: line.locationId },
+          tuple,
+        )
+      ) {
+        continue
+      }
       const receivedQty = Math.max(0, line.quantity)
       if (receivedQty <= 0) continue
       const issueQty = warehouse.movements
         .filter(
           (m) =>
-            m.warehouseId === packagingLocationId &&
+            matchesPackagingTuple(m, tuple) &&
             m.shiftReportId === doc.shiftReportId &&
             m.itemId === line.itemId &&
             m.type === 'issue' &&
-            docsById.get(m.documentId ?? '')?.purpose === 'production_wip_pack_consumption',
+            movementConsumesWipSource(
+              m,
+              line,
+              doc.id,
+              sourceProductionOrderId,
+              tuple.allowLegacyCollapsedTuple,
+            ) &&
+            isPostedWipConsumptionDocument(docsById.get(m.documentId ?? '')),
         )
         .reduce((sum, m) => sum + Math.max(0, m.quantity), 0)
       const remainingQty = Math.max(0, receivedQty - issueQty)
@@ -216,10 +350,7 @@ export function listAvailableWipAtPackaging(
       rows.push({
         lineId: line.lineId ?? doc.id,
         shiftReportId: doc.shiftReportId,
-        productionOrderId:
-          shiftReport.productionOrderId ||
-          (shiftReport as { orderId?: string }).orderId ||
-          '',
+        productionOrderId: sourceProductionOrderId,
         semiFinishedItemId: line.itemId,
         itemId: line.itemId,
         receiptDocumentId: doc.id,
@@ -272,10 +403,20 @@ function validateWipLines(
   warehouse: WarehouseStore,
   report: Pick<
     ProductionPackagingReport,
-    'productionOrderId' | 'packagingLocationId' | 'semiFinishedItemId' | 'wipLines'
+    | 'productionOrderId'
+    | 'packagingWarehouseId'
+    | 'packagingLocationId'
+    | 'semiFinishedItemId'
+    | 'wipLines'
   >,
 ): { ok: true; available: PackagingWipLine[] } | { ok: false; error: string } {
-  const available = listAvailableWipAtPackaging(production, warehouse, report.packagingLocationId)
+  const available = listAvailableWipAtPackaging(
+    production,
+    warehouse,
+    report.packagingLocationId,
+    report.packagingWarehouseId,
+    report.productionOrderId,
+  )
   const order = production.planner.orders.find((o) => o.id === report.productionOrderId)
   if (!order) return { ok: false, error: PACK_NO_ORDER }
   if (order.semiFinishedItemId && order.semiFinishedItemId !== report.semiFinishedItemId) {
@@ -287,6 +428,9 @@ function validateWipLines(
       (w) =>
         w.shiftReportId === line.shiftReportId &&
         w.semiFinishedItemId === line.semiFinishedItemId &&
+        (!line.lineId || w.lineId === line.lineId) &&
+        (!line.receiptDocumentId || w.receiptDocumentId === line.receiptDocumentId) &&
+        (!line.batchNo || w.batchNo === line.batchNo) &&
         (!report.productionOrderId || w.productionOrderId === report.productionOrderId),
     )
     if (!match) return { ok: false, error: PACK_WIP_MISMATCH }
@@ -304,9 +448,17 @@ function validateWipLines(
 function validateMaterialLines(
   warehouse: WarehouseStore,
   packagingLocationId: string,
+  packagingWarehouseId: string | undefined,
   lines: PackagingMaterialLine[],
 ): { ok: true; normalized: PackagingMaterialLine[] } | { ok: false; error: string } {
   const normalized: PackagingMaterialLine[] = []
+  const tuple = resolvePackagingStockTupleForRead(
+    warehouse,
+    packagingLocationId,
+    packagingWarehouseId,
+  )
+  const tupleMovements = movementsAtPackagingTuple(warehouse, tuple)
+  const plannedByItemId = new Map<string, number>()
 
   for (const raw of lines) {
     if (!raw.itemId?.trim()) {
@@ -323,17 +475,28 @@ function validateMaterialLines(
 
     const qty = Math.max(0, raw.quantity)
     if (qty <= 0) continue
+    const baseQty = toBaseQty(item, qty, raw.inputUnit)
+    const plannedQty = (plannedByItemId.get(item.id) ?? 0) + baseQty
+    const availableQty = computeItemBalance(
+      item.id,
+      tupleMovements,
+      tuple.warehouseId,
+    ).available
+    if (plannedQty > availableQty + 1e-9) {
+      return { ok: false, error: INSUFFICIENT_STOCK_ERROR }
+    }
+    plannedByItemId.set(item.id, plannedQty)
 
     let batchNo = raw.batchNo
     let expiryDate = raw.expiryDate
     if (batchNo) {
-      const lots = buildBatchLotsFromMovements(warehouse.movements, raw.itemId, packagingLocationId)
+      const lots = buildBatchLotsFromMovements(tupleMovements, raw.itemId, tuple.warehouseId)
       const auto = allocateBatchesFefoFifo(lots, qty)[0]
       if (auto && auto.batchNo !== batchNo && !raw.batchOverrideReason?.trim()) {
         return { ok: false, error: PACK_BATCH_OVERRIDE_REASON_REQUIRED }
       }
     } else {
-      const lots = buildBatchLotsFromMovements(warehouse.movements, raw.itemId, packagingLocationId)
+      const lots = buildBatchLotsFromMovements(tupleMovements, raw.itemId, tuple.warehouseId)
       const alloc = allocateBatchesFefoFifo(lots, qty)[0]
       batchNo = alloc?.batchNo
       expiryDate = alloc?.expiryDate
@@ -410,9 +573,14 @@ export function confirmProductionPackagingReport(
 
   const existing = loadExistingPackagingReport(production, input.idempotencyKey)
   if (existing) {
+    const existingPackagingWarehouseId =
+      existing.packagingWarehouseId?.trim() || existing.packagingLocationId
+    const requestedPackagingWarehouseId =
+      input.report.packagingWarehouseId?.trim() || input.report.packagingLocationId
     const same =
       existing.productionOrderId === input.report.productionOrderId &&
       existing.lineId === input.report.lineId &&
+      existingPackagingWarehouseId === requestedPackagingWarehouseId &&
       existing.packagingLocationId === input.report.packagingLocationId &&
       existing.outputM2 === input.report.outputM2 &&
       existing.rollCount === input.report.rollCount &&
@@ -441,7 +609,13 @@ export function confirmProductionPackagingReport(
   }
 
   const packBinding = resolveProductionLineLocation(warehouse, 'pack')
-  if (!packBinding.ok || packBinding.productionLocationId !== input.report.packagingLocationId) {
+  const requestedPackagingWarehouseId =
+    input.report.packagingWarehouseId?.trim() || input.report.packagingLocationId
+  if (
+    !packBinding.ok ||
+    packBinding.productionWarehouseId !== requestedPackagingWarehouseId ||
+    packBinding.productionLocationId !== input.report.packagingLocationId
+  ) {
     return { production, warehouse, result: { ok: false, error: PACK_SETUP } }
   }
 
@@ -461,6 +635,7 @@ export function confirmProductionPackagingReport(
   const materialsCheck = validateMaterialLines(
     warehouse,
     input.report.packagingLocationId,
+    input.report.packagingWarehouseId,
     input.report.materialLines,
   )
   if (!materialsCheck.ok) {
@@ -493,7 +668,7 @@ export function confirmProductionPackagingReport(
     rollsPerPalletSnapshot: input.report.rollsPerPalletSnapshot,
     productionDate: input.report.shiftDate,
     packagingDate: input.report.shiftDate,
-    warehouseId: input.report.packagingLocationId,
+    warehouseId: packBinding.productionWarehouseId,
     locationId: input.report.packagingLocationId,
     qcStatus: 'pending',
     quantityProduced: Math.max(0, input.report.outputM2),
@@ -514,6 +689,7 @@ export function confirmProductionPackagingReport(
     lineId: 'pack',
     shiftDate: input.report.shiftDate,
     shift: input.report.shift,
+    packagingWarehouseId: packBinding.productionWarehouseId,
     packagingLocationId: input.report.packagingLocationId,
     finishedProductId,
     warehouseItemId,
@@ -656,4 +832,3 @@ export function confirmPackagingReportCorrection(
     result: confirmed.result,
   }
 }
-

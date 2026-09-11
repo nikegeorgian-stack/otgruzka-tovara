@@ -2,6 +2,8 @@ import type { PurchaseOrder, PurchaseOrderStatus, ShipmentLeg } from './types'
 
 export const ORDER_STATUS_FLOW: PurchaseOrderStatus[] = [
   'draft',
+  'submitted',
+  'approved',
   'ordered',
   'production',
   'shipped',

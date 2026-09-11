@@ -19,6 +19,8 @@ export type G3CommandType =
   | 'production.reservation.reallocate'
   | 'production.material.issueToLine'
   | 'production.material.returnFromLine'
+  | 'production.impregnationQc.decide'
+  | 'production.lineBinding.configure'
   | 'production.shift.draft.save'
   | 'production.shift.draft.delete'
   | 'production.shift.confirm'
@@ -34,6 +36,7 @@ export type G3ProductionDomain = {
   wipBatches?: unknown[]
   wasteRecords?: unknown[]
   handoffs?: unknown[]
+  impregnationQcDecisions?: unknown[]
   auditLog?: unknown[]
   packagingReports?: unknown[]
   finishedGoodsLots?: unknown[]
@@ -100,7 +103,40 @@ export async function g3ProductionCommand(input: {
     idempotent?: boolean
     orderId?: string
     reportId?: string
+    /** Authoritative server shift DTO; adapt and validate before exposing to UI. */
+    report?: unknown
     versionId?: string
+    decisionId?: string
+    decisionKey?: string
+    decisionRevision?: number
+    decision?: 'approved' | 'rejected'
+    labStatus?: 'pending' | 'pass' | 'fail'
+    decisionMethod?: 'measured' | 'edu_manual_visual'
+    productionOrderId?: string
+    productionLineId?: string
+    batchRunId?: string
+    batchNo?: string
+    batchIssueDocumentId?: string
+    batchReceiptDocumentId?: string
+    outputWarehouseItemId?: string
+    outputQuantity?: number
+    supersedesDecisionId?: string
+    supersessionReason?: string
+    supersededByDecisionId?: string
+    supersededAt?: string
+    commandFingerprint?: string
+    actorUid?: string
+    decidedAt?: string
+    effective?: boolean
+    lineReady?: boolean
+    touchesWarehouse?: boolean
+    lineId?: string
+    bindingId?: string
+    productionWarehouseId?: string
+    productionLocationId?: string
+    note?: string
+    bindingFingerprint?: string
+    previousBindingFingerprint?: string
   }>({
     storeId: input.storeId ?? FST_SHARED_STORE_DOC_ID,
     idempotencyKey: input.idempotencyKey,
@@ -149,6 +185,8 @@ export function resolveAuthoritativeProductionOverlay(input: {
         g3WipBatches: input.criticalProduction.wipBatches ?? [],
         g3WasteRecords: input.criticalProduction.wasteRecords ?? [],
         g3Handoffs: input.criticalProduction.handoffs ?? [],
+        impregnationQcDecisions: input.criticalProduction.impregnationQcDecisions ?? [],
+        g3ImpregnationQcDecisions: input.criticalProduction.impregnationQcDecisions ?? [],
         g3AuditLog: input.criticalProduction.auditLog ?? [],
         g3PackagingReports: input.criticalProduction.packagingReports ?? [],
         finishedGoodsLots: input.criticalProduction.finishedGoodsLots ?? [],

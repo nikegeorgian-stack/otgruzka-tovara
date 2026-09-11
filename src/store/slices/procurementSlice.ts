@@ -2,6 +2,7 @@ import { allocateOrderNumber } from '@/lib/procurement/codes'
 import { normalizeProcurementStore } from '@/lib/procurement/init'
 import {
   applyPurchaseOrderReceiptAck,
+  buildAuthoritativePurchaseOrderReceiptPlan,
   preparePurchaseOrderReceipt,
   receivePurchaseOrderInStore,
   type ReceiveOrderResult,
@@ -33,30 +34,95 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
   const api = {
     async upsertPurchaseOrder(order: PurchaseOrder, statusNote?: string) {
       if (isG5ProcurementActive(getStore())) {
-        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
-          '@/lib/planner/g5ServerClient'
-        )
+        const {
+          g5ProcurementCommandFingerprint,
+          isG5WebPath,
+          executeG5Command,
+          mirrorG5Ack,
+          validateG5ProcurementOrderAck,
+        } = await import('@/lib/planner/g5ServerClient')
         if (isG5WebPath()) {
-          const isDraft = !order.status || order.status === 'draft'
+          const before = getStore()
+          const existing = before.procurement.orders.find((row) => row.id === order.id)
+          const statusTransitions: Record<string, { commandType: string; operation: 'submit' | 'approve' | 'markOrdered' | 'cancel' }> = {
+            submitted: { commandType: 'procurement.order.submit', operation: 'submit' },
+            approved: { commandType: 'procurement.order.approve', operation: 'approve' },
+            ordered: { commandType: 'procurement.order.markOrdered', operation: 'markOrdered' },
+            cancelled: { commandType: 'procurement.order.cancel', operation: 'cancel' },
+          }
+          const transition =
+            existing && existing.status !== order.status
+              ? statusTransitions[String(order.status)]
+              : undefined
+          const isCreate = !existing
+          const commandType = isCreate
+            ? 'procurement.draft.create'
+            : transition?.commandType ??
+              (order.status === 'draft'
+                ? 'procurement.draft.edit'
+                : 'procurement.order.change')
+          const command = transition
+            ? { id: order.id, note: statusNote }
+            : {
+                id: order.id,
+                supplierId: order.counterpartyId,
+                destinationWarehouseId: order.destinationWarehouseId,
+                orderDate: order.orderDate,
+                requestedDeliveryDate: order.requestedDeliveryDate,
+                scope: order.scope,
+                category: order.category,
+                categoryId: order.categoryId,
+                currency: order.currency,
+                ...(statusNote ? { reason: statusNote } : {}),
+                lines: (order.lines ?? []).map((line) => ({
+                  lineId: line.id,
+                  itemId: line.warehouseItemId,
+                  requestedQty: line.quantity,
+                  unit: line.unit,
+                  unitPrice: line.unitPrice,
+                })),
+              }
+          const createFingerprint = isCreate
+            ? g5ProcurementCommandFingerprint(
+                'procurement.draft.create',
+                command as Record<string, unknown>,
+              )
+            : undefined
           const conf = await executeG5Command({
-            idempotencyKey: `g5-po-${order.id}-${order.updatedAt || Date.now()}`,
-            commandType: isDraft ? 'procurement.draft.edit' : 'procurement.order.change',
-            command: {
-              id: order.id,
-              supplierId: order.counterpartyId,
-              lines: (order.lines ?? []).map((l) => ({
-                lineId: l.id,
-                itemId: l.warehouseItemId,
-                requestedQty: l.quantity,
-                unit: l.unit,
-              })),
-            },
+            idempotencyKey: isCreate
+              ? `g5-po-create-${createFingerprint}`
+              : `g5-po-${commandType}-${order.id}-${order.updatedAt || Date.now()}`,
+            commandType,
+            command,
           })
           if (!conf.ok) {
             throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
           }
+          const sourceOrder = transition && existing ? existing : order
+          const expectedLines = sourceOrder.lines.map((line) => ({
+            ...(isCreate ? {} : { lineId: line.id }),
+            itemId: String(line.warehouseItemId ?? ''),
+            requestedQty: line.quantity,
+            unit: line.unit,
+          }))
+          const validated = validateG5ProcurementOrderAck(
+            conf.data,
+            Number(
+              (before.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+            ),
+            {
+              operation: isCreate ? 'create' : transition?.operation ?? 'edit',
+              ...(isCreate ? {} : { orderId: order.id }),
+              status: String(order.status || 'draft'),
+              supplierId: sourceOrder.counterpartyId,
+              destinationWarehouseId: sourceOrder.destinationWarehouseId,
+              commandFingerprint: createFingerprint,
+              lines: expectedLines,
+            },
+          )
+          if (!validated.ok) throw new Error(validated.error)
           setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
-          return
+          return validated.order.id
         }
       }
 
@@ -83,6 +149,7 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
             : [...p.orders, normalized],
         }
       })
+      return order.id
     },
 
     async createPurchaseOrder(
@@ -94,8 +161,23 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       if (isG5ProcurementActive(getStore())) {
         const { isG5WebPath } = await import('@/lib/planner/g5ServerClient')
         if (isG5WebPath()) {
-          // Freehand PO create is not a G5 command — drafts come from MRP generateDraftsFromMrp.
-          throw new Error('g5.error.use_g5_gateway')
+          const now = new Date().toISOString()
+          const id = partial.id ?? crypto.randomUUID()
+          const order: PurchaseOrder = {
+            ...partial,
+            id,
+            orderNumber: '',
+            status: 'draft',
+            lines: partial.lines ?? [],
+            legs: partial.legs ?? [],
+            milestones: partial.milestones ?? [],
+            statusHistory: [],
+            attachments: partial.attachments ?? [],
+            warehouseDocumentIds: partial.warehouseDocumentIds ?? [],
+            createdAt: now,
+            updatedAt: now,
+          }
+          return (await api.upsertPurchaseOrder(order)) ?? id
         }
       }
 
@@ -174,25 +256,55 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       opts?: import('@/lib/procurement/receive').ReceiveOrderOpts,
     ): Promise<ReceiveOrderResult> {
       if (isG5ProcurementActive(getStore())) {
-        const prepared = preparePurchaseOrderReceipt(getStore(), orderId, opts)
+        const before = getStore()
+        const prepared = buildAuthoritativePurchaseOrderReceiptPlan(before, orderId, opts)
         if (!prepared.ok) return { ok: false, error: prepared.error }
-        const lines = [...prepared.receivedAdd.entries()].map(([lineId, quantity]) => ({
-          lineId,
-          quantity,
-          warehouseId: prepared.documentInput.warehouseId,
-        }))
         try {
           const data = await api.receivePurchaseOrderViaG5(orderId, {
-            lines,
-            note: prepared.number,
+            warehouseId: prepared.warehouseId,
+            date: prepared.date,
+            lines: prepared.lines,
           })
-          const documentId = String(
-            (data as { documentId?: string })?.documentId ??
-              (data as { warehouseDocumentId?: string })?.warehouseDocumentId ??
-              '',
+          const {
+            g5ProcurementCommandFingerprint,
+            mirrorG5Ack,
+            validateG5ProcurementReceiptAck,
+          } = await import('@/lib/planner/g5ServerClient')
+          const expectedCommandFingerprint = g5ProcurementCommandFingerprint(
+            'procurement.receipt.post',
+            {
+              id: orderId,
+              purchaseOrderId: orderId,
+              warehouseId: prepared.warehouseId,
+              date: prepared.date,
+              lines: prepared.lines.map((line) => ({
+                lineId: line.lineId,
+                itemId: line.itemId,
+                quantity: line.quantity,
+                unit: line.unit,
+                ...(line.locationId ? { locationId: line.locationId } : {}),
+                ...(line.batchNo ? { batchNo: line.batchNo } : {}),
+                ...(line.expiryDate ? { expiryDate: line.expiryDate } : {}),
+              })),
+            },
           )
-          if (!documentId) return { ok: false, error: 'g5.error.use_g5_gateway' }
-          return { ok: true, documentId }
+          const validated = validateG5ProcurementReceiptAck(
+            data,
+            Number(
+              (before.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+            ),
+            {
+              purchaseOrderId: prepared.purchaseOrderId,
+              warehouseId: prepared.warehouseId,
+              date: prepared.date,
+              commandFingerprint: expectedCommandFingerprint,
+              lines: prepared.lines,
+            },
+            before.warehouse,
+          )
+          if (!validated.ok) return { ok: false, error: validated.error }
+          setStore((s) => mirrorG5Ack(s, data), { origin: 'system' })
+          return { ok: true, documentId: validated.documentId }
         } catch (e) {
           return {
             ok: false,
@@ -265,13 +377,17 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
     async receivePurchaseOrderViaG5(
       orderId: string,
       opts: {
+        warehouseId: string
+        date: string
         lines: Array<{
           lineId: string
+          itemId: string
           quantity: number
-          batchId?: string
+          unit: string
+          batchNo?: string
           expiryDate?: string
-          warehouseId?: string
           locationId?: string
+          expectedReceivedQty?: number
         }>
         note?: string
       },
@@ -279,20 +395,43 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       if (!isG5ProcurementActive(getStore())) {
         throw new Error('g5.error.use_g5_gateway')
       }
-      const { isG5WebPath, g5ProcurementReceiptPost, mirrorG5Ack } = await import(
+      const {
+        g5ProcurementCommandFingerprint,
+        isG5WebPath,
+        g5ProcurementReceiptPost,
+      } = await import(
         '@/lib/planner/g5ServerClient'
       )
       if (!isG5WebPath()) {
         throw new Error('g5.error.use_g5_gateway')
       }
+      const command = {
+        id: orderId,
+        purchaseOrderId: orderId,
+        warehouseId: opts.warehouseId,
+        date: opts.date,
+        lines: opts.lines.map((line) => ({
+          lineId: line.lineId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          unit: line.unit,
+          ...(line.locationId ? { locationId: line.locationId } : {}),
+          ...(line.batchNo ? { batchNo: line.batchNo } : {}),
+          ...(line.expiryDate ? { expiryDate: line.expiryDate } : {}),
+        })),
+        note: opts.note,
+      }
+      const commandFingerprint = g5ProcurementCommandFingerprint(
+        'procurement.receipt.post',
+        command,
+      )
       const conf = await g5ProcurementReceiptPost({
-        idempotencyKey: `g5-po-receipt-${orderId}-${Date.now()}`,
-        command: { id: orderId, orderId, lines: opts.lines, note: opts.note },
+        idempotencyKey: `g5-po-receipt-${commandFingerprint}`,
+        command,
       })
       if (!conf.ok) {
         throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
       }
-      setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
       return conf.data
     },
 
@@ -302,36 +441,11 @@ export function createProcurementSlice({ setStore, getStore, getActor }: StoreSl
       note?: string,
     ) {
       if (isG5ProcurementActive(getStore())) {
-        const { isG5WebPath, executeG5Command, mirrorG5Ack } = await import(
-          '@/lib/planner/g5ServerClient'
-        )
+        const { isG5WebPath } = await import('@/lib/planner/g5ServerClient')
         if (isG5WebPath()) {
-          const map: Record<string, string> = {
-            ordered: 'procurement.order.markOrdered',
-            submitted: 'procurement.order.submit',
-            approved: 'procurement.order.approve',
-            cancelled: 'procurement.order.cancel',
-          }
-          // Legacy status names → G5 commands where possible
-          const commandType =
-            map[status] ??
-            (status === 'received' || status === 'partial'
-              ? null
-              : status === 'draft'
-                ? 'procurement.draft.edit'
-                : 'procurement.order.change')
-          if (!commandType) {
-            throw new Error('g5.error.use_g5_gateway')
-          }
-          const conf = await executeG5Command({
-            idempotencyKey: `g5-po-status-${orderId}-${status}-${Date.now()}`,
-            commandType,
-            command: { id: orderId, note },
-          })
-          if (!conf.ok) {
-            throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
-          }
-          setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
+          const order = getStore().procurement.orders.find((row) => row.id === orderId)
+          if (!order) throw new Error('procurement.receive.errNotFound')
+          await api.upsertPurchaseOrder({ ...order, status }, note)
           return
         }
       }

@@ -30,6 +30,7 @@ import {
 import { computeItemBalance } from './stock'
 import type {
   MaterialShortageRecord,
+  StockMovement,
   WarehouseDocument,
   WarehouseDocumentLine,
   WarehouseStore,
@@ -95,6 +96,7 @@ export type HandoffResult = {
 export type LineMaterialBalance = {
   productionOrderId: string
   lineId: string
+  productionWarehouseId: string
   productionLocationId: string
   itemId: string
   batchNo?: string
@@ -128,6 +130,25 @@ export function canViewProductionMaterialHandoff(
   )
 }
 
+/** Match the canonical warehouse + physical-location tuple, with one collapsed legacy case. */
+export function movementMatchesProductionTuple(
+  movement: Pick<StockMovement, 'warehouseId' | 'locationId'>,
+  route: { productionWarehouseId: string; productionLocationId: string },
+): boolean {
+  const movementLocationId = String(movement.locationId ?? '').trim()
+  if (
+    movement.warehouseId === route.productionWarehouseId &&
+    movementLocationId === route.productionLocationId
+  ) {
+    return true
+  }
+  return (
+    !movementLocationId &&
+    route.productionWarehouseId === route.productionLocationId &&
+    movement.warehouseId === route.productionWarehouseId
+  )
+}
+
 function assertHandoffActor(actor: HandoffActor | undefined): { ok: true } | { ok: false; error: string } {
   if (!actor?.roleId) return { ok: true } // tests may omit; slice should pass
   if (actor.roleId === 'warehouse_keeper' || actor.roleId === 'sysadmin') return { ok: true }
@@ -148,13 +169,14 @@ function findIdempotentPair(
 }
 
 /**
- * Physical stock at a production location for one order (and optional batch).
+ * Physical stock at one production warehouse/location tuple for one order (and optional item).
  * Derived from movements — not a second ledger.
  */
 export function computeLineMaterialBalances(
   store: WarehouseStore,
   args: {
     productionOrderId: string
+    productionWarehouseId: string
     productionLocationId: string
     lineId?: string
     itemId?: string
@@ -178,19 +200,29 @@ export function computeLineMaterialBalances(
       doc &&
         (doc.purpose === 'production_material_transfer' ||
           doc.docRole === 'production_transfer_issue' ||
-          doc.docRole === 'production_transfer_receipt'),
+          doc.docRole === 'production_transfer_receipt' ||
+          (doc.type === 'issue' &&
+            doc.purpose === 'production_issue' &&
+            doc.docRole === 'transfer_issue') ||
+          (doc.type === 'receipt' &&
+            doc.purpose === 'production_receipt' &&
+            doc.docRole === 'transfer_receipt')),
     )
   const isReturnDoc = (doc: WarehouseDocument | undefined) =>
     Boolean(
       doc &&
         (doc.purpose === 'production_material_return' ||
           doc.docRole === 'production_return_issue' ||
-          doc.docRole === 'production_return_receipt'),
+          doc.docRole === 'production_return_receipt' ||
+          (doc.type === 'issue' && doc.purpose === 'return' && doc.docRole === 'transfer_issue') ||
+          (doc.type === 'receipt' &&
+            doc.purpose === 'return' &&
+            doc.docRole === 'transfer_receipt')),
     )
 
   for (const m of store.movements) {
     if (m.productionOrderId !== args.productionOrderId) continue
-    if (m.warehouseId !== args.productionLocationId) continue
+    if (!movementMatchesProductionTuple(m, args)) continue
     if (args.itemId && m.itemId !== args.itemId) continue
     if (m.type !== 'receipt' && m.type !== 'issue') continue
 
@@ -200,6 +232,7 @@ export function computeLineMaterialBalances(
       row = {
         productionOrderId: args.productionOrderId,
         lineId: args.lineId ?? '',
+        productionWarehouseId: args.productionWarehouseId,
         productionLocationId: args.productionLocationId,
         itemId: m.itemId,
         batchNo: m.batchNo,
@@ -249,12 +282,14 @@ export function computeLineMaterialBalances(
 function remainingAtLine(
   store: WarehouseStore,
   orderId: string,
+  warehouseId: string,
   locationId: string,
   itemId: string,
   batchNo?: string,
 ): number {
   const rows = computeLineMaterialBalances(store, {
     productionOrderId: orderId,
+    productionWarehouseId: warehouseId,
     productionLocationId: locationId,
     itemId,
   })
@@ -330,7 +365,7 @@ export function transferProductionMaterials(
   if (!isWarehouseAccountingActive(store, input.rawWarehouseId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
-  if (!isWarehouseAccountingActive(store, lineResolve.productionLocationId)) {
+  if (!isWarehouseAccountingActive(store, lineResolve.productionWarehouseId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
 
@@ -478,9 +513,9 @@ export function transferProductionMaterials(
     date,
     documentDateTime: now,
     warehouseId: input.rawWarehouseId,
-    targetWarehouseId: lineResolve.productionLocationId,
+    targetWarehouseId: lineResolve.productionWarehouseId,
     sourceWarehouseId: input.rawWarehouseId,
-    destinationWarehouseId: lineResolve.productionLocationId,
+    destinationWarehouseId: lineResolve.productionWarehouseId,
     purpose: 'production_material_transfer',
     docRole: 'production_transfer_issue',
     productionOrderId: order.id,
@@ -548,6 +583,8 @@ export function transferProductionMaterials(
         if (!doc || doc.transferPairId !== pairId) return m
         return {
           ...m,
+          locationId:
+            doc.type === 'receipt' ? lineResolve.productionLocationId : m.locationId,
           productionOrderId: order.id,
           transactionGroupId: groupId,
         }
@@ -643,7 +680,7 @@ export function returnProductionMaterials(
   if (!isWarehouseAccountingActive(store, input.rawWarehouseId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
-  if (!isWarehouseAccountingActive(store, lineResolve.productionLocationId)) {
+  if (!isWarehouseAccountingActive(store, lineResolve.productionWarehouseId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
 
@@ -669,6 +706,7 @@ export function returnProductionMaterials(
     const rem = remainingAtLine(
       store,
       order.id,
+      lineResolve.productionWarehouseId,
       lineResolve.productionLocationId,
       item.id,
       line.batchNo,
@@ -707,9 +745,9 @@ export function returnProductionMaterials(
     number: transferNumber,
     date,
     documentDateTime: now,
-    warehouseId: lineResolve.productionLocationId,
+    warehouseId: lineResolve.productionWarehouseId,
     targetWarehouseId: input.rawWarehouseId,
-    sourceWarehouseId: lineResolve.productionLocationId,
+    sourceWarehouseId: lineResolve.productionWarehouseId,
     destinationWarehouseId: input.rawWarehouseId,
     purpose: 'production_material_return',
     docRole: 'production_return_issue',
@@ -774,7 +812,12 @@ export function returnProductionMaterials(
       movements: next.movements.map((m) => {
         const doc = next.documents.find((d) => d.id === m.documentId)
         if (!doc || doc.transferPairId !== pairId) return m
-        return { ...m, productionOrderId: order.id, transactionGroupId: groupId }
+        return {
+          ...m,
+          locationId: doc.type === 'issue' ? lineResolve.productionLocationId : m.locationId,
+          productionOrderId: order.id,
+          transactionGroupId: groupId,
+        }
       }),
     }
   }

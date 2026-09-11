@@ -28,14 +28,18 @@ import type { ProductionOrder } from '@/lib/planner/types'
 import { countOpenRecipeRequests } from '@/lib/planner/recipeRequests'
 import type { PostBatchMixInput, PostBatchMixResult } from '@/lib/formulations/batch'
 import { formatQty } from '@/lib/warehouse/stock'
-import type {
-  EadCalculationRecord,
-  EadControlRecord,
-  ImpregnationQcRecord,
-  IncomingControlRecord,
-  RoomClimateRecord,
-  ShiftHandoffRecord,
-  TechnologistQcStore,
+import {
+  collectConfirmedImpregnationMixerBatches,
+  type AuthoritativeImpregnationQcDecisionSnapshot,
+  type AuthoritativeImpregnationProductionOrder,
+  type AuthorizeImpregnationQcDecision,
+  type EadCalculationRecord,
+  type EadControlRecord,
+  type ImpregnationQcRecord,
+  type IncomingControlRecord,
+  type RoomClimateRecord,
+  type ShiftHandoffRecord,
+  type TechnologistQcStore,
 } from '@/lib/technologist/types'
 import type { WastewaterTransition, WastewaterTransitionPatch } from '@/lib/wastewater/transitions'
 import type { WastewaterCube, WastewaterStore } from '@/lib/wastewater/types'
@@ -58,6 +62,8 @@ type Props = {
   wastewater: WastewaterStore
   warehouse: WarehouseStore
   plannerOrders: ProductionOrder[]
+  /** Loaded critical G3 order stream; absent means QC batch selection fails closed. */
+  authoritativeProductionOrders?: AuthoritativeImpregnationProductionOrder[]
   brigades: string[]
   operatorId?: string
   operatorName?: string
@@ -67,6 +73,12 @@ type Props = {
   webTechnologistMode?: boolean
   webUserName?: string
   site?: string
+  /** Server-authoritative impregnation decision; absent means fail closed. */
+  onAuthorizeImpregnationQcDecision?: AuthorizeImpregnationQcDecision
+  /** Loaded G3 decision stream; absent means the QC writer fails closed. */
+  authoritativeImpregnationQcDecisions?: AuthoritativeImpregnationQcDecisionSnapshot[]
+  /** Defense-in-depth: UI additionally requires the exact staging Firebase project. */
+  allowEduManualVisual?: boolean
   onUpsertRecipe: (
     r: FormulationRecipe,
   ) => { ok: true } | { ok: false; error: string } | void
@@ -100,7 +112,7 @@ type Props = {
   ) => void
   onRemoveIncomingControl: (id: string) => void
   onUpsertImpregnationQc: (
-    entry: Omit<ImpregnationQcRecord, 'computed' | 'id' | 'createdAt'>,
+    entry: Omit<ImpregnationQcRecord, 'computed' | 'id' | 'createdAt'> & { id?: string },
   ) => void
   onRemoveImpregnationQc: (id: string) => void
   onAddRoomClimateReading: (entry: Omit<RoomClimateRecord, 'id' | 'createdAt'>) => void
@@ -139,6 +151,7 @@ export function TechnologistPage({
   wastewater,
   warehouse,
   plannerOrders,
+  authoritativeProductionOrders,
   brigades,
   operatorId,
   operatorName,
@@ -148,6 +161,9 @@ export function TechnologistPage({
   webTechnologistMode = false,
   webUserName,
   site,
+  onAuthorizeImpregnationQcDecision,
+  authoritativeImpregnationQcDecisions,
+  allowEduManualVisual = false,
   onUpsertRecipe,
   onUpsertWarehouseItem,
   onSubmitRecipeVersion,
@@ -207,6 +223,18 @@ export function TechnologistPage({
   const recipeById = useMemo(
     () => new Map(formulations.recipes.map((r) => [r.id, r])),
     [formulations.recipes],
+  )
+
+  const confirmedImpregnationMixerBatches = useMemo(
+    () =>
+      authoritativeProductionOrders
+        ? collectConfirmedImpregnationMixerBatches(
+            formulations,
+            warehouse,
+            authoritativeProductionOrders,
+          )
+        : [],
+    [authoritativeProductionOrders, formulations, warehouse],
   )
 
   function handleBatchPosted(run: FormulationBatchRun) {
@@ -472,7 +500,11 @@ export function TechnologistPage({
         <TechnologistQcHub
           qcStore={technologistQc}
           formulations={formulations}
+          confirmedMixerBatches={confirmedImpregnationMixerBatches}
+          authoritativeImpregnationQcDecisions={authoritativeImpregnationQcDecisions}
           operatorName={operatorName}
+          allowEduManualVisual={allowEduManualVisual}
+          onAuthorizeImpregnationQcDecision={onAuthorizeImpregnationQcDecision}
           onUpsertEadCalculation={onUpsertEadCalculation}
           onRemoveEadCalculation={onRemoveEadCalculation}
           onUpsertEadControl={onUpsertEadControl}

@@ -141,7 +141,11 @@ export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDep
           '@/lib/planner/g5ServerClient'
         )
         if (isG5WebPath()) {
-          const prev = getStore().sales.orders.find((o) => o.id === order.id)
+          const before = getStore()
+          const prev = before.sales.orders.find((o) => o.id === order.id)
+          const previousCriticalRevision = Number(
+            (before.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+          )
           const commercial = order.commercialStatus ?? order.status
           const isDraft = !commercial || commercial === 'draft'
           const priorityOnly =
@@ -156,59 +160,67 @@ export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDep
             : isDraft
               ? 'sales.order.draft.save'
               : 'sales.order.change'
+          const command = priorityOnly
+            ? { id: order.id, priority: order.priority === 'urgent' ? 10 : 1 }
+            : {
+                id: order.id,
+                customerId: order.counterpartyId,
+                orderDate: order.orderDate,
+                priority: order.priority === 'urgent' ? 10 : 1,
+                lines: order.lines.map((l) => ({
+                  lineId: l.id,
+                  finishedProductId: l.finishedProductId,
+                  quantity: l.qtyMp,
+                  unit: l.unit ?? 'm2',
+                  requestedShipDate: order.dueDate,
+                  linkedProductionOrderIds: [...(l.productionOrderIds ?? [])],
+                })),
+              }
           const conf = await executeG5Command({
             idempotencyKey: `g5-so-${order.id}-${order.updatedAt || Date.now()}`,
             commandType,
-            command: priorityOnly
-              ? { id: order.id, priority: order.priority === 'urgent' ? 10 : 1 }
-              : {
-                  id: order.id,
-                  customerId: order.counterpartyId,
-                  priority: order.priority === 'urgent' ? 10 : 1,
-                  lines: order.lines.map((l) => ({
-                    lineId: l.id,
-                    finishedProductId: l.finishedProductId,
-                    quantity: l.qtyMp,
-                    unit: 'm2',
-                    requestedShipDate: order.dueDate,
-                  })),
-                },
+            command,
           })
           if (!conf.ok) {
             throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
           }
-          const ackId = String(
-            (conf.data as { id?: string } | undefined)?.id || order.id,
-          )
+          let ackId = String((conf.data as { id?: string } | undefined)?.id ?? '').trim()
+          if (isDraft) {
+            const {
+              g5SalesDraftCommandFingerprint,
+              validateG5SalesDraftSaveAck,
+            } = await import('@/lib/sales/g5SalesOrderAuthority')
+            const validated = validateG5SalesDraftSaveAck(
+              conf.data,
+              previousCriticalRevision,
+              {
+                orderId: order.id,
+                customerId: String(order.counterpartyId ?? '').trim(),
+                priority: order.priority === 'urgent' ? 10 : 1,
+                orderDate: order.orderDate,
+                commandFingerprint: g5SalesDraftCommandFingerprint(command),
+                existingLineIds: prev?.lines.map((line) => line.id) ?? [],
+                lines: order.lines.map((line) => ({
+                  lineId: line.id,
+                  finishedProductId: String(line.finishedProductId ?? '').trim(),
+                  quantity: line.qtyMp,
+                  unit: line.unit ?? 'm2',
+                  requestedShipDate: order.dueDate,
+                  productionOrderIds: [...(line.productionOrderIds ?? [])],
+                })),
+              },
+            )
+            if (!validated.ok) throw new Error(validated.error)
+            ackId = validated.order.id
+          }
+          if (!ackId) throw new Error('sales_order_ack_mismatch')
           setStore(
-            (s) => {
-              let next = mirrorG5Ack(s, conf.data)
-              if (!next.sales.orders.some((o) => o.id === ackId)) {
-                const draft = {
-                  ...order,
-                  id: ackId,
-                  status: (isDraft ? 'draft' : order.status) as typeof order.status,
-                  commercialStatus: (isDraft
-                    ? 'draft'
-                    : (order.commercialStatus ?? order.status)) as typeof order.commercialStatus,
-                  updatedAt: new Date().toISOString(),
-                }
-                next = {
-                  ...next,
-                  sales: {
-                    ...next.sales,
-                    orders: [
-                      ...next.sales.orders.filter((o) => o.id !== order.id),
-                      draft,
-                    ],
-                  },
-                }
-              }
-              return next
-            },
+            (s) => mirrorG5Ack(s, conf.data),
             { origin: 'system' },
           )
-          return getStore().sales.orders.find((o) => o.id === ackId) ?? order
+          const persisted = getStore().sales.orders.find((o) => o.id === ackId)
+          if (!persisted) throw new Error('sales_order_ack_mismatch')
+          return persisted
         }
       }
 
@@ -286,19 +298,40 @@ export function createSalesSlice({ setStore, getStore, getActor }: StoreSliceDep
           '@/lib/planner/g5ServerClient'
         )
         if (isG5WebPath()) {
+          const before = getStore()
+          const previousOrder = before.sales.orders.find((order) => order.id === id)
+          const previousCriticalRevision = Number(
+            (before.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+          )
           const commandType =
             status === 'confirmed'
               ? 'sales.order.confirm'
               : status === 'cancelled'
                 ? 'sales.order.cancel'
                 : 'sales.order.change'
+          const command = { id }
           const conf = await executeG5Command({
             idempotencyKey: `g5-so-status-${id}-${status}-${Date.now()}`,
             commandType,
-            command: { id },
+            command,
           })
           if (!conf.ok) {
             throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
+          }
+          if (status === 'confirmed') {
+            if (!previousOrder) throw new Error('sales_order_confirm_ack_mismatch')
+            const { g5CommandFingerprint, validateG5SalesConfirmAck } = await import(
+              '@/lib/sales/g5SalesOrderAuthority'
+            )
+            const validated = validateG5SalesConfirmAck(
+              conf.data,
+              previousCriticalRevision,
+              {
+                commandFingerprint: g5CommandFingerprint(commandType, command),
+                previousOrder,
+              },
+            )
+            if (!validated.ok) throw new Error(validated.error)
           }
           setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
           return

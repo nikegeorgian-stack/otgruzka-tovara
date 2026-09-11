@@ -1123,6 +1123,7 @@ describe('PHASE P1B production shift report', () => {
     expect(fefo.result.report?.materialLines[0]?.batchNo).toBe(
       computeLineMaterialBalances(fefo.warehouse, {
         productionOrderId: fefoFixture.order.id,
+        productionWarehouseId: 'wh-line1',
         productionLocationId: 'wh-line1',
         lineId: '1',
         itemId: 'item-rm',
@@ -1193,6 +1194,7 @@ describe('PHASE P1B production shift report', () => {
     expect(fifo.result.report?.materialLines[0]?.batchNo).toBe(
       computeLineMaterialBalances(fifo.warehouse, {
         productionOrderId: fifoOrder.id,
+        productionWarehouseId: 'wh-line1',
         productionLocationId: 'wh-line1',
         lineId: '1',
         itemId: 'item-rm',
@@ -1466,6 +1468,7 @@ describe('PHASE P1B production shift report', () => {
     }
     const rows = computeLineMaterialBalances(out.warehouse, {
       productionOrderId: fixture.order.id,
+      productionWarehouseId: 'wh-line1',
       productionLocationId: 'wh-line1',
       lineId: '1',
       itemId: 'item-rm',

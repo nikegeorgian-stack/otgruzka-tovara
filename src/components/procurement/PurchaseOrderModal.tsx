@@ -46,6 +46,7 @@ type ModalTab = 'main' | 'lines' | 'logistics' | 'documents' | 'tracking' | 'jou
 type Props = {
   order: PurchaseOrder
   isNew: boolean
+  authoritativeMode?: boolean
   counterparties: CounterpartyStore
   warehouse: WarehouseStore
   categories: ProcurementCategoryNode[]
@@ -54,7 +55,7 @@ type Props = {
   onUpsertCounterparty: (c: Counterparty) => void
   onUpsertWarehouseItem: (item: WarehouseItem) => void
   onNavigateToDirectory: (section: DirectorySection) => void
-  onSave: (order: PurchaseOrder, statusNote?: string) => void
+  onSave: (order: PurchaseOrder, statusNote?: string) => void | Promise<unknown>
   onSyncPersist?: (order: PurchaseOrder) => void
   /** ACL: show print actions when user can view the order. */
   canViewOrder?: boolean
@@ -91,6 +92,7 @@ function newLeg(seq: number): ShipmentLeg {
 export function PurchaseOrderModal({
   order: initial,
   isNew,
+  authoritativeMode = false,
   counterparties,
   warehouse,
   categories,
@@ -119,6 +121,23 @@ export function PurchaseOrderModal({
   const [pickItemId, setPickItemId] = useState('')
   const [statusChangeNote, setStatusChangeNote] = useState('')
   const [journalSyncing, setJournalSyncing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const statusOptions = useMemo<PurchaseOrderStatus[]>(() => {
+    if (!authoritativeMode) return [...ORDER_STATUS_FLOW, 'cancelled']
+    switch (initial.status) {
+      case 'draft':
+        return ['draft', 'submitted', 'cancelled']
+      case 'submitted':
+        return ['submitted', 'approved', 'cancelled']
+      case 'approved':
+        return ['approved', 'ordered', 'cancelled']
+      case 'ordered':
+      case 'partial':
+        return [initial.status, 'cancelled']
+      default:
+        return [initial.status]
+    }
+  }, [authoritativeMode, initial.status])
   const statusChanged = !isNew && draft.status !== initial.status
   const canRefreshJournal = Boolean(
     draft.containerTracking?.reference.trim() &&
@@ -186,7 +205,7 @@ export function PurchaseOrderModal({
     }
   }
 
-  function save() {
+  async function save() {
     if (supplierMode === 'select' && !draft.counterpartyId) {
       setError(t('procurement.err.supplierRequired'))
       setTab('main')
@@ -207,32 +226,58 @@ export function PurchaseOrderModal({
       setTab('lines')
       return
     }
+    if (
+      authoritativeMode &&
+      (supplierMode !== 'select' ||
+        !draft.destinationWarehouseId ||
+        draft.lines.some(
+          (line) =>
+            !line.warehouseItemId ||
+            !Number.isFinite(Number(line.quantity)) ||
+            Number(line.quantity) <= 0 ||
+            !line.unit.trim(),
+        ))
+    ) {
+      setError('g5.error.use_g5_gateway')
+      setTab(draft.destinationWarehouseId ? 'lines' : 'main')
+      return
+    }
     setError(null)
 
-    const prepared = syncOrderBeforeSave(
-      {
-        order: {
-          ...draft,
-          lines: draft.lines.filter((l) => l.name.trim()),
-          legs: draft.legs.map((l, i) => ({ ...l, sequence: i + 1 })),
-        },
-        pendingSupplier: supplierMode === 'new' ? pendingSupplier : null,
-        pendingContract: showNewContract ? pendingContract : null,
-        linesToNomenclature,
-        counterparties: counterparties.items,
-        counterpartyStore: counterparties,
-        warehouse,
-      },
-      {
-        upsertCounterparty: onUpsertCounterparty,
-        upsertWarehouseItem: onUpsertWarehouseItem,
-      },
-    )
+    const baseOrder = {
+      ...draft,
+      lines: draft.lines.filter((line) => line.name.trim()),
+      legs: draft.legs.map((line, index) => ({ ...line, sequence: index + 1 })),
+    }
+    const prepared = authoritativeMode
+      ? { order: baseOrder }
+      : syncOrderBeforeSave(
+          {
+            order: baseOrder,
+            pendingSupplier: supplierMode === 'new' ? pendingSupplier : null,
+            pendingContract: showNewContract ? pendingContract : null,
+            linesToNomenclature,
+            counterparties: counterparties.items,
+            counterpartyStore: counterparties,
+            warehouse,
+          },
+          {
+            upsertCounterparty: onUpsertCounterparty,
+            upsertWarehouseItem: onUpsertWarehouseItem,
+          },
+        )
 
-    onSave(
-      prepared.order,
-      statusChanged ? statusChangeNote.trim() || undefined : undefined,
-    )
+    setSaving(true)
+    try {
+      await onSave(
+        prepared.order,
+        statusChanged ? statusChangeNote.trim() || undefined : undefined,
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'g5.error.use_g5_gateway')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function toggleNomenclature(lineId: string, on: boolean) {
@@ -278,7 +323,7 @@ export function PurchaseOrderModal({
       onClose={onClose}
       dirty={dirty}
       onSaveDirty={() => {
-        save()
+        void save()
       }}
       panelClassName="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-sm bg-white shadow-sm"
     >
@@ -348,14 +393,16 @@ export function PurchaseOrderModal({
                       }
                       onAdd={() => onNavigateToDirectory('counterparties')}
                     />
-                    <button
-                      type="button"
-                      className="mt-2 text-sm font-semibold text-teal-700 hover:underline"
-                      data-coach="procurement:orderAddSupplier"
-                      onClick={() => setSupplierMode('new')}
-                    >
-                      + {t('procurement.supplier.createNew')}
-                    </button>
+                    {!authoritativeMode ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-sm font-semibold text-teal-700 hover:underline"
+                        data-coach="procurement:orderAddSupplier"
+                        onClick={() => setSupplierMode('new')}
+                      >
+                        + {t('procurement.supplier.createNew')}
+                      </button>
+                    ) : null}
                     </div>
                   </>
                 ) : (
@@ -550,7 +597,7 @@ export function PurchaseOrderModal({
                       setDraft({ ...draft, status: e.target.value as PurchaseOrderStatus })
                     }
                   >
-                    {ORDER_STATUS_FLOW.concat('cancelled').map((s) => (
+                    {statusOptions.map((s) => (
                       <option key={s} value={s}>
                         {t(`procurement.status.${s}`)}
                       </option>
@@ -796,13 +843,15 @@ export function PurchaseOrderModal({
                     onAdd={() => onNavigateToDirectory('nomenclature')}
                   />
                 </div>
-                <button
-                  type="button"
-                  className="btn-add shrink-0"
-                  onClick={() => setDraft((d) => ({ ...d, lines: [...d.lines, newLine()] }))}
-                >
-                  + {t('procurement.addLine')}
-                </button>
+                {!authoritativeMode ? (
+                  <button
+                    type="button"
+                    className="btn-add shrink-0"
+                    onClick={() => setDraft((d) => ({ ...d, lines: [...d.lines, newLine()] }))}
+                  >
+                    + {t('procurement.addLine')}
+                  </button>
+                ) : null}
               </div>
               <div className="overflow-x-auto rounded-sm border border-grid">
                 <table className="w-full text-sm">
@@ -825,6 +874,7 @@ export function PurchaseOrderModal({
                           <input
                             className="w-full rounded border border-grid px-2 py-1 text-sm"
                             value={line.name}
+                            readOnly={authoritativeMode}
                             onChange={(e) =>
                               setDraft((d) => ({
                                 ...d,
@@ -880,6 +930,7 @@ export function PurchaseOrderModal({
                           <input
                             className="w-full rounded border border-grid px-2 py-1 text-sm"
                             value={line.unit}
+                            readOnly={authoritativeMode}
                             onChange={(e) =>
                               setDraft((d) => ({
                                 ...d,
@@ -920,6 +971,7 @@ export function PurchaseOrderModal({
                             min={0}
                             className="w-full rounded border border-grid px-2 py-1 text-sm text-right"
                             value={line.receivedQty}
+                            readOnly={authoritativeMode}
                             onChange={(e) =>
                               setDraft((d) => ({
                                 ...d,
@@ -933,7 +985,7 @@ export function PurchaseOrderModal({
                           />
                         </td>
                         <td className="px-2 py-1.5 text-center">
-                          {!line.warehouseItemId && line.name.trim() ? (
+                          {!authoritativeMode && !line.warehouseItemId && line.name.trim() ? (
                             <label className="inline-flex items-center gap-1 text-[10px] text-stone-600">
                               <input
                                 type="checkbox"
@@ -1415,7 +1467,8 @@ export function PurchaseOrderModal({
               type="button"
               className="rounded-sm bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
               data-coach="procurement:orderSave"
-              onClick={save}
+              disabled={saving}
+              onClick={() => void save()}
             >
               {t('common.save')}
             </button>

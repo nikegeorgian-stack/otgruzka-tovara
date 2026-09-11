@@ -5,9 +5,14 @@
 import type { ProductionLineId } from '@/lib/production/types'
 import { PRODUCTION_LINES } from '@/lib/production/types'
 import type { ProductionLineLocationBinding, WarehouseStore } from './types'
+import {
+  LINE_BINDING_LOCATION_MISSING,
+  LINE_BINDING_NOT_CONFIGURED,
+  resolveProductionLineBinding as resolveProductionLineBindingCore,
+} from '@/lib/production/lineReadinessCore.mjs'
 
-export const LINE_LOCATION_NOT_CONFIGURED = 'warehouse.handoff.errLineNotConfigured' as const
-export const LINE_LOCATION_MISSING = 'warehouse.handoff.errLocationMissing' as const
+export const LINE_LOCATION_NOT_CONFIGURED = LINE_BINDING_NOT_CONFIGURED
+export const LINE_LOCATION_MISSING = LINE_BINDING_LOCATION_MISSING
 
 export function knownProductionLineIds(): string[] {
   return PRODUCTION_LINES.map((l) => l.id)
@@ -29,7 +34,12 @@ export function getProductionLineBinding(
   store: Pick<WarehouseStore, 'productionLineBindings'>,
   lineId: string,
 ): ProductionLineLocationBinding | undefined {
-  const raw = (store.productionLineBindings ?? []).find((b) => b.lineId === lineId || b.id === lineId)
+  const candidates = (store.productionLineBindings ?? []).filter((b) => {
+    const canonicalLineId = String(b.lineId ?? '').trim()
+    return canonicalLineId ? canonicalLineId === lineId : b.id === lineId
+  })
+  if (candidates.length !== 1) return undefined
+  const raw = candidates[0]
   if (!raw) return undefined
   const productionWarehouseId = bindingProductionWarehouseId(raw)
   const productionLocationId = String(raw.productionLocationId ?? '').trim()
@@ -52,17 +62,11 @@ export function resolveProductionLineLocation(
       productionWarehouseId: string
       productionLocationId: string
     }
-  | { ok: false; error: typeof LINE_LOCATION_NOT_CONFIGURED | typeof LINE_LOCATION_MISSING } {
-  const binding = getProductionLineBinding(store, lineId)
-  const productionWarehouseId = binding ? bindingProductionWarehouseId(binding) : ''
-  const productionLocationId = String(binding?.productionLocationId ?? '').trim()
-  if (!productionWarehouseId || !productionLocationId) {
-    return { ok: false, error: LINE_LOCATION_NOT_CONFIGURED }
-  }
-  const locIds = new Set(store.locations.map((l) => l.id))
-  if (!locIds.has(productionWarehouseId) || !locIds.has(productionLocationId)) {
-    return { ok: false, error: LINE_LOCATION_MISSING }
-  }
+  | { ok: false; error: string } {
+  const resolved = resolveProductionLineBindingCore(store, lineId)
+  if (!resolved.ok) return resolved
+  const binding = getProductionLineBinding(store, lineId)!
+  const { productionWarehouseId, productionLocationId } = resolved
   const normalized: ProductionLineLocationBinding = {
     ...binding!,
     id: binding!.id || binding!.lineId,

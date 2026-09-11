@@ -54,7 +54,7 @@ export type ProductionOrder = {
   /** Справочник готовой продукции */
   finishedProductId?: string
   productName: string
-  /** @deprecated — используйте finishedProductId */
+  /** Stable warehouse item used for finished-goods output (m² ledger). */
   warehouseItemId?: string
   category: PlannerOrderCategory
   totalQtyMp: number
@@ -78,6 +78,8 @@ export type ProductionOrder = {
   boxRecipeId?: string
   /** Рецептура пропиточного состава */
   formulationRecipeId?: string
+  /** Frozen warehouse item produced by the selected impregnation recipe (kg ledger). */
+  impregnationOutputItemId?: string
   /** Запрос / назначение рецептуры технологом */
   formulationRecipeStatus?: FormulationRecipeStatus
   /** Целевая граммовка / плотность для подбора рецепта, г/м² */
@@ -102,8 +104,10 @@ export type ProductionOrder = {
   metersPerRoll?: number
   /** PHASE P1B — immutable recipe norm snapshot after confirm/activate */
   recipeNormSnapshot?: import('@/lib/formulations/recipeApproval').RecipeNormSnapshot
-  /** PHASE P1B — stable semi-finished warehouse item (m² ledger) */
+  /** Stable post-line, pre-packaging WIP warehouse item (m² ledger). */
   semiFinishedItemId?: string
+  /** Server-owned canonical WIP/QC lineage contract for newly created staging orders. */
+  wipContractVersion?: 1
   /** PHASE P1B — m² per roll conversion for shift report validation */
   m2PerRoll?: number
   /** Кэш расчёта по всему заказу */
@@ -112,6 +116,8 @@ export type ProductionOrder = {
   packagingBomId?: string
   packagingBomVersion?: number
   packagingBomContentHash?: string
+  /** Server-frozen product policy; false is the only valid no-BOM exemption. */
+  packagingBomRequired?: boolean
   /** G5.4 — immutable BOM snapshot frozen at G3 confirm */
   packagingBomSnapshot?: import('@/lib/planner/g5PackagingBom').PackagingBomSnapshot
   dayPlans: PlannerDayPlan[]

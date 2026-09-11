@@ -3,6 +3,7 @@ import { AccessAdminPanel } from '@/components/auth/AccessAdminPanel'
 import { WorkshopMasterCoveragePanel } from '@/components/access/WorkshopMasterCoveragePanel'
 import { CoachSettingsPanel } from '@/components/ai/CoachSettingsPanel'
 import { RsGeSettingsPanel } from '@/components/settings/RsGeSettingsPanel'
+import { ProductionLineBindingSettingsPanel } from '@/components/settings/ProductionLineBindingSettingsPanel'
 import { FormNotice } from '@/components/ui/FormNotice'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
@@ -26,6 +27,7 @@ import type { AppUser } from '@/lib/access/types'
 import type { AppStore, PrintSignatures, ViewId } from '@/lib/types'
 import { MAX_AUDIT_ENTRIES } from '@/lib/types'
 import type { UpsertAppUserInput } from '@/store/slices/accessSlice'
+import type { ProductionLineBindingSaveResult } from '@/lib/warehouse/productionLineBindingSettings'
 
 type Props = {
   store: AppStore
@@ -73,6 +75,12 @@ type Props = {
   onAddMonth: (month: string) => void
   canCloseWarehousePeriod?: boolean
   canReopenWarehousePeriod?: boolean
+  allowStagingLineBindingConfiguration?: boolean
+  onUpsertProductionLineLocationBinding?: (
+    binding: Omit<import('@/lib/warehouse/types').ProductionLineLocationBinding, 'id'> & {
+      id?: string
+    },
+  ) => ProductionLineBindingSaveResult | Promise<ProductionLineBindingSaveResult>
   onRemoveMonth: (month: string) => void
   onArchiveMonth: (month: string, archived: boolean) => void
   onSetMonthClosed: (month: string, closed: boolean) => void
@@ -115,6 +123,8 @@ export function SettingsPage({
   onAddMonth,
   canCloseWarehousePeriod,
   canReopenWarehousePeriod,
+  allowStagingLineBindingConfiguration = false,
+  onUpsertProductionLineLocationBinding,
   onRemoveMonth,
   onArchiveMonth,
   onSetMonthClosed,
@@ -372,6 +382,15 @@ export function SettingsPage({
       {isWeb && currentUser && canManageAccess(currentUser) && (
         <CloudStoreSizePanel store={store} />
       )}
+
+      {onUpsertProductionLineLocationBinding ? (
+        <ProductionLineBindingSettingsPanel
+          warehouse={store.warehouse}
+          currentUser={currentUser}
+          allowStagingConfiguration={allowStagingLineBindingConfiguration}
+          onUpsert={onUpsertProductionLineLocationBinding}
+        />
+      ) : null}
 
       {currentUser && canManageAccess(currentUser) && <AgentChainContextPanel />}
 

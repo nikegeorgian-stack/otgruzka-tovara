@@ -217,6 +217,7 @@ describe('G5.1 security / concurrency', () => {
         qcStatus: 'released',
         quantityQcReleased: 20,
         quantityShipped: 0,
+        quantityRemaining: 20,
         lotRevision: 1,
         currentDecisionId: 'd1',
       },
@@ -230,7 +231,7 @@ describe('G5.1 security / concurrency', () => {
     expect(
       (await cmd(svc, 'masterdata.customer.upsert', { id: CUST_ID, code: 'C', name: 'C' }, 'c')).ok,
     ).toBe(true)
-    await cmd(
+    const draft = await cmd(
       svc,
       'sales.order.draft.save',
       {
@@ -243,13 +244,16 @@ describe('G5.1 security / concurrency', () => {
       'sod',
     )
     expect((await cmd(svc, 'sales.order.confirm', { id: 'so-r' }, 'soc')).ok).toBe(true)
+    const salesLineId = String(
+      (draft.order as { lines: Array<{ lineId: string }> }).lines[0].lineId,
+    )
 
     const first = await cmd(
       svc,
       'sales.shipment.post',
       {
         salesOrderId: 'so-r',
-        salesLineId: 'sol-1',
+        salesLineId,
         shipmentId: 'shp-a',
         finishedGoodsLotId: LOT_ID,
         finishedProductId: FG_ID,
@@ -266,7 +270,7 @@ describe('G5.1 security / concurrency', () => {
       'sales.shipment.post',
       {
         salesOrderId: 'so-r',
-        salesLineId: 'sol-1',
+        salesLineId,
         shipmentId: 'shp-b',
         finishedGoodsLotId: LOT_ID,
         finishedProductId: FG_ID,

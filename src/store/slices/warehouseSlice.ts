@@ -34,7 +34,15 @@ import {
   type ProductionMaterialReturnInput,
   type ProductionMaterialTransferInput,
 } from '@/lib/warehouse/productionMaterialHandoff'
+import {
+  validateG3MaterialHandoffAck,
+  type G3MaterialHandoffAck,
+} from '@/lib/warehouse/g3MaterialHandoffAck'
+export { validateG3MaterialHandoffAck } from '@/lib/warehouse/g3MaterialHandoffAck'
 import { upsertProductionLineBinding } from '@/lib/warehouse/productionLineLocationConfig'
+import {
+  validateProductionLineBindingAck,
+} from '@/lib/warehouse/g3LineBindingConfigCore.mjs'
 import type { ProductionLineLocationBinding } from '@/lib/warehouse/types'
 import {
   acquireWarehouseDocumentLock as acquireDocLockInStore,
@@ -123,23 +131,45 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     async upsertWarehouseItem(item: WarehouseItem) {
       const { isG5MasterDataActive } = await import('@/lib/planner/g5Activation')
       if (isG5MasterDataActive(getStore())) {
-        const { isG5WebPath, g5MasterdataItemUpsert, mirrorG5Ack } = await import(
-          '@/lib/planner/g5ServerClient'
-        )
+        const {
+          isG5WebPath,
+          g5MasterdataItemUpsert,
+          mirrorG5Ack,
+          validateG5MasterdataItemUpsertAck,
+        } = await import('@/lib/planner/g5ServerClient')
         if (isG5WebPath()) {
+          const baseUnit = ['m²', 'м²', 'м2', 'sqm'].includes(
+            item.unit.trim().toLowerCase(),
+          )
+            ? 'm2'
+            : item.unit.trim()
+          const previousRevision = Number(
+            (getStore().production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+          )
           const conf = await g5MasterdataItemUpsert({
             idempotencyKey: `g5-item-${item.id}-${Date.now()}`,
             command: {
               id: item.id,
               code: item.internalCode,
               name: item.name,
-              unit: item.unit,
+              baseUnit,
+              categoryId: item.categoryId,
+              warehouseId: item.warehouseId,
               active: item.active !== false,
             },
           })
           if (!conf.ok) {
             throw new Error(conf.error || conf.message || 'g5.error.use_g5_gateway')
           }
+          const ack = validateG5MasterdataItemUpsertAck(conf.data, previousRevision, {
+            id: item.id,
+            code: item.internalCode,
+            name: item.name,
+            baseUnit,
+            categoryId: item.categoryId,
+            warehouseId: item.warehouseId,
+          })
+          if (!ack.ok) throw new Error(ack.error)
           setStore((s) => mirrorG5Ack(s, conf.data), { origin: 'system' })
           return
         }
@@ -642,58 +672,70 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     ): Promise<HandoffResult> {
       const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
         await import('@/lib/production/g3ServerClient')
-      if (
-        isG3WebAuthoritativePath() &&
-        isG3ProductionDomainActive(
-          // production may not be on warehouse slice store — read via getStore if available
-          (typeof getStore === 'function'
-            ? (getStore() as { production?: Record<string, unknown> }).production
-            : undefined) as Record<string, unknown>,
-        )
-      ) {
+      if (isG3WebAuthoritativePath()) {
+        const production = (typeof getStore === 'function'
+          ? (getStore() as { production?: Record<string, unknown> }).production
+          : undefined) as Record<string, unknown>
+        if (!isG3ProductionDomainActive(production)) {
+          return { ok: false, error: 'production_authoritative_domain_inactive' }
+        }
+        const previousCriticalRevision = Number(production.g3CriticalRevision ?? 0)
+        const command = {
+          orderId: input.productionOrder.id,
+          lineId: input.productionOrder.lineId,
+          rawWarehouseId: input.rawWarehouseId,
+          reservationDocumentId: input.reservationDocumentId,
+          overReserveReason: input.overReserveReason,
+          reason: input.overReserveReason || input.comment,
+          lines: input.lines.map((l) => ({
+            itemId: l.itemId,
+            quantity: l.quantity,
+            batchNo: l.batchNo,
+            expiryDate: l.expiryDate,
+          })),
+        }
         const server = await g3ProductionCommand({
           idempotencyKey: input.idempotencyKey,
           commandType: 'production.material.issueToLine',
-          command: {
-            orderId: input.productionOrder.id,
-            lineId: input.productionOrder.lineId,
-            rawWarehouseId: input.rawWarehouseId,
-            overReserveReason: input.overReserveReason,
-            reason: input.overReserveReason || input.comment,
-            lines: input.lines.map((l) => ({
-              itemId: l.itemId,
-              quantity: l.quantity,
-              batchNo: l.batchNo,
-              expiryDate: l.expiryDate,
-            })),
-          },
+          command,
         })
         if (!server.ok) return { ok: false, error: server.error || server.message }
-        patchWarehouse(
-          setStore,
-          (w) => {
-            const mirrored = mirrorG3Ack(w, {}, {
-              warehouse: server.data.warehouse,
-              production: server.data.production,
-              criticalRevision: server.data.criticalRevision,
-            })
-            return mirrored.warehouse
+        const ack = server.data as G3MaterialHandoffAck
+        const validated = await validateG3MaterialHandoffAck(ack, {
+          commandType: 'production.material.issueToLine',
+          orderId: input.productionOrder.id,
+          lineId: input.productionOrder.lineId,
+          rawWarehouseId: input.rawWarehouseId,
+          reservationDocumentId: input.reservationDocumentId,
+          reason: String(command.overReserveReason ?? command.reason ?? ''),
+          lines: input.lines,
+          idempotencyKey: input.idempotencyKey,
+          previousCriticalRevision,
+        })
+        if (!validated.ok) return validated
+        setStore(
+          (state) => {
+            const mirrored = mirrorG3Ack(
+              state.warehouse,
+              state.production as unknown as Record<string, unknown>,
+              {
+                warehouse: server.data.warehouse,
+                production: server.data.production,
+                criticalRevision: server.data.criticalRevision,
+              },
+            )
+            return {
+              ...state,
+              warehouse: mirrored.warehouse,
+              production: mirrored.production as typeof state.production,
+            }
           },
-          {
-            origin: 'user',
-            atomic: true,
-            transactionGroupId: warehouseTransactionGroupId({
-              kind: 'production_material_transfer',
-              sourceId: input.productionOrder.id,
-              revision: String(server.data.criticalRevision ?? 1),
-            }),
-            transactionGroupKind: 'production_material_transfer',
-            transactionGroupLabel: 'G3 issue to line',
-          },
+          { origin: 'system' },
         )
         return {
           ok: true,
-          documentIds: (server.data as { documentIds?: string[] }).documentIds,
+          documentIds: validated.documentIds,
+          transferPairId: validated.transferPairId,
           idempotent: server.data.idempotent,
         }
       }
@@ -735,57 +777,67 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
     async returnProductionOrderMaterials(input: ProductionMaterialReturnInput): Promise<HandoffResult> {
       const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
         await import('@/lib/production/g3ServerClient')
-      if (
-        isG3WebAuthoritativePath() &&
-        isG3ProductionDomainActive(
-          // production may not be on warehouse slice store — read via getStore if available
-          (typeof getStore === 'function'
-            ? (getStore() as { production?: Record<string, unknown> }).production
-            : undefined) as Record<string, unknown>,
-        )
-      ) {
+      if (isG3WebAuthoritativePath()) {
+        const production = (typeof getStore === 'function'
+          ? (getStore() as { production?: Record<string, unknown> }).production
+          : undefined) as Record<string, unknown>
+        if (!isG3ProductionDomainActive(production)) {
+          return { ok: false, error: 'production_authoritative_domain_inactive' }
+        }
+        const previousCriticalRevision = Number(production.g3CriticalRevision ?? 0)
+        const command = {
+          orderId: input.productionOrder.id,
+          lineId: input.productionOrder.lineId,
+          rawWarehouseId: input.rawWarehouseId,
+          reason: input.returnReason,
+          lines: input.lines.map((l) => ({
+            itemId: l.itemId,
+            quantity: l.quantity,
+            batchNo: l.batchNo,
+            expiryDate: l.expiryDate,
+          })),
+        }
         const server = await g3ProductionCommand({
           idempotencyKey: input.idempotencyKey,
           commandType: 'production.material.returnFromLine',
-          command: {
-            orderId: input.productionOrder.id,
-            lineId: input.productionOrder.lineId,
-            rawWarehouseId: input.rawWarehouseId,
-            reason: input.returnReason,
-            lines: input.lines.map((l) => ({
-              itemId: l.itemId,
-              quantity: l.quantity,
-              batchNo: l.batchNo,
-              expiryDate: l.expiryDate,
-            })),
-          },
+          command,
         })
         if (!server.ok) return { ok: false, error: server.error || server.message }
-        patchWarehouse(
-          setStore,
-          (w) => {
-            const mirrored = mirrorG3Ack(w, {}, {
-              warehouse: server.data.warehouse,
-              production: server.data.production,
-              criticalRevision: server.data.criticalRevision,
-            })
-            return mirrored.warehouse
+        const ack = server.data as G3MaterialHandoffAck
+        const validated = await validateG3MaterialHandoffAck(ack, {
+          commandType: 'production.material.returnFromLine',
+          orderId: input.productionOrder.id,
+          lineId: input.productionOrder.lineId,
+          rawWarehouseId: input.rawWarehouseId,
+          reason: input.returnReason,
+          lines: input.lines,
+          idempotencyKey: input.idempotencyKey,
+          previousCriticalRevision,
+        })
+        if (!validated.ok) return validated
+        setStore(
+          (state) => {
+            const mirrored = mirrorG3Ack(
+              state.warehouse,
+              state.production as unknown as Record<string, unknown>,
+              {
+                warehouse: server.data.warehouse,
+                production: server.data.production,
+                criticalRevision: server.data.criticalRevision,
+              },
+            )
+            return {
+              ...state,
+              warehouse: mirrored.warehouse,
+              production: mirrored.production as typeof state.production,
+            }
           },
-          {
-            origin: 'user',
-            atomic: true,
-            transactionGroupId: warehouseTransactionGroupId({
-              kind: 'production_material_return',
-              sourceId: input.productionOrder.id,
-              revision: String(server.data.criticalRevision ?? 1),
-            }),
-            transactionGroupKind: 'production_material_return',
-            transactionGroupLabel: 'G3 return from line',
-          },
+          { origin: 'system' },
         )
         return {
           ok: true,
-          documentIds: (server.data as { documentIds?: string[] }).documentIds,
+          documentIds: validated.documentIds,
+          transferPairId: validated.transferPairId,
           idempotent: server.data.idempotent,
         }
       }
@@ -819,10 +871,91 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
       return result
     },
 
-    upsertProductionLineLocationBinding(
+    async upsertProductionLineLocationBinding(
       binding: Omit<ProductionLineLocationBinding, 'id'> & { id?: string },
     ) {
+      const {
+        g3ProductionCommand,
+        isG3ProductionDomainActive,
+        isG3WebAuthoritativePath,
+        mirrorG3Ack,
+      } = await import('@/lib/production/g3ServerClient')
+      if (isG3WebAuthoritativePath()) {
+        const current = getStore()
+        if (
+          !isG3ProductionDomainActive(
+            current.production as unknown as Record<string, unknown>,
+          )
+        ) {
+          return { ok: false, error: 'production_authoritative_domain_inactive' }
+        }
+        const expected = {
+          lineId: String(binding.lineId ?? binding.id ?? '').trim(),
+          productionWarehouseId: String(binding.productionWarehouseId ?? '').trim(),
+          productionLocationId: String(binding.productionLocationId ?? '').trim(),
+          note: String(binding.note ?? '').trim(),
+        }
+        if (
+          !expected.lineId ||
+          !expected.productionWarehouseId ||
+          !expected.productionLocationId
+        ) {
+          return { ok: false, error: 'production_line_binding_config_input_invalid' }
+        }
+        const previousCriticalRevision = Number(
+          (current.production as unknown as Record<string, unknown>).g3CriticalRevision ?? 0,
+        )
+        // A transport attempt key must never double as the business/config
+        // fingerprint. In particular A→B→A needs three distinct attempts.
+        const commandIdentity = `production-line-binding-attempt:${expected.lineId}:${crypto.randomUUID()}`
+        const server = await g3ProductionCommand({
+          idempotencyKey: commandIdentity,
+          commandType: 'production.lineBinding.configure',
+          command: expected,
+        })
+        if (!server.ok) {
+          return { ok: false, error: server.error || server.message }
+        }
+        const validated = await validateProductionLineBindingAck(server.data, expected, {
+          previousCriticalRevision,
+        })
+        if (!validated.ok) return validated
+        setStore(
+          (state) => {
+            const mirrored = mirrorG3Ack(
+              state.warehouse,
+              state.production as unknown as Record<string, unknown>,
+              {
+                warehouse: server.data.warehouse,
+                production: server.data.production,
+                criticalRevision: server.data.criticalRevision,
+              },
+            )
+            return {
+              ...state,
+              warehouse: mirrored.warehouse,
+              production: mirrored.production as typeof state.production,
+            }
+          },
+          { origin: 'system' },
+        )
+        return {
+          ok: true,
+          binding: validated.binding,
+          bindingFingerprint: validated.bindingFingerprint,
+          criticalRevision: validated.criticalRevision,
+          idempotent: validated.idempotent,
+        }
+      }
+
       patchWarehouse(setStore, (w) => upsertProductionLineBinding(w, binding))
+      return {
+        ok: true,
+        binding: {
+          ...binding,
+          id: binding.id ?? binding.lineId,
+        } as ProductionLineLocationBinding,
+      }
     },
 
     async cancelWarehouseDocument(
@@ -844,42 +977,68 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
           if (isG5WebPath()) {
             const reason = args?.reason?.trim()
             if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
+            const date = new Date().toISOString().slice(0, 10)
+            const minimumCriticalRevision = Number(
+              (currentForG4.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+            )
             const server = await g5SalesShipmentCancel({
               idempotencyKey: `g5-ship-cancel-${loadingShipmentForG4.id}`,
               command: {
                 shipmentId: loadingShipmentForG4.id,
                 reason,
                 cancellationReason: reason,
+                date,
               },
             })
             if (!server.ok) return { ok: false, error: server.error || server.message }
-            setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' })
-            const reversalIds = Array.isArray(
-              (server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds,
+            const { acceptG5ShipmentCancelAck } = await import(
+              '@/lib/warehouse/g5ShipmentAck'
             )
-              ? ((server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds as string[])
-              : []
-            return { ok: true, reversalIds }
+            const acknowledged = await acceptG5ShipmentCancelAck(
+              server.data as unknown as Parameters<typeof acceptG5ShipmentCancelAck>[0],
+              {
+                shipmentId: loadingShipmentForG4.id,
+                reason,
+                date,
+                minimumCriticalRevision,
+              },
+              () => setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' }),
+            )
+            if (!acknowledged.ok) return { ok: false, error: acknowledged.error }
+            return { ok: true, reversalIds: acknowledged.reversalDocumentIds }
           }
         }
-        const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+        const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
           await import('@/lib/production/g4ServerClient')
-        if (
-          isG4WebAuthoritativePath() &&
-          isG4PackagingQcActive(currentForG4.production as unknown as Record<string, unknown>)
-        ) {
+        if (isG4WebAuthoritativePath()) {
           const reason = args?.reason?.trim()
           if (!reason) return { ok: false, error: 'warehouse.doc.errCancelReasonRequired' }
+          const date = new Date().toISOString().slice(0, 10)
+          const command = {
+            shipmentId: loadingShipmentForG4.id,
+            reason,
+            cancellationReason: reason,
+            date,
+          }
+          const previousCriticalRevision = Number(
+            (currentForG4.production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+          )
           const server = await g4ProductionCommand({
             idempotencyKey: `g4-ship-cancel-${loadingShipmentForG4.id}`,
             commandType: 'shipment.cancel',
-            command: {
-              shipmentId: loadingShipmentForG4.id,
-              reason,
-              cancellationReason: reason,
-            },
+            command,
           })
           if (!server.ok) return { ok: false, error: server.error || server.message }
+          const { validateG4CriticalMutationAck } = await import(
+            '@/lib/production/g4CriticalMutationAck'
+          )
+          const acknowledged = validateG4CriticalMutationAck({
+            ack: server.data,
+            commandType: 'shipment.cancel',
+            command,
+            previousCriticalRevision,
+          })
+          if (!acknowledged.ok) return { ok: false, error: acknowledged.error }
           setStore((s) => {
             const mirrored = mirrorG4Ack(
               s.warehouse,
@@ -888,7 +1047,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
                 warehouse: server.data.warehouse,
                 production: server.data.production,
                 criticalRevision: server.data.criticalRevision,
-                packagingQcActive: server.data.packagingQcActive ?? true,
+                packagingQcActive: server.data.packagingQcActive,
                 productionActive: server.data.productionActive,
               },
             )
@@ -905,14 +1064,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
             }
             return next
           })
-          const reversalIds = Array.isArray(
-            (server.data as { reversalDocumentIds?: string[]; reversalIds?: string[] }).reversalDocumentIds,
-          )
-            ? ((server.data as { reversalDocumentIds?: string[] }).reversalDocumentIds as string[])
-            : Array.isArray((server.data as { reversalIds?: string[] }).reversalIds)
-              ? ((server.data as { reversalIds?: string[] }).reversalIds as string[])
-              : []
-          return { ok: true, reversalIds }
+          return { ok: true, reversalIds: acknowledged.documentIds }
         }
       }
 
@@ -1392,50 +1544,63 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
           const lots = storeNow.production.finishedGoodsLots ?? []
           const usages = resolveLoadingShipmentLotUsages(shipment.lines, lots)
           if (!usages.ok) return { ok: false as const, error: usages.error }
-          if (usages.usages.length === 0) {
-            return { ok: false as const, error: 'warehouse.loading.errEmpty' }
+          const { acceptG5ShipmentPostAck, requireSingleG5ShipmentUsage } = await import(
+            '@/lib/warehouse/g5ShipmentAck'
+          )
+          const singleUsage = requireSingleG5ShipmentUsage(usages.usages)
+          if (!singleUsage.ok) return { ok: false as const, error: singleUsage.error }
+          const usage = singleUsage.usage
+          const lot = lots.find((entry) => entry.id === usage.lotId)
+          if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
+          const { resolveSalesShipmentLinkIds } = await import('@/lib/sales/loadingLink')
+          const link = resolveSalesShipmentLinkIds(
+            storeNow.sales.orders,
+            shipment,
+            lot.finishedProductId,
+          )
+          if (!link.salesOrderId || !link.salesLineId) {
+            return { ok: false as const, error: 'invalid_input' }
           }
-          let lastNumber = shipment.number
-          for (const usage of usages.usages) {
-            const lot = lots.find((l) => l.id === usage.lotId)
-            if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
-            const lineShipmentId =
-              usages.usages.length === 1 ? shipmentId : `${shipmentId}::${usage.lineId}`
-            const { resolveSalesShipmentLinkIds } = await import('@/lib/sales/loadingLink')
-            const link = resolveSalesShipmentLinkIds(
-              storeNow.sales.orders,
-              shipment,
-              lot.finishedProductId,
-            )
-            if (!link.salesOrderId || !link.salesLineId) {
-              return { ok: false as const, error: 'invalid_input' }
-            }
-            const server = await g5SalesShipmentPost({
-              idempotencyKey: `g5-ship-post-${lineShipmentId}`,
-              command: {
-                shipmentId: lineShipmentId,
-                finishedProductId: lot.finishedProductId,
-                finishedGoodsLotId: usage.lotId,
-                lotId: usage.lotId,
-                quantity: usage.quantity,
-                warehouseId: shipment.warehouseId || lot.warehouseId,
-                salesOrderId: link.salesOrderId,
-                salesLineId: link.salesLineId,
-                date: shipment.date,
-                counterpartyId: shipment.counterpartyId,
-                keeperId: args?.keeperId ?? shipment.keeperId,
-                keeperName: args?.keeperName ?? shipment.keeperName,
-              },
-            })
-            if (!server.ok) {
-              return { ok: false as const, error: server.error || server.message }
-            }
-            setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' })
-            lastNumber =
-              (server.data as { number?: string }).number ??
-              String((server.data as { shipmentId?: string }).shipmentId ?? lastNumber)
+          const linkedOrder = storeNow.sales.orders.find((order) => order.id === link.salesOrderId)
+          const counterpartyId = shipment.counterpartyId ?? linkedOrder?.counterpartyId
+          if (!linkedOrder || !counterpartyId) {
+            return { ok: false as const, error: 'invalid_input' }
           }
-          return { ok: true as const, number: lastNumber }
+          const command = {
+            shipmentId,
+            finishedProductId: lot.finishedProductId,
+            finishedGoodsLotId: usage.lotId,
+            lotId: usage.lotId,
+            quantity: usage.quantity,
+            warehouseId: shipment.warehouseId || lot.warehouseId,
+            salesOrderId: link.salesOrderId,
+            salesLineId: link.salesLineId,
+            date: shipment.date,
+            counterpartyId,
+            keeperId: args?.keeperId ?? shipment.keeperId,
+            keeperName: args?.keeperName ?? shipment.keeperName,
+          }
+          const server = await g5SalesShipmentPost({
+            idempotencyKey: `g5-ship-post-${shipmentId}`,
+            command,
+          })
+          if (!server.ok) {
+            return { ok: false as const, error: server.error || server.message }
+          }
+          const acknowledged = await acceptG5ShipmentPostAck(
+            server.data as unknown as Parameters<typeof acceptG5ShipmentPostAck>[0],
+            {
+              ...command,
+              minimumCriticalRevision: Number(
+                (storeNow.production as { g5CriticalRevision?: number }).g5CriticalRevision ?? 0,
+              ),
+            },
+            () => setStore((s) => mirrorG5Ack(s, server.data), { origin: 'system' }),
+          )
+          if (!acknowledged.ok) {
+            return { ok: false as const, error: acknowledged.error }
+          }
+          return { ok: true as const, number: acknowledged.number }
         }
       }
 
@@ -1457,30 +1622,46 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
         }
 
         let lastNumber = shipment.number
+        const { validateG4CriticalMutationAck } = await import(
+          '@/lib/production/g4CriticalMutationAck'
+        )
         for (const usage of usages.usages) {
           const lot = lots.find((l) => l.id === usage.lotId)
           if (!lot) return { ok: false as const, error: 'production.ship.errLotRequired' }
           const lineShipmentId =
             usages.usages.length === 1 ? shipmentId : `${shipmentId}::${usage.lineId}`
+          const command = {
+            shipmentId: lineShipmentId,
+            finishedProductId: lot.finishedProductId,
+            finishedGoodsLotId: usage.lotId,
+            lotId: usage.lotId,
+            quantity: usage.quantity,
+            warehouseId: shipment.warehouseId || lot.warehouseId,
+            salesOrderId: shipment.salesOrderId,
+            date: shipment.date,
+            counterpartyId: shipment.counterpartyId,
+            keeperId: args?.keeperId ?? shipment.keeperId,
+            keeperName: args?.keeperName ?? shipment.keeperName,
+          }
+          const previousCriticalRevision = Number(
+            (getStore().production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+          )
           const server = await g4ProductionCommand({
             idempotencyKey: `g4-ship-post-${lineShipmentId}`,
             commandType: 'shipment.post',
-            command: {
-              shipmentId: lineShipmentId,
-              finishedProductId: lot.finishedProductId,
-              finishedGoodsLotId: usage.lotId,
-              lotId: usage.lotId,
-              quantity: usage.quantity,
-              warehouseId: shipment.warehouseId || lot.warehouseId,
-              salesOrderId: shipment.salesOrderId,
-              date: shipment.date,
-              counterpartyId: shipment.counterpartyId,
-              keeperId: args?.keeperId ?? shipment.keeperId,
-              keeperName: args?.keeperName ?? shipment.keeperName,
-            },
+            command,
           })
           if (!server.ok) {
             return { ok: false as const, error: server.error || server.message }
+          }
+          const acknowledged = validateG4CriticalMutationAck({
+            ack: server.data,
+            commandType: 'shipment.post',
+            command,
+            previousCriticalRevision,
+          })
+          if (!acknowledged.ok) {
+            return { ok: false as const, error: acknowledged.error }
           }
           setStore((s) => {
             const mirrored = mirrorG4Ack(
@@ -1490,7 +1671,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
                 warehouse: server.data.warehouse,
                 production: server.data.production,
                 criticalRevision: server.data.criticalRevision,
-                packagingQcActive: server.data.packagingQcActive ?? true,
+                packagingQcActive: server.data.packagingQcActive,
                 productionActive: server.data.productionActive,
               },
             )
@@ -1509,7 +1690,7 @@ export function createWarehouseSlice({ setStore, getStore, getActor }: StoreSlic
             return next
           })
           lastNumber =
-            (server.data as { number?: string }).number ??
+            (acknowledged.shipment as { number?: string } | undefined)?.number ??
             server.data.shipmentId ??
             lastNumber
         }

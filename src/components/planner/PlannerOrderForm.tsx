@@ -31,12 +31,17 @@ import {
 } from '@/lib/warehouse/documentValidation'
 import { estimatedOrderedRolls, qtyMpFromRolls } from '@/lib/planner/rolls'
 import {
+  isAreaWarehouseUnit,
+  validateProductionOrderWip,
+} from '@/lib/planner/activateGate'
+import {
   type PlannerPlanMode,
   type PlannerRecalcMode,
   type ProductionOrder,
 } from '@/lib/planner/types'
 import { PRODUCTION_LINES } from '@/lib/production/types'
 import type { WarehouseItem, StockMovement } from '@/lib/warehouse/types'
+import { warehouseItemDisplayName } from '@/lib/warehouse/technicalName'
 import type { ReactNode } from 'react'
 
 const fieldClass =
@@ -95,6 +100,7 @@ export function PlannerOrderForm({
     form.rawMaterialItemId ||
     form.formulationRecipeId ||
     form.packagingRecipeId ||
+    form.semiFinishedItemId ||
     form.metersPerRoll
   )
   const [extrasOpen, setExtrasOpen] = useState(hasExtras || !isEdit)
@@ -128,6 +134,22 @@ export function PlannerOrderForm({
   )
 
   const selectedProduct = finishedProducts.find((p) => p.id === form.finishedProductId)
+  const finishedGoodsItemId = form.warehouseItemId || selectedProduct?.warehouseItemId
+  const wipItemOptions = warehouseItems
+    .filter(
+      (item) =>
+        item.active &&
+        isAreaWarehouseUnit(item.unit) &&
+        (!finishedGoodsItemId || item.id !== finishedGoodsItemId),
+    )
+    .map((item) => ({
+      value: item.id,
+      label: `${warehouseItemDisplayName(item)} · ${item.unit}`,
+    }))
+  const wipGate = validateProductionOrderWip(form, {
+    warehouseItems,
+    finishedGoodsItemId,
+  })
   const selectedCustomer = customers.find((c) => c.id === form.counterpartyId)
   const selectedPackRecipe = packagingRecipes.find((r) => r.id === form.packagingRecipeId)
   const selectedBoxRecipe = boxRecipes.find((r) => r.id === form.boxRecipeId)
@@ -541,6 +563,34 @@ export function PlannerOrderForm({
                 >
                   {t('planner.form.journal.nomenclature')}
                 </button>
+              </div>
+
+              <div
+                className="rounded-md border border-sky-200/80 bg-sky-50/40 p-3"
+                data-testid="planner-wip-item"
+              >
+                <DirectoryFieldPicker
+                  label={t('planner.wipItem')}
+                  hint={t('planner.wipItemHint')}
+                  value={form.semiFinishedItemId ?? ''}
+                  placeholder={t('planner.wipItemPick')}
+                  options={wipItemOptions}
+                  onChange={(id) =>
+                    setForm((current) => ({
+                      ...current,
+                      semiFinishedItemId: id || undefined,
+                    }))
+                  }
+                  onAdd={() => onOpenDirectory('nomenclature', { create: true })}
+                  onOpenJournal={() => onOpenDirectory('nomenclature')}
+                  journalLabel={t('planner.form.journal.nomenclature')}
+                >
+                  {!wipGate.ok && (
+                    <span className="mt-1 block text-[10px] font-medium text-red-700">
+                      {t(wipGate.messageKey)}
+                    </span>
+                  )}
+                </DirectoryFieldPicker>
               </div>
 
               <div className="rounded-md border border-violet-200/80 bg-violet-50/40 p-3">

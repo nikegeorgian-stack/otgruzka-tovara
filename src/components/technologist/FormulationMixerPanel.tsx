@@ -6,7 +6,11 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { Input } from '@/components/ui/Input'
 import { useI18n } from '@/context/I18nContext'
 import { useConfirm } from '@/context/ConfirmContext'
-import { planFormulationBatch, type PostBatchMixResult } from '@/lib/formulations/batch'
+import {
+  planFormulationBatch,
+  type PostBatchMixInput,
+  type PostBatchMixResult,
+} from '@/lib/formulations/batch'
 import { analyzeBatchPlan, varianceLevel, varianceLevelClass, warehousePriceLookup } from '@/lib/formulations/batchAnalysis'
 import { recipeTotalBatchKg } from '@/lib/formulations/calc'
 import { formulationRecipeDisplayName } from '@/lib/formulations/warehouseSync'
@@ -22,23 +26,17 @@ type Props = {
   operatorId?: string
   operatorName?: string
   allowNegativeStock?: boolean
-  onPostBatch: (input: {
-    recipeId: string
-    targetVolumeL: number
-    warehouseId: string
-    mixedAt: string
-    mixedBy: string
-    mixedByName: string
-    shiftBrigade?: string
-    shiftNote?: string
-    comment?: string
-  }) => PostBatchMixResult
+  onPostBatch: (input: PostBatchMixInput) => PostBatchMixResult
   onBatchPosted: (run: FormulationBatchRun) => void
   /** Пред-заполнение из задания на замес (интерфейс миксера) */
   initialRecipeId?: string
   initialVolumeL?: number
   initialWarehouseId?: string
   initialBrigade?: string
+  /** Stable lineage of the selected task; absent for a free mix. */
+  mixTaskId?: string
+  productionOrderId?: string
+  productionLineId?: string
   /** Подпись активного задания (например, номер ЗД-…) */
   taskBadge?: string
 }
@@ -60,6 +58,9 @@ export function FormulationMixerPanel({
   initialVolumeL,
   initialWarehouseId,
   initialBrigade,
+  mixTaskId,
+  productionOrderId,
+  productionLineId,
   taskBadge,
 }: Props) {
   const { t, tf, locale } = useI18n()
@@ -131,6 +132,9 @@ export function FormulationMixerPanel({
       mixedAt,
       mixedBy: operatorId,
       mixedByName: operatorName,
+      ...(mixTaskId ? { mixTaskId } : {}),
+      ...(productionOrderId ? { productionOrderId } : {}),
+      ...(productionLineId ? { productionLineId } : {}),
       shiftBrigade: shiftBrigade || undefined,
       shiftNote: shiftNote.trim() || undefined,
       comment: comment.trim() || undefined,

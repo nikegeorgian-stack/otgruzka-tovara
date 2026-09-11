@@ -2,7 +2,12 @@ import { useState } from 'react'
 import { TabBar } from '@/components/ui/TabBar'
 import { useI18n } from '@/context/I18nContext'
 import type { FormulationStore } from '@/lib/formulations/types'
-import type { TechnologistQcStore } from '@/lib/technologist/types'
+import type {
+  AuthoritativeImpregnationQcDecisionSnapshot,
+  AuthorizeImpregnationQcDecision,
+  ConfirmedImpregnationMixerBatch,
+  TechnologistQcStore,
+} from '@/lib/technologist/types'
 import { TechnologistEadCalcPanel } from './TechnologistEadCalcPanel'
 import { TechnologistEadControlPanel } from './TechnologistEadControlPanel'
 import { TechnologistIncomingControlPanel } from './TechnologistIncomingControlPanel'
@@ -13,7 +18,11 @@ type QcTab = 'eadCalc' | 'eadControl' | 'incoming' | 'impreg'
 type Props = {
   qcStore: TechnologistQcStore
   formulations: FormulationStore
+  confirmedMixerBatches: ConfirmedImpregnationMixerBatch[]
+  authoritativeImpregnationQcDecisions?: AuthoritativeImpregnationQcDecisionSnapshot[]
   operatorName?: string
+  allowEduManualVisual?: boolean
+  onAuthorizeImpregnationQcDecision?: AuthorizeImpregnationQcDecision
   onUpsertEadCalculation: Parameters<typeof TechnologistEadCalcPanel>[0]['onSave']
   onRemoveEadCalculation: (id: string) => void
   onUpsertEadControl: Parameters<typeof TechnologistEadControlPanel>[0]['onSave']
@@ -65,7 +74,11 @@ export function TechnologistQcHub(props: Props) {
         <TechnologistImpregnationQcPanel
           store={props.qcStore}
           formulations={props.formulations}
+          confirmedMixerBatches={props.confirmedMixerBatches}
+          authoritativeDecisions={props.authoritativeImpregnationQcDecisions}
           operatorName={props.operatorName}
+          allowEduManualVisual={props.allowEduManualVisual}
+          onAuthorizeDecision={props.onAuthorizeImpregnationQcDecision}
           onSave={props.onUpsertImpregnationQc}
           onRemove={props.onRemoveImpregnationQc}
         />

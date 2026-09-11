@@ -19,7 +19,7 @@ import type { ProcurementPageProps } from './procurementTypes'
 type Props = Pick<ProcurementPageProps, 'counterparties'> & {
   orders: PurchaseOrder[]
   onEdit: (order: PurchaseOrder) => void
-  onRemove: (id: string) => void
+  onRemove?: (id: string) => void
   onReceive?: (
     id: string,
     opts?: ReceiveOrderOpts,
@@ -155,9 +155,7 @@ export function ProcurementOrdersTab({ orders, counterparties, onEdit, onRemove,
                       {t('common.edit')}
                     </button>
                     {onReceive &&
-                      o.status !== 'draft' &&
-                      o.status !== 'received' &&
-                      o.status !== 'cancelled' &&
+                      ['approved', 'ordered', 'partial'].includes(o.status) &&
                       recv < 100 && (
                         <button
                           type="button"
@@ -168,7 +166,7 @@ export function ProcurementOrdersTab({ orders, counterparties, onEdit, onRemove,
                           {t('procurement.receive.action')}
                         </button>
                       )}
-                    {o.status === 'draft' && (
+                    {o.status === 'draft' && onRemove && (
                       <button
                         type="button"
                         className="ml-2 text-xs text-red-600 hover:underline"

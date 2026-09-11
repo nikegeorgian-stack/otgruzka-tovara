@@ -33,6 +33,7 @@
  *   g5ProductionRecommendationCreateManual → planning.productionRecommendation.createManual
  *   g5ProcurementDomainActivate           → procurement.domain.activate
  *   g5GenerateProcurementDrafts           → procurement.generateDraftsFromMrp
+ *   g5ProcurementDraftCreate              → procurement.draft.create
  *   g5ProcurementDraftEdit                → procurement.draft.edit
  *   g5ProcurementOrderChange              → procurement.order.change
  *   g5ProcurementSubmit                   → procurement.order.submit
@@ -51,7 +52,7 @@ import {
 
 describe('G5.2 UI gateway matrix', () => {
   it('every matrix row has a named wrapper with matching commandType', () => {
-    expect(G5_UI_GATEWAY_MATRIX.length).toBe(37)
+    expect(G5_UI_GATEWAY_MATRIX.length).toBe(38)
 
     for (const row of G5_UI_GATEWAY_MATRIX) {
       const fn = (g5Client as Record<string, unknown>)[row.wrapper] as G5NamedWrapper | undefined
@@ -71,6 +72,7 @@ describe('G5.2 UI gateway matrix', () => {
       'planning.mrp.run',
       'procurement.domain.activate',
       'procurement.generateDraftsFromMrp',
+      'procurement.draft.create',
       'procurement.draft.edit',
       'procurement.order.submit',
       'procurement.order.approve',

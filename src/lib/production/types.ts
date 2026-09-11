@@ -156,6 +156,10 @@ export type ProductionStore = {
   finishedGoodsLots?: import('./finishedGoodsLots').FinishedGoodsLot[]
   /** PHASE P1C — метаданные QC-вложений */
   qcAttachments?: import('./qcAttachments').QcLotAttachment[]
+  /** R3.1C — authoritative mixer-batch disposition before line confirmation. */
+  impregnationQcDecisions?: import('@/lib/technologist/types').AuthoritativeImpregnationQcDecisionSnapshot[]
+  /** Read-only authoritative G3 order projection used by strict lineage selectors. */
+  g3Orders?: import('@/lib/technologist/types').AuthoritativeImpregnationProductionOrder[]
 }
 
 export const PRODUCTION_LINES: {

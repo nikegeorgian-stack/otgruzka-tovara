@@ -717,6 +717,7 @@ export function useAppStore() {
     assignProductionOrderFormulationRecipe: production.assignProductionOrderFormulationRecipe,
     removeProductionOrder: production.removeProductionOrder,
     activateProductionOrder: production.activateProductionOrder,
+    authorizeImpregnationQcDecision: production.authorizeImpregnationQcDecision,
     confirmProductionShiftReport: production.confirmProductionShiftReport,
     confirmProductionShiftReportCorrection: production.confirmProductionShiftReportCorrection,
     upsertPackagingReport: production.upsertPackagingReport,

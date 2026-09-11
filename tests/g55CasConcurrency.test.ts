@@ -306,7 +306,7 @@ describe('G5.5 CAS concurrency', () => {
       command: {
         id: winnerItemId,
         code: a.ok ? 'A' : 'B',
-        name: 'retry',
+        name: a.ok ? 'Item A' : 'Item B',
         baseUnit: 'pcs',
         moq: 1,
         active: true,
@@ -316,6 +316,24 @@ describe('G5.5 CAS concurrency', () => {
     expect(retry.idempotent === true || retry.recoveredFromEmbeddedReceipt === true).toBe(true)
     const itemsAfter = payload().domains.masterData.items ?? []
     expect(itemsAfter.filter((i: { id: string }) => i.id === winnerItemId)).toHaveLength(1)
+
+    calls.updateCas.mockClear()
+    const conflictingRetry = await svc.executeG5Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: winnerKey,
+      commandType: 'masterdata.item.upsert',
+      command: {
+        id: winnerItemId,
+        code: a.ok ? 'A' : 'B',
+        name: 'changed payload',
+        baseUnit: 'pcs',
+        moq: 1,
+        active: true,
+      },
+    })
+    expect(conflictingRetry).toMatchObject({ ok: false, error: 'g5_idempotency_conflict' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
   })
 
   it('concurrent G3 production.order.confirm: one 409, loser retry succeeds', async () => {

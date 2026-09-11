@@ -65,6 +65,8 @@ export type RoutePoint = {
 
 export type PurchaseOrderStatus =
   | 'draft'
+  | 'submitted'
+  | 'approved'
   | 'ordered'
   | 'production'
   | 'shipped'

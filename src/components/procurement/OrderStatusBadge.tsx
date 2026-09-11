@@ -3,6 +3,8 @@ import type { PurchaseOrderStatus } from '@/lib/procurement/types'
 
 const STYLES: Record<PurchaseOrderStatus, string> = {
   draft: 'bg-stone-200 text-stone-700',
+  submitted: 'bg-cyan-100 text-cyan-800',
+  approved: 'bg-teal-100 text-teal-800',
   ordered: 'bg-sky-100 text-sky-800',
   production: 'bg-violet-100 text-violet-800',
   shipped: 'bg-amber-100 text-amber-900',

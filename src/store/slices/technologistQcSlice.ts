@@ -5,14 +5,15 @@ import {
   computeIncomingControl,
 } from '@/lib/technologist/calc'
 import { normalizeShiftHandoff } from '@/lib/technologist/init'
-import type {
-  EadCalculationRecord,
-  EadControlRecord,
-  ImpregnationQcRecord,
-  IncomingControlRecord,
-  RoomClimateRecord,
-  ShiftHandoffRecord,
-  ShiftHandoffUrgency,
+import {
+  impregnationQcDecisionKey,
+  type EadCalculationRecord,
+  type EadControlRecord,
+  type ImpregnationQcRecord,
+  type IncomingControlRecord,
+  type RoomClimateRecord,
+  type ShiftHandoffRecord,
+  type ShiftHandoffUrgency,
 } from '@/lib/technologist/types'
 import { recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
 import { type StoreSliceDeps } from '../storeApi'
@@ -143,21 +144,133 @@ export function createTechnologistQcSlice({ setStore }: StoreSliceDeps) {
       setStore((s) => {
         const list = s.technologistQc.impregnationQc
         const idx = list.findIndex((r) => r.id === row.id)
+        const existing = idx >= 0 ? list[idx] : undefined
+        const hasAuthoritativeMetadata = Boolean(
+          row.authoritativeDecisionId ||
+            row.authoritativeDecisionKey ||
+            row.authoritativeCommandFingerprint ||
+            row.authoritativeActorUid ||
+            row.authoritativeDecidedAt ||
+            row.authoritativeCriticalRevision !== undefined ||
+            row.decisionRevision !== undefined ||
+            row.supersedesDecisionId ||
+            row.supersessionReason ||
+            row.supersededByDecisionId ||
+            row.effective !== undefined,
+        )
+        const decisionRevision = Number(row.decisionRevision)
+        const outputQuantity = Number(row.outputQuantity)
+        const isCompleteAuthoritativeAck = Boolean(
+          row.authoritativeDecisionId &&
+            row.id === row.authoritativeDecisionId &&
+            row.batchRunId &&
+            row.batchNumber &&
+            row.batchIssueDocumentId &&
+            row.batchReceiptDocumentId &&
+            row.productionOrderId &&
+            row.productionLineId &&
+            row.outputWarehouseItemId &&
+            Number.isFinite(outputQuantity) &&
+            outputQuantity > 0 &&
+            Number.isInteger(decisionRevision) &&
+            decisionRevision >= 1 &&
+            row.authoritativeDecisionKey ===
+              impregnationQcDecisionKey(row.batchRunId, decisionRevision) &&
+            /^[a-f0-9]{64}$/.test(row.authoritativeCommandFingerprint ?? '') &&
+            row.authoritativeActorUid &&
+            row.authoritativeDecidedAt &&
+            (row.labStatus === 'pending' || row.labStatus === 'pass' || row.labStatus === 'fail') &&
+            (row.decision === 'approved' || row.decision === 'rejected') &&
+            (row.decisionMethod === 'measured' ||
+              row.decisionMethod === 'edu_manual_visual') &&
+            Number.isInteger(row.authoritativeCriticalRevision) &&
+            Number(row.authoritativeCriticalRevision) > 0 &&
+            row.effective === true &&
+            !row.supersededByDecisionId,
+        )
+        if (hasAuthoritativeMetadata && !isCompleteAuthoritativeAck) return s
+        // An authoritative acknowledgement is append-only local history. Exact
+        // replay is a no-op; form values can never rewrite recorded evidence.
+        if (existing?.authoritativeDecisionId) return s
+        const persistedRow = existing ? { ...row, createdAt: existing.createdAt } : row
+        let withSupersededPredecessor = list
+        if (isCompleteAuthoritativeAck) {
+          const sameBatch = list.filter(
+            (record) =>
+              record.authoritativeDecisionId && record.batchRunId === row.batchRunId,
+          )
+          if (decisionRevision === 1) {
+            if (row.supersedesDecisionId) return s
+          } else {
+            if (!row.supersedesDecisionId || !row.supersessionReason?.trim()) return s
+            const predecessors = sameBatch.filter(
+              (record) => record.authoritativeDecisionId === row.supersedesDecisionId,
+            )
+            if (predecessors.length === 1) {
+              const predecessor = predecessors[0]
+              const predecessorOutputQuantity = Number(predecessor.outputQuantity)
+              const predecessorIsCompatible =
+                predecessor.effective !== false &&
+                !predecessor.supersededByDecisionId &&
+                Number(predecessor.decisionRevision) === decisionRevision - 1 &&
+                predecessor.authoritativeDecisionKey ===
+                  impregnationQcDecisionKey(row.batchRunId, decisionRevision - 1) &&
+                predecessor.productionOrderId === row.productionOrderId &&
+                predecessor.productionLineId === row.productionLineId &&
+                predecessor.batchIssueDocumentId === row.batchIssueDocumentId &&
+                predecessor.batchReceiptDocumentId === row.batchReceiptDocumentId &&
+                predecessor.outputWarehouseItemId === row.outputWarehouseItemId &&
+                predecessor.batchNumber === row.batchNumber &&
+                Number.isFinite(predecessorOutputQuantity) &&
+                predecessorOutputQuantity > 0 &&
+                Math.abs(predecessorOutputQuantity - outputQuantity) <= 1e-9 &&
+                !sameBatch.some(
+                  (record) =>
+                    record.authoritativeDecisionId !== predecessor.authoritativeDecisionId &&
+                    record.effective !== false &&
+                    !record.supersededByDecisionId,
+                )
+              if (predecessorIsCompatible) {
+                withSupersededPredecessor = list.map((record) =>
+                  record === predecessor
+                    ? {
+                        ...record,
+                        effective: false,
+                        supersededByDecisionId: row.authoritativeDecisionId,
+                        supersededAt: row.authoritativeDecidedAt,
+                      }
+                    : record,
+                )
+              }
+            }
+          }
+        }
         const impregnationQc =
-          idx >= 0 ? list.map((r, i) => (i === idx ? row : r)) : [row, ...list]
+          idx >= 0
+            ? withSupersededPredecessor.map((record, index) =>
+                index === idx ? persistedRow : record,
+              )
+            : [persistedRow, ...withSupersededPredecessor]
         return { ...s, technologistQc: { ...s.technologistQc, impregnationQc } }
       })
     },
 
     removeImpregnationQc(id: string) {
-      recordSliceExplicitDelete('technologistQc.impregnationQc', id)
-      setStore((s) => ({
-        ...s,
-        technologistQc: {
-          ...s.technologistQc,
-          impregnationQc: s.technologistQc.impregnationQc.filter((r) => r.id !== id),
-        },
-      }))
+      let removed = false
+      setStore((s) => {
+        const record = s.technologistQc.impregnationQc.find((candidate) => candidate.id === id)
+        if (!record || record.authoritativeDecisionId) return s
+        removed = true
+        return {
+          ...s,
+          technologistQc: {
+            ...s.technologistQc,
+            impregnationQc: s.technologistQc.impregnationQc.filter((candidate) => candidate.id !== id),
+          },
+        }
+      })
+      if (removed) recordSliceExplicitDelete('technologistQc.impregnationQc', id)
+      return removed
     },
 
     addRoomClimateReading(

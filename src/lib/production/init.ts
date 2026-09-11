@@ -278,7 +278,7 @@ export function normalizeProductionRequest(entry: ProductionRequest): Production
 }
 
 export function createDefaultProduction(): ProductionStore {
-  return { requests: [], planner: createDefaultPlanner() }
+  return { requests: [], planner: createDefaultPlanner(), impregnationQcDecisions: [] }
 }
 
 export function normalizeProduction(raw: ProductionStore | undefined): ProductionStore {
@@ -305,5 +305,8 @@ export function normalizeProduction(raw: ProductionStore | undefined): Productio
     packagingReports: Array.isArray(raw?.packagingReports) ? raw!.packagingReports : [],
     finishedGoodsLots: Array.isArray(raw?.finishedGoodsLots) ? raw!.finishedGoodsLots : [],
     qcAttachments: Array.isArray(raw?.qcAttachments) ? raw!.qcAttachments : [],
+    impregnationQcDecisions: Array.isArray(raw?.impregnationQcDecisions)
+      ? raw!.impregnationQcDecisions
+      : [],
   }
 }

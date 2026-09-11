@@ -73,6 +73,10 @@ import { resolveOrderProductColor } from '@/lib/finishedProducts/colors'
 import type { FinishedProduct } from '@/lib/finishedProducts/types'
 import { productTypeToRawKind } from '@/lib/finishedProducts/types'
 import type { WarehouseCategory, WarehouseItem, StockMovement } from '@/lib/warehouse/types'
+import type {
+  HandoffResult,
+  ProductionMaterialTransferInput,
+} from '@/lib/warehouse/productionMaterialHandoff'
 import type { SalesOrder } from '@/lib/sales/types'
 import {
   formatSalesOrderLinkLabel,
@@ -115,6 +119,9 @@ type Props = {
   ) => GeneratePlannerRequestsResult
   onReserveMaterials: (orderId: string) => MaterialReserveResult
   onUnreserveMaterials: (orderId: string) => boolean
+  onTransferProductionOrderMaterials: (
+    input: ProductionMaterialTransferInput,
+  ) => Promise<HandoffResult> | HandoffResult
   salesOrders: SalesOrder[]
   onOpenSalesOrder?: () => void
   focusOrderId?: string | null
@@ -176,6 +183,7 @@ export function PlannerPage({
   onGenerateRequest,
   onReserveMaterials,
   onUnreserveMaterials,
+  onTransferProductionOrderMaterials,
   salesOrders,
   onOpenSalesOrder,
   focusOrderId,
@@ -260,6 +268,17 @@ export function PlannerPage({
     () => orders.find((o) => o.id === selectedId) ?? null,
     [orders, selectedId],
   )
+
+  const selectedActivationGate = useMemo(() => {
+    if (!selected) return null
+    const finishedGoodsItemId =
+      selected.warehouseItemId ||
+      finishedProducts.find((product) => product.id === selected.finishedProductId)?.warehouseItemId
+    return canActivateProductionOrder(selected, undefined, {
+      warehouseItems,
+      finishedGoodsItemId,
+    })
+  }, [finishedProducts, selected, warehouseItems])
 
   const selectedSummary = useMemo(
     () => (selected ? summarizeOrder(selected, requests) : null),
@@ -430,6 +449,7 @@ export function PlannerPage({
       return {
         ...f,
         finishedProductId: id || undefined,
+        warehouseItemId: fp?.warehouseItemId || undefined,
         productName: fp?.name ?? '',
         category: fp?.category ?? f.category,
         colorLogo: fp?.colorLogo ?? f.colorLogo,
@@ -486,7 +506,13 @@ export function PlannerPage({
     const order = orders.find((o) => o.id === id)
     if (!order) return
 
-    const gate = canActivateProductionOrder(order)
+    const finishedGoodsItemId =
+      order.warehouseItemId ||
+      finishedProducts.find((product) => product.id === order.finishedProductId)?.warehouseItemId
+    const gate = canActivateProductionOrder(order, undefined, {
+      warehouseItems,
+      finishedGoodsItemId,
+    })
     if (!gate.ok) {
       setNotice(t(gate.messageKey ?? 'planner.activate.recipePending'))
       return
@@ -1038,10 +1064,11 @@ export function PlannerPage({
                 )}
 
                 {selected.status === 'draft' &&
-                  !canActivateProductionOrder(selected).ok && (
+                  selectedActivationGate &&
+                  !selectedActivationGate.ok && (
                     <FormNotice
                       type="info"
-                      message={t('planner.activate.recipePending')}
+                      message={t(selectedActivationGate.messageKey)}
                     />
                   )}
 
@@ -1049,7 +1076,7 @@ export function PlannerPage({
                   {selected.status === 'draft' && (
                     <button
                       type="button"
-                      disabled={!canActivateProductionOrder(selected).ok}
+                      disabled={!selectedActivationGate?.ok}
                       className="rounded-sm bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                       onClick={() => activateOrder(selected.id)}
                     >
@@ -1362,6 +1389,7 @@ export function PlannerPage({
           warehouseAccounting={warehouseAccounting}
           onReserveOrder={onReserveMaterials}
           onUnreserveOrder={onUnreserveMaterials}
+          onTransferProductionOrderMaterials={onTransferProductionOrderMaterials}
           onSelectOrder={(id) => {
             const order = orders.find((o) => o.id === id)
             if (order) openOrder(order)

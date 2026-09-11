@@ -67,6 +67,7 @@ const PRODUCTION_KNOWN = new Set([
   'wipBatches',
   'wasteRecords',
   'handoffs',
+  'impregnationQcDecisions',
   'auditLog',
   'lineBindings',
   // PHASE G4 — packaging / FG lots / canonical QC decision snapshots
@@ -137,6 +138,7 @@ export function emptyProductionStore() {
     wipBatches: [],
     wasteRecords: [],
     handoffs: [],
+    impregnationQcDecisions: [],
     auditLog: [],
     lineBindings: [],
     packagingReports: [],
@@ -269,6 +271,7 @@ function normalizeProduction(raw) {
     wipBatches: asArray(src.wipBatches),
     wasteRecords: asArray(src.wasteRecords),
     handoffs: asArray(src.handoffs),
+    impregnationQcDecisions: asArray(src.impregnationQcDecisions),
     auditLog: asArray(src.auditLog),
     lineBindings: asArray(src.lineBindings),
     packagingReports: asArray(src.packagingReports),

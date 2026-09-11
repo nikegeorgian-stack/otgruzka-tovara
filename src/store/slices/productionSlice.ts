@@ -36,6 +36,10 @@ import {
   type ConfirmShiftReportResult,
 } from '@/lib/production/shiftReports'
 import {
+  adaptAuthoritativeShiftReport,
+  canonicalShiftBusinessKey,
+} from '@/lib/production/g3ShiftReportAdapter'
+import {
   confirmProductionPackagingReport as confirmPackagingReportCore,
   confirmPackagingReportCorrection as confirmPackagingReportCorrectionCore,
   listAvailableWipAtPackaging,
@@ -44,6 +48,15 @@ import {
   type ProductionPackagingReport,
 } from '@/lib/production/packagingReports'
 import { listPendingQcLots, type FinishedGoodsLot } from '@/lib/production/finishedGoodsLots'
+import {
+  G4_PACKAGING_ACK_INVALID,
+  validatePackagingMutationAck,
+} from '@/lib/production/g4PackagingAck'
+import {
+  G4_CRITICAL_ACK_INVALID,
+  validateG4CriticalMutationAck,
+} from '@/lib/production/g4CriticalMutationAck'
+import { validateImpregnationQcMutationAck } from '@/lib/production/impregnationQcAck'
 import {
   applyRejectTransferToScrap,
   releaseFinishedGoodsLot,
@@ -66,6 +79,7 @@ import {
   captureLegacyNormSnapshot,
 } from '@/lib/formulations/recipeApproval'
 import { actorFromGetter, recordSliceExplicitDelete } from '@/lib/cloud/explicitDeleteHelper'
+import { fingerprintJson } from '@/lib/cloud/cloudPayload'
 import { warehouseTransactionGroupId } from '@/lib/cloud/transactionGroups'
 import {
   reallocateProductionReservation,
@@ -90,6 +104,10 @@ let qcAttachmentAdapter: QcAttachmentStorageAdapter = resolveQcAttachmentAdapter
 export function setQcAttachmentAdapterForTests(adapter?: QcAttachmentStorageAdapter) {
   qcAttachmentAdapter = adapter ?? resolveQcAttachmentAdapter()
 }
+
+export type StartQcReviewMutationResult =
+  | { ok: true; lot: FinishedGoodsLot }
+  | { ok: false; error: string }
 
 export function createProductionSlice({ setStore, getStore, getActor }: StoreSliceDeps) {
   return {
@@ -309,43 +327,157 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async activateProductionOrder(id: string): Promise<{ ok: boolean; messageKey?: string; error?: string }> {
       const { isG3WebAuthoritativePath, g3ProductionCommand, mirrorG3Ack, isG3ProductionDomainActive } =
         await import('@/lib/production/g3ServerClient')
-      if (
-        isG3WebAuthoritativePath() &&
-        isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      if (isG3WebAuthoritativePath()) {
+        if (
+          !isG3ProductionDomainActive(
+            getStore().production as unknown as Record<string, unknown>,
+          )
+        ) {
+          const { G3_PRODUCTION_INACTIVE } = await import(
+            '@/lib/cloud/authoritativeWebGates'
+          )
+          return {
+            ok: false,
+            error: G3_PRODUCTION_INACTIVE,
+            messageKey: G3_PRODUCTION_INACTIVE,
+          }
+        }
         const order = getStore().production.planner.orders.find((o) => o.id === id)
         if (!order) return { ok: false, messageKey: 'planner.material.noOrder' }
-        // Ensure draft exists on critical store then confirm
-        const draftKey = `g3-order-draft-${id}`
+        const formulationRecipe = getStore().formulations.recipes.find(
+          (recipe) => recipe.id === order.formulationRecipeId && recipe.active !== false,
+        )
+        const impregnationOutputItemId = String(
+          formulationRecipe?.outputWarehouseItemId ?? '',
+        ).trim()
+        if (!formulationRecipe || !impregnationOutputItemId) {
+          return {
+            ok: false,
+            error: 'impregnation_output_mapping_required',
+            messageKey: 'impregnation_output_mapping_required',
+          }
+        }
+        const rawItem = getStore().warehouse.items.find(
+          (item) => item.id === order.rawMaterialItemId && item.active !== false,
+        )
+        const rawWarehouseId = String(rawItem?.warehouseId ?? '').trim()
+        const rawMaterialQty = Number(
+          order.packagingPlan?.rawRollsEstimated ?? order.orderedRolls ?? 0,
+        )
+        if (!rawItem || !rawWarehouseId || !(rawMaterialQty > 0)) {
+          return { ok: false, error: 'raw_material_mapping_required', messageKey: 'raw_material_mapping_required' }
+        }
+        // Bind transport replay to the exact activation payload. A fixed key can
+        // otherwise acknowledge an older draft after a failed confirm + edit.
+        const draftCommand = {
+          orderId: id,
+          orderNumber: order.orderNumber,
+          finishedProductId: order.finishedProductId,
+          warehouseItemId: order.warehouseItemId,
+          semiFinishedItemId: order.semiFinishedItemId,
+          rawMaterialItemId: order.rawMaterialItemId,
+          rawMaterialQty,
+          formulationRecipeId: order.formulationRecipeId,
+          impregnationOutputItemId,
+          lineId: order.lineId,
+          totalQtyMp: order.totalQtyMp,
+          startDate: order.startDate,
+          endDate: order.endDate,
+          productName: order.productName,
+          customer: order.customer,
+          category: order.category,
+          priority: order.priority,
+        }
+        const draftFingerprint = fingerprintJson(JSON.stringify(draftCommand))
+        const draftKey = `g3-order-draft:${id}:${draftFingerprint}`
         const draft = await g3ProductionCommand({
           idempotencyKey: draftKey,
           commandType: 'production.order.draft.save',
-          command: {
-            orderId: id,
-            orderNumber: order.orderNumber,
-            finishedProductId: order.finishedProductId,
-            formulationRecipeId: order.formulationRecipeId,
-            lineId: order.lineId,
-            totalQtyMp: order.totalQtyMp,
-            startDate: order.startDate,
-            endDate: order.endDate,
-            productName: order.productName,
-            customer: order.customer,
-            category: order.category,
-            priority: order.priority,
-          },
+          command: draftCommand,
         })
         if (!draft.ok) return { ok: false, error: draft.error, messageKey: draft.error }
-        const rawWarehouseId =
-          getStore().warehouse.accountingByWarehouse?.[0]?.warehouseId ||
-          getStore().warehouse.locations?.[0]?.id ||
-          ''
+        const activationFieldsMatch = (
+          candidate: Record<string, unknown> | undefined,
+          expectedStatus: 'draft' | 'active',
+        ): boolean => {
+          if (!candidate || String(candidate.id ?? '').trim() !== id) return false
+          const textFields = [
+            'orderNumber',
+            'finishedProductId',
+            'warehouseItemId',
+            'semiFinishedItemId',
+            'rawMaterialItemId',
+            'formulationRecipeId',
+            'impregnationOutputItemId',
+            'lineId',
+            'startDate',
+            'endDate',
+            'productName',
+            'customer',
+            'category',
+            'priority',
+          ] as const
+          if (
+            textFields.some(
+              (field) =>
+                String(candidate[field] ?? '').trim() !==
+                String(draftCommand[field] ?? '').trim(),
+            )
+          ) {
+            return false
+          }
+          return (
+            candidate.status === expectedStatus &&
+            Number(candidate.wipContractVersion) === 1 &&
+            Number(candidate.rawMaterialQty) === rawMaterialQty &&
+            Number(candidate.totalQtyMp) === Number(order.totalQtyMp)
+          )
+        }
+        const draftOrders = (draft.data.production?.orders ?? []) as Array<
+          Record<string, unknown>
+        >
+        const draftMatches = draftOrders.filter(
+          (candidate) => String(candidate.id ?? '').trim() === id,
+        )
+        if (
+          draftMatches.length !== 1 ||
+          !activationFieldsMatch(draftMatches[0], 'draft')
+        ) {
+          return {
+            ok: false,
+            error: 'production_order_ack_mismatch',
+            messageKey: 'production_order_ack_mismatch',
+          }
+        }
         const conf = await g3ProductionCommand({
-          idempotencyKey: `g3-order-confirm-${id}`,
+          idempotencyKey:
+            `g3-order-confirm:${id}:${draftFingerprint}:${fingerprintJson(rawWarehouseId)}`,
           commandType: 'production.order.confirm',
           command: { orderId: id, rawWarehouseId },
         })
         if (!conf.ok) return { ok: false, error: conf.error, messageKey: conf.error }
+        const confirmedOrders = (conf.data.production?.orders ?? []) as Array<
+          Record<string, unknown>
+        >
+        const confirmedMatches = confirmedOrders.filter(
+          (candidate) => String(candidate.id ?? '').trim() === id,
+        )
+        const authoritativeOrder = confirmedMatches[0]
+        if (
+          confirmedMatches.length !== 1 ||
+          !authoritativeOrder ||
+          !activationFieldsMatch(authoritativeOrder, 'active') ||
+          String(
+            (authoritativeOrder?.recipeNormSnapshot as Record<string, unknown> | undefined)
+              ?.recipeId ?? '',
+          ).trim() !== String(order.formulationRecipeId ?? '').trim()
+        ) {
+          return {
+            ok: false,
+            error: 'production_order_ack_mismatch',
+            messageKey: 'production_order_ack_mismatch',
+          }
+        }
         setStore((s) => {
           const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
@@ -355,13 +487,11 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           })
           const orders = s.production.planner.orders.map((o) =>
             o.id === id
-              ? {
+              ? ({
                   ...o,
-                  status: 'active' as const,
-                  recipeNormSnapshot: (
-                    conf.data.production?.orders as Array<{ id: string; recipeNormSnapshot?: unknown }> | undefined
-                  )?.find((x) => x.id === id)?.recipeNormSnapshot as typeof o.recipeNormSnapshot,
-                }
+                  ...authoritativeOrder,
+                  id: o.id,
+                } as ProductionOrder)
               : o,
           )
           return {
@@ -391,7 +521,14 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           const order = s.production.planner.orders.find((o) => o.id === id)
           if (!order) return s
 
-          const gate = canActivateProductionOrder(order, s.formulations)
+          const finishedGoodsItemId =
+            order.warehouseItemId ||
+            s.finishedProducts.items.find((product) => product.id === order.finishedProductId)
+              ?.warehouseItemId
+          const gate = canActivateProductionOrder(order, s.formulations, {
+            warehouseItems: s.warehouse.items,
+            finishedGoodsItemId,
+          })
           if (!gate.ok) {
             result = { ok: false, messageKey: gate.messageKey }
             return s
@@ -594,6 +731,19 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           return { ok: false, messageKey: G3_PRODUCTION_INACTIVE }
         }
 
+        // R3.1C — a production request is a planning/read-model document, not an
+        // accounting writer.  New authoritative line output must follow the
+        // single writer path: material.issueToLine -> linked QC -> shift.confirm.
+        // The server keeps request.post only for exact historical replay/repair.
+        const legacyUiReplayEnabled =
+          (getStore().production as unknown as Record<string, unknown>)
+            .g3LegacyRequestPostReplayEnabled === true
+        if (!legacyUiReplayEnabled) {
+          return { ok: false, messageKey: 'production.post.useCanonicalShiftFlow' }
+        }
+
+        // Compatibility-only branch. The authoritative gateway independently
+        // refuses creation of a new request.post footprint.
         let priorStatus: ProductionRequest['status']
         if (snapshot) {
           priorStatus = snapshot.status === 'posted' ? 'posted' : 'saved'
@@ -649,8 +799,8 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             shiftSlot: req.shift,
             outputMp: factMp,
             outputRolls: Number(req.rawRollQty) || 0,
-            semiFinishedItemId: order?.semiFinishedItemId ?? fp?.warehouseItemId,
-            warehouseItemId: fp?.warehouseItemId ?? order?.semiFinishedItemId,
+            semiFinishedItemId: order?.semiFinishedItemId,
+            warehouseItemId: fp?.warehouseItemId ?? order?.warehouseItemId,
             finishedProductId: order?.finishedProductId ?? fp?.id,
             consumeLines,
             productionWarehouseId:
@@ -658,16 +808,11 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
                 s.warehouse.productionLineBindings?.find(
                   (b) => b.lineId === req.lineId || b.id === req.lineId,
                 ) ?? { productionWarehouseId: '' },
-              ) ||
-              s.warehouse.locations?.[0]?.id ||
-              s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
+              ),
             productionLocationId:
               s.warehouse.productionLineBindings?.find(
                 (b) => b.lineId === req.lineId || b.id === req.lineId,
-              )?.productionLocationId ??
-              s.warehouse.locations?.find((l) => l.kind === 'wip' || l.kind === 'packaging')?.id ??
-              s.warehouse.locations?.[0]?.id ??
-              s.warehouse.documents?.find((d) => d.warehouseId)?.warehouseId,
+              )?.productionLocationId,
             packLocationId:
               s.warehouse.productionLineBindings?.find(
                 (b) => b.lineId === 'pack' || b.id === 'pack',
@@ -1065,6 +1210,96 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       return result
     },
 
+    async authorizeImpregnationQcDecision(
+      command: import('@/lib/technologist/types').AuthoritativeImpregnationQcCommand,
+    ): Promise<import('@/lib/technologist/types').AuthoritativeImpregnationQcResult> {
+      const {
+        isG3WebAuthoritativePath,
+        g3ProductionCommand,
+        mirrorG3Ack,
+        isG3ProductionDomainActive,
+      } = await import('@/lib/production/g3ServerClient')
+      if (!isG3WebAuthoritativePath()) {
+        return { ok: false, error: 'impregnation_qc_authoritative_required' }
+      }
+      if (!isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)) {
+        const { G3_PRODUCTION_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G3_PRODUCTION_INACTIVE }
+      }
+      const previousCriticalRevision = Number(
+        (getStore().production as unknown as Record<string, unknown>).g3CriticalRevision ?? 0,
+      )
+
+      // The business key is stable and versioned; the transport key is fresh so
+      // gateway receipt replay can never hide a changed disposition payload.
+      const transportIdempotencyKey =
+        `g3-impqc-attempt:${command.decisionKey}:${crypto.randomUUID()}`
+      const response = await g3ProductionCommand({
+        idempotencyKey: transportIdempotencyKey,
+        commandType: 'production.impregnationQc.decide',
+        command,
+      })
+      if (!response.ok) {
+        return { ok: false, error: response.error || response.message }
+      }
+
+      const ack = response.data
+      const validatedAck = await validateImpregnationQcMutationAck({
+        ack: ack as unknown as Record<string, unknown>,
+        command,
+        previousCriticalRevision,
+      })
+      if (!validatedAck.ok) return { ok: false, error: validatedAck.error }
+
+      setStore(
+        (state) => {
+          const mirrored = mirrorG3Ack(
+            state.warehouse,
+            state.production as unknown as Record<string, unknown>,
+            {
+              production: ack.production,
+              criticalRevision: ack.criticalRevision,
+            },
+          )
+          return {
+            ...state,
+            warehouse: mirrored.warehouse,
+            production: mirrored.production as typeof state.production,
+          }
+        },
+        { origin: 'system' },
+      )
+
+      return {
+        ok: true,
+        decisionId: validatedAck.decisionId,
+        decisionKey: ack.decisionKey!,
+        decisionRevision: ack.decisionRevision!,
+        decision: ack.decision!,
+        labStatus: ack.labStatus!,
+        decisionMethod: ack.decisionMethod!,
+        productionOrderId: ack.productionOrderId!,
+        productionLineId: ack.productionLineId!,
+        batchRunId: ack.batchRunId!,
+        batchNo: validatedAck.batchNo,
+        batchIssueDocumentId: validatedAck.batchIssueDocumentId,
+        batchReceiptDocumentId: ack.batchReceiptDocumentId!,
+        outputWarehouseItemId: ack.outputWarehouseItemId!,
+        outputQuantity: validatedAck.outputQuantity,
+        supersedesDecisionId: ack.supersedesDecisionId,
+        supersessionReason: ack.supersessionReason,
+        supersededByDecisionId: ack.supersededByDecisionId,
+        supersededAt: ack.supersededAt,
+        commandFingerprint: validatedAck.commandFingerprint,
+        actorUid: validatedAck.actorUid,
+        decidedAt: validatedAck.decidedAt,
+        effective: ack.effective!,
+        lineReady: ack.lineReady!,
+        criticalRevision: validatedAck.criticalRevision,
+        idempotent: ack.idempotent === true,
+      }
+    },
+
     async confirmProductionShiftReport(input: {
       report: import('@/lib/production/shiftReports').ConfirmShiftReportInput['report']
       productionOrderId: string
@@ -1077,7 +1312,10 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         isG3WebAuthoritativePath() &&
         isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
       ) {
-        const order = getStore().production.planner.orders.find((o) => o.id === input.productionOrderId)
+        const stateBeforeCommand = getStore()
+        const order = stateBeforeCommand.production.planner.orders.find(
+          (o) => o.id === input.productionOrderId,
+        )
         if (!order) return { ok: false, error: 'planner.material.noOrder' }
         const materialLines = input.report.materialLines ?? []
         const conf = await g3ProductionCommand({
@@ -1095,6 +1333,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
               quantity: l.actualInputQty,
               deviationReason: l.deviationReason,
               batchNo: l.batchNo,
+              batchRunId: l.batchRunId,
               expiryDate: l.expiryDate,
             })),
             wasteLines: (input.report.wasteLines ?? []).map((w) => ({
@@ -1102,39 +1341,58 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
               quantity: w.quantity,
               reason: w.comment || w.reasonCode,
               unit: w.unitSnapshot,
+              batchNo: w.batchNo,
+              batchRunId: w.batchRunId,
+              expiryDate: w.expiryDate,
             })),
             semiFinishedItemId: input.report.semiFinishedItemId,
             packLocationId: input.report.packagingLocationId,
+            impregnationQcDecisionId: input.report.impregnationQcDecisionId,
+            batchRunId: input.report.batchRunId,
             reportKey: input.idempotencyKey,
           },
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
-        let reportOut: import('@/lib/production/shiftReports').ProductionShiftReport | undefined
+        const expectedBusinessKey = canonicalShiftBusinessKey({
+          productionOrderId: input.productionOrderId,
+          lineId: input.report.lineId,
+          shiftDate: input.report.shiftDate,
+          shift: input.report.shift,
+        })
+        const adapted = await adaptAuthoritativeShiftReport({
+          serverReport: conf.data.report,
+          reportId: conf.data.reportId,
+          criticalRevision: conf.data.criticalRevision,
+          previousCriticalRevision: Number(
+            (stateBeforeCommand.production as unknown as Record<string, unknown>)
+              .g3CriticalRevision ?? 0,
+          ),
+          idempotent: conf.data.idempotent,
+          warehouse: conf.data.warehouse,
+          production: conf.data.production,
+          productionOrderId: input.productionOrderId,
+          expectedBusinessKey,
+          submitted: input.report,
+          emergencyReason: input.emergencyReason,
+        })
+        if (!adapted.ok) return adapted
+        const reportOut = adapted.report
         setStore((s) => {
           const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
           })
-          const g3Reports = (conf.data.production?.shiftReports ?? []) as Array<
-            import('@/lib/production/shiftReports').ProductionShiftReport & { id: string }
-          >
-          reportOut = g3Reports.find((r) => r.id === conf.data.reportId) ?? g3Reports[g3Reports.length - 1]
           return {
             ...s,
             warehouse: mirrored.warehouse,
             production: {
               ...s.production,
               ...(mirrored.production as typeof s.production),
-              shiftReports: [
-                ...(s.production.shiftReports ?? []),
-                ...(reportOut && !(s.production.shiftReports ?? []).some((r) => r.id === reportOut!.id)
-                  ? [reportOut]
-                  : []),
-              ],
+              shiftReports: adapted.authoritativeReports,
             },
           }
-        })
+        }, { origin: 'system' })
         return { ok: true, report: reportOut }
       }
       if (
@@ -1209,6 +1467,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         isG3WebAuthoritativePath() &&
         isG3ProductionDomainActive(getStore().production as unknown as Record<string, unknown>)
       ) {
+        const stateBeforeCommand = getStore()
         const materialLines = input.report.materialLines ?? []
         const conf = await g3ProductionCommand({
           idempotencyKey: input.idempotencyKey,
@@ -1228,6 +1487,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
               quantity: l.actualInputQty,
               deviationReason: l.deviationReason,
               batchNo: l.batchNo,
+              batchRunId: l.batchRunId,
               expiryDate: l.expiryDate,
             })),
             wasteLines: (input.report.wasteLines ?? []).map((w) => ({
@@ -1235,44 +1495,54 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
               quantity: w.quantity,
               reason: w.comment || w.reasonCode,
               unit: w.unitSnapshot,
+              batchNo: w.batchNo,
+              batchRunId: w.batchRunId,
+              expiryDate: w.expiryDate,
             })),
             semiFinishedItemId: input.report.semiFinishedItemId,
             packLocationId: input.report.packagingLocationId,
+            impregnationQcDecisionId: input.report.impregnationQcDecisionId,
+            batchRunId: input.report.batchRunId,
             reportKey: input.idempotencyKey,
           },
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
-        let reportOut: import('@/lib/production/shiftReports').ProductionShiftReport | undefined
+        const adapted = await adaptAuthoritativeShiftReport({
+          serverReport: conf.data.report,
+          reportId: conf.data.reportId,
+          criticalRevision: conf.data.criticalRevision,
+          previousCriticalRevision: Number(
+            (stateBeforeCommand.production as unknown as Record<string, unknown>)
+              .g3CriticalRevision ?? 0,
+          ),
+          idempotent: conf.data.idempotent,
+          warehouse: conf.data.warehouse,
+          production: conf.data.production,
+          productionOrderId: input.productionOrderId,
+          expectedBusinessKey: input.idempotencyKey,
+          submitted: input.report,
+          correctsReportId: input.originalReportId,
+          correctionReason: input.correctionReason,
+          emergencyReason: input.emergencyReason,
+        })
+        if (!adapted.ok) return adapted
+        const reportOut = adapted.report
         setStore((s) => {
           const mirrored = mirrorG3Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
           })
-          const g3Reports = (conf.data.production?.shiftReports ?? []) as Array<
-            import('@/lib/production/shiftReports').ProductionShiftReport & { id: string }
-          >
-          reportOut = g3Reports.find((r) => r.id === conf.data.reportId) ?? g3Reports[g3Reports.length - 1]
           return {
             ...s,
             warehouse: mirrored.warehouse,
             production: {
               ...s.production,
               ...(mirrored.production as typeof s.production),
-              shiftReports: [
-                ...(s.production.shiftReports ?? []).map((r) =>
-                  r.id === input.originalReportId
-                    ? { ...r, correctedAt: new Date().toISOString() }
-                    : r,
-                ),
-                ...(reportOut &&
-                !(s.production.shiftReports ?? []).some((r) => r.id === reportOut!.id)
-                  ? [reportOut]
-                  : []),
-              ],
+              shiftReports: adapted.authoritativeReports,
             },
           }
-        })
+        }, { origin: 'system' })
         return { ok: true, report: reportOut }
       }
 
@@ -1373,71 +1643,82 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async confirmPackagingReport(
       input: ConfirmPackagingReportInput,
     ): Promise<ReturnType<typeof confirmPackagingReportCore>['result']> {
-      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
         await import('@/lib/production/g4ServerClient')
-      const g4Active = isG4PackagingQcActive(
-        getStore().production as unknown as Record<string, unknown>,
-      )
-      if (isG4WebAuthoritativePath() && g4Active) {
+      const g4ExplicitlyInactive =
+        (getStore().production as unknown as Record<string, unknown>).g4PackagingQcActive === false
+      if (isG4WebAuthoritativePath() && g4ExplicitlyInactive) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
+      }
+      // Web confirms always re-enter G4. Local activation/revision mirrors can be
+      // stale/missing and are never authority for an irreversible packaging command.
+      // An explicit authoritative false still fails before network/local mutation.
+      if (isG4WebAuthoritativePath()) {
         const report = input.report
+        const command = {
+          productionOrderId: report.productionOrderId,
+          orderId: report.productionOrderId,
+          lineId: report.lineId ?? 'pack',
+          reportDate: report.shiftDate,
+          date: report.shiftDate,
+          shiftSlot: report.shift === 'night' ? 'night' : 'day',
+          finishedProductId: report.finishedProductId,
+          warehouseItemId: report.warehouseItemId,
+          packagingLocationId: report.packagingLocationId,
+          packagingWarehouseId: report.packagingWarehouseId,
+          outputM2: report.outputM2,
+          outputMp: report.outputM2,
+          outputRolls: report.rollCount ?? 0,
+          outputPallets: report.palletCount ?? 0,
+          wipLines: report.wipLines ?? [],
+          materialLines: report.materialLines ?? [],
+          batchNo: report.batchNo,
+          reportKey: input.idempotencyKey,
+          emergencyReason: input.emergencyReason,
+          orderSnapshot: (() => {
+            const order = getStore().production.planner.orders.find(
+              (o) => o.id === report.productionOrderId,
+            )
+            if (!order) return undefined
+            return {
+              id: order.id,
+              status: order.status === 'paused' ? 'active' : order.status,
+              finishedProductId: order.finishedProductId,
+              warehouseItemId: order.warehouseItemId ?? order.finishedProductId,
+              semiFinishedItemId: order.semiFinishedItemId,
+              lineId: order.lineId,
+              orderNumber: order.orderNumber,
+            }
+          })(),
+        }
         const conf = await g4ProductionCommand({
           idempotencyKey: input.idempotencyKey,
           commandType: 'packaging.report.confirm',
-          command: {
-            productionOrderId: report.productionOrderId,
-            orderId: report.productionOrderId,
-            lineId: report.lineId ?? 'pack',
-            reportDate: report.shiftDate,
-            date: report.shiftDate,
-            shiftSlot: report.shift === 'night' ? 'night' : 'day',
-            finishedProductId: report.finishedProductId,
-            warehouseItemId: report.warehouseItemId,
-            packagingLocationId: report.packagingLocationId,
-            packagingWarehouseId: report.packagingWarehouseId,
-            outputM2: report.outputM2,
-            outputMp: report.outputM2,
-            outputRolls: report.rollCount ?? 0,
-            wipLines: report.wipLines ?? [],
-            materialLines: report.materialLines ?? [],
-            batchNo: report.batchNo,
-            reportKey: input.idempotencyKey,
-            emergencyReason: input.emergencyReason,
-            orderSnapshot: (() => {
-              const order = getStore().production.planner.orders.find(
-                (o) => o.id === report.productionOrderId,
-              )
-              if (!order) return undefined
-              return {
-                id: order.id,
-                status: order.status === 'paused' ? 'active' : order.status,
-                finishedProductId: order.finishedProductId,
-                warehouseItemId: order.warehouseItemId ?? order.finishedProductId,
-                semiFinishedItemId: order.semiFinishedItemId,
-                lineId: order.lineId,
-                orderNumber: order.orderNumber,
-              }
-            })(),
-          },
+          command,
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        const ack = await validatePackagingMutationAck({
+          ack: conf.data,
+          command,
+          previousCriticalRevision: Number(
+            (getStore().production as unknown as Record<string, unknown>).g4CriticalRevision ?? 0,
+          ),
+        })
+        if (!ack.ok) return { ok: false, error: G4_PACKAGING_ACK_INVALID }
         let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: true }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
-          const reportId = conf.data.reportId ?? conf.data.finishedGoodsLotId
           const reports = (mirrored.production.packagingReports ?? []) as ProductionPackagingReport[]
           const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
-          const confirmedReport =
-            reports.find((r) => r.id === reportId || r.idempotencyKey === input.idempotencyKey) ??
-            reports.find((r) => r.id === conf.data.reportId)
-          const lot =
-            lots.find((l) => l.id === conf.data.finishedGoodsLotId) ??
-            lots.find((l) => l.packagingReportId === confirmedReport?.id)
+          const confirmedReport = reports.find((r) => r.id === ack.report.id)
+          const lot = lots.find((l) => l.id === ack.lot.id)
           result = {
             ok: true,
             idempotent: conf.data.idempotent,
@@ -1455,11 +1736,6 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         })
         return result
       }
-      if (isG4WebAuthoritativePath() && !g4Active) {
-        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
-        return { ok: false, error: G4_PACKAGING_INACTIVE }
-      }
-
       let result: ReturnType<typeof confirmPackagingReportCore>['result'] = { ok: false, error: 'unknown' }
       const groupId =
         input.transactionGroupId ??
@@ -1504,57 +1780,69 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async confirmPackagingReportCorrection(
       input: ConfirmPackagingReportInput,
     ): Promise<ReturnType<typeof confirmPackagingReportCorrectionCore>['result']> {
-      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
         await import('@/lib/production/g4ServerClient')
-      const g4Active = isG4PackagingQcActive(
-        getStore().production as unknown as Record<string, unknown>,
-      )
-      if (isG4WebAuthoritativePath() && g4Active) {
+      const g4ExplicitlyInactive =
+        (getStore().production as unknown as Record<string, unknown>).g4PackagingQcActive === false
+      if (isG4WebAuthoritativePath() && g4ExplicitlyInactive) {
+        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        return { ok: false, error: G4_PACKAGING_INACTIVE }
+      }
+      // Correction uses the same server-authoritative activation and replay gate.
+      if (isG4WebAuthoritativePath()) {
         const report = input.report
+        const command = {
+          originalReportId: report.correctsReportId,
+          correctsReportId: report.correctsReportId,
+          correctionReason: report.correctionReason,
+          reason: report.correctionReason,
+          emergencyReason: input.emergencyReason ?? report.correctionReason,
+          productionOrderId: report.productionOrderId,
+          orderId: report.productionOrderId,
+          lineId: report.lineId ?? 'pack',
+          reportDate: report.shiftDate,
+          date: report.shiftDate,
+          shiftSlot: report.shift === 'night' ? 'night' : 'day',
+          finishedProductId: report.finishedProductId,
+          warehouseItemId: report.warehouseItemId,
+          packagingLocationId: report.packagingLocationId,
+          outputM2: report.outputM2,
+          outputMp: report.outputM2,
+          outputRolls: report.rollCount ?? 0,
+          outputPallets: report.palletCount ?? 0,
+          wipLines: report.wipLines ?? [],
+          materialLines: report.materialLines ?? [],
+          batchNo: report.batchNo,
+          reportKey: input.idempotencyKey,
+        }
         const conf = await g4ProductionCommand({
           idempotencyKey: input.idempotencyKey,
           commandType: 'packaging.report.confirmCorrection',
-          command: {
-            originalReportId: report.correctsReportId,
-            correctsReportId: report.correctsReportId,
-            correctionReason: report.correctionReason,
-            reason: report.correctionReason,
-            emergencyReason: input.emergencyReason ?? report.correctionReason,
-            productionOrderId: report.productionOrderId,
-            orderId: report.productionOrderId,
-            lineId: report.lineId ?? 'pack',
-            reportDate: report.shiftDate,
-            date: report.shiftDate,
-            shiftSlot: report.shift === 'night' ? 'night' : 'day',
-            finishedProductId: report.finishedProductId,
-            warehouseItemId: report.warehouseItemId,
-            packagingLocationId: report.packagingLocationId,
-            outputM2: report.outputM2,
-            outputMp: report.outputM2,
-            outputRolls: report.rollCount ?? 0,
-            wipLines: report.wipLines ?? [],
-            materialLines: report.materialLines ?? [],
-            batchNo: report.batchNo,
-            reportKey: input.idempotencyKey,
-          },
+          command,
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        const ack = await validatePackagingMutationAck({
+          ack: conf.data,
+          command,
+          previousCriticalRevision: Number(
+            (getStore().production as unknown as Record<string, unknown>).g4CriticalRevision ?? 0,
+          ),
+          correction: true,
+        })
+        if (!ack.ok) return { ok: false, error: G4_PACKAGING_ACK_INVALID }
         let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = { ok: true }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
           const reports = (mirrored.production.packagingReports ?? []) as ProductionPackagingReport[]
           const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
-          const confirmedReport =
-            reports.find((r) => r.id === conf.data.reportId || r.idempotencyKey === input.idempotencyKey)
-          const lot =
-            lots.find((l) => l.id === conf.data.finishedGoodsLotId) ??
-            lots.find((l) => l.packagingReportId === confirmedReport?.id)
+          const confirmedReport = reports.find((r) => r.id === ack.report.id)
+          const lot = lots.find((l) => l.id === ack.lot.id)
           result = {
             ok: true,
             idempotent: conf.data.idempotent,
@@ -1572,11 +1860,6 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
         })
         return result
       }
-      if (isG4WebAuthoritativePath() && !g4Active) {
-        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
-        return { ok: false, error: G4_PACKAGING_INACTIVE }
-      }
-
       let result: ReturnType<typeof confirmPackagingReportCorrectionCore>['result'] = {
         ok: false,
         error: 'unknown',
@@ -1633,25 +1916,33 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       )
     },
 
-    async startQcReview(lotId: string): Promise<void> {
-      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+    async startQcReview(lotId: string): Promise<StartQcReviewMutationResult> {
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
         await import('@/lib/production/g4ServerClient')
-      const g4Active = isG4PackagingQcActive(
-        getStore().production as unknown as Record<string, unknown>,
-      )
-      if (isG4WebAuthoritativePath() && g4Active) {
+      if (isG4WebAuthoritativePath()) {
+        const command = { lotId, finishedGoodsLotId: lotId }
+        const previousCriticalRevision = Number(
+          (getStore().production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+        )
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-review-${lotId}`,
           commandType: 'qc.review.start',
-          command: { lotId, finishedGoodsLotId: lotId },
+          command,
         })
-        if (!conf.ok) return
+        if (!conf.ok) return { ok: false, error: conf.error || conf.message }
+        const acknowledged = validateG4CriticalMutationAck({
+          ack: conf.data,
+          commandType: 'qc.review.start',
+          command,
+          previousCriticalRevision,
+        })
+        if (!acknowledged.ok) return { ok: false, error: G4_CRITICAL_ACK_INVALID }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
           return {
@@ -1663,15 +1954,23 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         })
-        return
+        return { ok: true, lot: acknowledged.lot as unknown as FinishedGoodsLot }
       }
-      if (isG4WebAuthoritativePath() && !g4Active) {
-        return
+      let result: StartQcReviewMutationResult = {
+        ok: false,
+        error: 'production.qc.errLotNotFound',
       }
       setStore((s) => {
         const lots = s.production.finishedGoodsLots ?? []
-        const nextLots = lots.map((lot) => (lot.id === lotId ? startQcReviewCore(lot) : lot))
-        if (nextLots === lots) return s
+        const current = lots.find((lot) => lot.id === lotId)
+        if (!current) return s
+        const reviewed = startQcReviewCore(current)
+        if (reviewed.qcStatus !== 'in_review') {
+          result = { ok: false, error: 'production.qc.errReleaseImmutable' }
+          return s
+        }
+        result = { ok: true, lot: reviewed }
+        const nextLots = lots.map((lot) => (lot.id === lotId ? reviewed : lot))
         return {
           ...s,
           production: {
@@ -1680,6 +1979,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           },
         }
       })
+      return result
     },
 
     async upsertQcAttachment(input: QcAttachmentUploadInput): Promise<QcLotAttachment> {
@@ -1738,15 +2038,19 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
       // Web: always ask G4. Soft g4PackagingQcActive can lag behind SQL feature flag.
       if (isG4WebAuthoritativePath()) {
         const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
+        const command = {
+          lotId: input.lotId,
+          finishedGoodsLotId: input.lotId,
+          passportAttachmentId: input.attachments?.passportAttachmentId,
+          protocolAttachmentId: input.attachments?.protocolAttachmentId,
+        }
+        const previousCriticalRevision = Number(
+          (getStore().production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+        )
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-release-${input.lotId}`,
           commandType: 'qc.release',
-          command: {
-            lotId: input.lotId,
-            finishedGoodsLotId: input.lotId,
-            passportAttachmentId: input.attachments?.passportAttachmentId,
-            protocolAttachmentId: input.attachments?.protocolAttachmentId,
-          },
+          command,
         })
         if (!conf.ok) {
           if (conf.error === 'packaging_qc_inactive' || conf.error === G4_PACKAGING_INACTIVE) {
@@ -1756,18 +2060,21 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
           if (!g4Active) return { ok: false, error: G4_PACKAGING_INACTIVE }
           return { ok: false, error: conf.error || conf.message }
         }
-        let result: ReturnType<typeof releaseFinishedGoodsLot>['result'] = { ok: true }
+        const acknowledged = validateG4CriticalMutationAck({
+          ack: conf.data,
+          commandType: 'qc.release',
+          command,
+          previousCriticalRevision,
+        })
+        if (!acknowledged.ok) return { ok: false, error: G4_CRITICAL_ACK_INVALID }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
-          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
-          const lot = lots.find((l) => l.id === input.lotId || l.id === conf.data.finishedGoodsLotId)
-          result = { ok: true, lot }
           return {
             ...s,
             warehouse: mirrored.warehouse,
@@ -1777,7 +2084,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         })
-        return result
+        return { ok: true, lot: acknowledged.lot as unknown as FinishedGoodsLot }
       }
 
       const groupId = `warehouse::qc_release::${input.lotId}::release`
@@ -1845,42 +2152,45 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async requestRegrade(
       input: RequestRegradeInput,
     ): Promise<ReturnType<typeof requestRegrade>['result']> {
-      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      if (isG4WebAuthoritativePath()) {
+        const date = new Date().toISOString().slice(0, 10)
+        const command = {
+          lotId: input.lotId,
+          finishedGoodsLotId: input.lotId,
+          targetFinishedProductId: input.targetFinishedProductId,
+          targetWarehouseItemId: input.targetWarehouseItemId,
+          reason: input.reason,
+          regradeReason: input.reason,
+          quantity: input.quantity,
+          batchNo: input.batchNo,
+          date,
+        }
+        const previousCriticalRevision = Number(
+          (getStore().production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+        )
         const conf = await g4ProductionCommand({
           idempotencyKey: input.idempotencyKey,
           commandType: 'qc.regrade',
-          command: {
-            lotId: input.lotId,
-            finishedGoodsLotId: input.lotId,
-            targetFinishedProductId: input.targetFinishedProductId,
-            targetWarehouseItemId: input.targetWarehouseItemId,
-            reason: input.reason,
-            regradeReason: input.reason,
-            quantity: input.quantity,
-            batchNo: input.batchNo,
-          },
+          command,
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
-        let result: ReturnType<typeof requestRegrade>['result'] = { ok: true }
+        const acknowledged = validateG4CriticalMutationAck({
+          ack: conf.data,
+          commandType: 'qc.regrade',
+          command,
+          previousCriticalRevision,
+        })
+        if (!acknowledged.ok) return { ok: false, error: G4_CRITICAL_ACK_INVALID }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
-          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
-          const originalLot = lots.find((l) => l.id === input.lotId)
-          const newLot =
-            lots.find((l) => l.originalLotId === input.lotId) ??
-            lots.find((l) => l.id === conf.data.finishedGoodsLotId)
-          result = { ok: true, originalLot, newLot }
           return {
             ...s,
             warehouse: mirrored.warehouse,
@@ -1890,14 +2200,12 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         })
-        return result
-      }
-      if (
-        isG4WebAuthoritativePath() &&
-        !isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
-        const { G4_PACKAGING_INACTIVE } = await import('@/lib/cloud/authoritativeWebGates')
-        return { ok: false, error: G4_PACKAGING_INACTIVE }
+        return {
+          ok: true,
+          originalLot: acknowledged.lot as unknown as FinishedGoodsLot,
+          newLot: acknowledged.childLot as unknown as FinishedGoodsLot,
+          documentIds: acknowledged.documentIds,
+        }
       }
 
       const groupId = `warehouse::qc_regrade::${input.lotId}::${input.idempotencyKey}`
@@ -1936,35 +2244,41 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
     async rejectFinishedGoodsLot(
       input: RejectFinishedGoodsLotInput,
     ): Promise<ReturnType<typeof rejectFinishedGoodsLot>['result']> {
-      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack, isG4PackagingQcActive } =
+      const { isG4WebAuthoritativePath, g4ProductionCommand, mirrorG4Ack } =
         await import('@/lib/production/g4ServerClient')
-      if (
-        isG4WebAuthoritativePath() &&
-        isG4PackagingQcActive(getStore().production as unknown as Record<string, unknown>)
-      ) {
+      if (isG4WebAuthoritativePath()) {
+        const date = new Date().toISOString().slice(0, 10)
+        const command = {
+          lotId: input.lotId,
+          finishedGoodsLotId: input.lotId,
+          reason: input.reason,
+          rejectReason: input.reason,
+          date,
+        }
+        const previousCriticalRevision = Number(
+          (getStore().production as { g4CriticalRevision?: number }).g4CriticalRevision ?? 0,
+        )
         const conf = await g4ProductionCommand({
           idempotencyKey: `g4-qc-reject-${input.lotId}`,
           commandType: 'qc.reject',
-          command: {
-            lotId: input.lotId,
-            finishedGoodsLotId: input.lotId,
-            reason: input.reason,
-            rejectReason: input.reason,
-          },
+          command,
         })
         if (!conf.ok) return { ok: false, error: conf.error || conf.message }
-        let result: ReturnType<typeof rejectFinishedGoodsLot>['result'] = { ok: true }
+        const acknowledged = validateG4CriticalMutationAck({
+          ack: conf.data,
+          commandType: 'qc.reject',
+          command,
+          previousCriticalRevision,
+        })
+        if (!acknowledged.ok) return { ok: false, error: G4_CRITICAL_ACK_INVALID }
         setStore((s) => {
           const mirrored = mirrorG4Ack(s.warehouse, s.production as unknown as Record<string, unknown>, {
             warehouse: conf.data.warehouse,
             production: conf.data.production,
             criticalRevision: conf.data.criticalRevision,
-            packagingQcActive: conf.data.packagingQcActive ?? true,
+            packagingQcActive: conf.data.packagingQcActive,
             productionActive: conf.data.productionActive,
           })
-          const lots = (mirrored.production.finishedGoodsLots ?? []) as FinishedGoodsLot[]
-          const lot = lots.find((l) => l.id === input.lotId || l.id === conf.data.finishedGoodsLotId)
-          result = { ok: true, lot }
           return {
             ...s,
             warehouse: mirrored.warehouse,
@@ -1974,7 +2288,7 @@ export function createProductionSlice({ setStore, getStore, getActor }: StoreSli
             },
           }
         })
-        return result
+        return { ok: true, lot: acknowledged.lot as unknown as FinishedGoodsLot }
       }
 
       const groupId = `warehouse::qc_reject_transfer::${input.lotId}::reject`

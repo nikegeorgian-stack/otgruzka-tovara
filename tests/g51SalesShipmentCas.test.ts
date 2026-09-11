@@ -160,6 +160,7 @@ async function seedShipReady() {
       qcStatus: 'released',
       quantityQcReleased: 50,
       quantityShipped: 0,
+      quantityRemaining: 50,
       lotRevision: 1,
       currentDecisionId: 'dec-1',
     },
@@ -180,7 +181,7 @@ async function seedShipReady() {
       .ok,
   ).toBe(true)
 
-  await g5cmd(
+  const draft = await g5cmd(
     svc,
     'sales.order.draft.save',
     {
@@ -199,18 +200,19 @@ async function seedShipReady() {
     'sod',
   )
   expect((await g5cmd(svc, 'sales.order.confirm', { id: 'so-ship' }, 'soc')).ok).toBe(true)
-  return svc
+  return { svc, salesLineId: String((draft.order as { lines: Array<{ lineId: string }> }).lines[0].lineId) }
 }
 
 describe('G5.1 sales shipment CAS', () => {
   it('posts sales shipment and updates shippedQty; double post same key is idempotent', async () => {
-    const svc = await seedShipReady()
+    const { svc, salesLineId } = await seedShipReady()
+    const beforeShipmentRevision = Number(dcState.critical?.revision ?? 0)
     const ship = await g5cmd(
       svc,
       'sales.shipment.post',
       {
         salesOrderId: 'so-ship',
-        salesLineId: 'sol-1',
+        salesLineId,
         shipmentId: 'shp-1',
         finishedGoodsLotId: LOT_ID,
         finishedProductId: FG_ID,
@@ -221,18 +223,34 @@ describe('G5.1 sales shipment CAS', () => {
       'ship-1',
     )
     expect(ship.ok).toBe(true)
+    const { validateG5ShipmentPostAck } = await import('@/lib/warehouse/g5ShipmentAck')
+    expect(
+      await validateG5ShipmentPostAck(ship, {
+        salesOrderId: 'so-ship',
+        salesLineId,
+        shipmentId: 'shp-1',
+        finishedGoodsLotId: LOT_ID,
+        finishedProductId: FG_ID,
+        quantity: 10,
+        warehouseId: WH,
+        date: DATE,
+        counterpartyId: CUST_ID,
+        minimumCriticalRevision: beforeShipmentRevision,
+      }),
+    ).toMatchObject({ ok: true })
     const order = payload().domains.sales.orders.find((o: { id: string }) => o.id === 'so-ship')
     expect(order.lines[0].shippedQty).toBe(10)
     expect(order.status === 'partially_shipped' || order.lines[0].shippedQty < order.lines[0].quantity).toBe(
       true,
     )
 
+    calls.updateCas.mockClear()
     const again = await g5cmd(
       svc,
       'sales.shipment.post',
       {
         salesOrderId: 'so-ship',
-        salesLineId: 'sol-1',
+        salesLineId,
         shipmentId: 'shp-1',
         finishedGoodsLotId: LOT_ID,
         finishedProductId: FG_ID,
@@ -244,10 +262,247 @@ describe('G5.1 sales shipment CAS', () => {
     )
     expect(again.ok).toBe(true)
     expect(again.idempotent).toBe(true)
+    expect(calls.updateCas).not.toHaveBeenCalled()
     expect(
       payload().domains.sales.orders.find((o: { id: string }) => o.id === 'so-ship').lines[0]
         .shippedQty,
     ).toBe(10)
+
+    const changed = await g5cmd(
+      svc,
+      'sales.shipment.post',
+      {
+        salesOrderId: 'so-ship',
+        salesLineId,
+        shipmentId: 'shp-1',
+        finishedGoodsLotId: LOT_ID,
+        finishedProductId: FG_ID,
+        quantity: 11,
+        warehouseId: WH,
+        date: DATE,
+      },
+      'ship-1',
+    )
+    expect(changed).toMatchObject({ ok: false, error: 'sales_shipment_idempotency_conflict' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+  })
+
+  it('cancels once, revalidates exact replay without CAS, and rejects changed reason/key collision', async () => {
+    const { svc, salesLineId } = await seedShipReady()
+    const postCommand = {
+      salesOrderId: 'so-ship',
+      salesLineId,
+      shipmentId: 'shp-cancel',
+      finishedGoodsLotId: LOT_ID,
+      finishedProductId: FG_ID,
+      quantity: 10,
+      warehouseId: WH,
+      date: DATE,
+    }
+    expect((await g5cmd(svc, 'sales.shipment.post', postCommand, 'ship-cancel-post')).ok).toBe(true)
+
+    const cancelCommand = {
+      shipmentId: 'shp-cancel',
+      reason: 'customer request',
+      date: DATE,
+    }
+    const cancelled = await g5cmd(
+      svc,
+      'sales.shipment.cancel',
+      cancelCommand,
+      'ship-cancel',
+    )
+    expect(cancelled).toMatchObject({ ok: true, status: 'cancelled', quantity: 10 })
+    expect(String(cancelled.commandFingerprint)).toMatch(/^[a-f0-9]{64}$/)
+    const { validateG5ShipmentCancelAck } = await import('@/lib/warehouse/g5ShipmentAck')
+    expect(
+      await validateG5ShipmentCancelAck(cancelled, {
+        ...cancelCommand,
+        minimumCriticalRevision: Number(cancelled.criticalRevision) - 1,
+      }),
+    ).toMatchObject({ ok: true })
+
+    calls.updateCas.mockClear()
+    const replay = await g5cmd(
+      svc,
+      'sales.shipment.cancel',
+      cancelCommand,
+      'ship-cancel',
+    )
+    expect(replay).toMatchObject({ ok: true, status: 'cancelled', idempotent: true })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+
+    const changed = await g5cmd(
+      svc,
+      'sales.shipment.cancel',
+      { ...cancelCommand, reason: 'different request' },
+      'ship-cancel',
+    )
+    expect(changed).toMatchObject({
+      ok: false,
+      error: 'sales_shipment_cancel_idempotency_conflict',
+    })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+
+    const collision = await g5cmd(
+      svc,
+      'sales.shipment.post',
+      { ...postCommand, shipmentId: 'shp-other' },
+      'ship-cancel',
+    )
+    expect(collision).toMatchObject({ ok: false, error: 'sales_shipment_idempotency_conflict' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+  })
+
+  it('rejects a receipt whose authoritative shipment entity was lost without another CAS', async () => {
+    const { svc, salesLineId } = await seedShipReady()
+    const command = {
+      salesOrderId: 'so-ship',
+      salesLineId,
+      shipmentId: 'shp-receipt-state',
+      finishedGoodsLotId: LOT_ID,
+      finishedProductId: FG_ID,
+      quantity: 10,
+      warehouseId: WH,
+      date: DATE,
+    }
+    expect((await g5cmd(svc, 'sales.shipment.post', command, 'ship-state-key')).ok).toBe(true)
+
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
+    const corrupted = payload()
+    corrupted.domains.warehouse.loadingShipments = []
+    dcState.critical!.payloadJson = h.serializeCriticalPayload(corrupted)
+    dcState.critical!.fingerprint = h.fingerprintCriticalPayload(dcState.critical!.payloadJson)
+    calls.updateCas.mockClear()
+
+    const replay = await g5cmd(svc, 'sales.shipment.post', command, 'ship-state-key')
+    expect(replay).toMatchObject({ ok: false, error: 'sales_shipment_receipt_state_mismatch' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'an unexpected cancelled movement',
+      (criticalPayload: Record<string, unknown>) => {
+        const domains = criticalPayload.domains as Record<string, Record<string, unknown[]>>
+        const movements = domains.warehouse.movements
+        const source = movements.find(
+          (entry) => (entry as { shipmentId?: string }).shipmentId === 'shp-corrupt',
+        ) as Record<string, unknown>
+        movements.push({ ...source, id: 'movement-extra-cancelled', cancelled: true })
+      },
+    ],
+    [
+      'a duplicate shipment identity',
+      (criticalPayload: Record<string, unknown>) => {
+        const domains = criticalPayload.domains as Record<string, Record<string, unknown[]>>
+        const shipments = domains.warehouse.loadingShipments
+        const target = shipments.find(
+          (entry) => (entry as { id?: string }).id === 'shp-corrupt',
+        ) as Record<string, unknown>
+        shipments.push({ ...target })
+      },
+    ],
+    [
+      'a non-finite matching shipment quantity',
+      (criticalPayload: Record<string, unknown>) => {
+        const domains = criticalPayload.domains as Record<string, Record<string, unknown[]>>
+        const shipments = domains.warehouse.loadingShipments
+        const target = shipments.find(
+          (entry) => (entry as { id?: string }).id === 'shp-corrupt',
+        ) as Record<string, unknown>
+        shipments.push({ ...target, id: 'shp-corrupt-nan', quantity: 'NaN', documentIds: [] })
+      },
+    ],
+  ])('rejects exact replay with %s and performs no CAS', async (_label, corrupt) => {
+    const { svc, salesLineId } = await seedShipReady()
+    const command = {
+      salesOrderId: 'so-ship',
+      salesLineId,
+      shipmentId: 'shp-corrupt',
+      finishedGoodsLotId: LOT_ID,
+      finishedProductId: FG_ID,
+      quantity: 10,
+      warehouseId: WH,
+      date: DATE,
+    }
+    expect((await g5cmd(svc, 'sales.shipment.post', command, 'ship-corrupt-key')).ok).toBe(true)
+
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
+    const corrupted = payload() as Record<string, unknown>
+    corrupt(corrupted)
+    dcState.critical!.payloadJson = h.serializeCriticalPayload(corrupted)
+    dcState.critical!.fingerprint = h.fingerprintCriticalPayload(dcState.critical!.payloadJson)
+    calls.updateCas.mockClear()
+
+    const replay = await g5cmd(svc, 'sales.shipment.post', command, 'ship-corrupt-key')
+    expect(replay).toMatchObject({ ok: false, error: 'sales_shipment_receipt_state_mismatch' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+  })
+
+  it('rejects cancel replay with an unexpected cancelled movement and performs no CAS', async () => {
+    const { svc, salesLineId } = await seedShipReady()
+    const postCommand = {
+      salesOrderId: 'so-ship',
+      salesLineId,
+      shipmentId: 'shp-cancel-corrupt',
+      finishedGoodsLotId: LOT_ID,
+      finishedProductId: FG_ID,
+      quantity: 10,
+      warehouseId: WH,
+      date: DATE,
+    }
+    expect((await g5cmd(svc, 'sales.shipment.post', postCommand, 'ship-cancel-corrupt-post')).ok).toBe(
+      true,
+    )
+    const cancelCommand = { shipmentId: 'shp-cancel-corrupt', reason: 'customer request', date: DATE }
+    expect((await g5cmd(svc, 'sales.shipment.cancel', cancelCommand, 'ship-cancel-corrupt')).ok).toBe(
+      true,
+    )
+
+    const h = await import('../server/fst/_g1CriticalHelpers.mjs')
+    const corrupted = payload()
+    const source = corrupted.domains.warehouse.movements.find(
+      (entry: { shipmentId?: string }) => entry.shipmentId === 'shp-cancel-corrupt',
+    )
+    corrupted.domains.warehouse.movements.push({
+      ...source,
+      id: 'movement-cancel-extra',
+      cancelled: true,
+    })
+    dcState.critical!.payloadJson = h.serializeCriticalPayload(corrupted)
+    dcState.critical!.fingerprint = h.fingerprintCriticalPayload(dcState.critical!.payloadJson)
+    calls.updateCas.mockClear()
+
+    const replay = await g5cmd(svc, 'sales.shipment.cancel', cancelCommand, 'ship-cancel-corrupt')
+    expect(replay).toMatchObject({ ok: false, error: 'sales_shipment_receipt_state_mismatch' })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+  })
+
+  it('does not initialize critical storage for a non-activation command', async () => {
+    grant(ALL_CAPS)
+    const svc = await import('../server/fst/_g5SalesProcurementService.mjs')
+
+    const result = await g5cmd(
+      svc,
+      'sales.shipment.post',
+      {
+        salesOrderId: 'missing',
+        salesLineId: 'missing',
+        shipmentId: 'missing',
+        finishedGoodsLotId: 'missing',
+        finishedProductId: 'missing',
+        quantity: 1,
+        warehouseId: WH,
+        date: DATE,
+      },
+      'no-create-on-read',
+    )
+
+    expect(result).toMatchObject({ ok: false, error: 'critical_store_missing' })
+    expect(calls.upsertCritical).not.toHaveBeenCalled()
+    expect(calls.updateCas).not.toHaveBeenCalled()
+    expect(calls.insertReceipt).not.toHaveBeenCalled()
   })
 
   it('G4 shipment.post returns use_g5_gateway when salesPlanning is active', async () => {

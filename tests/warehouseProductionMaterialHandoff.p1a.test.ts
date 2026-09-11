@@ -247,7 +247,7 @@ describe('PHASE P1A production material handoff', () => {
         {
           id: 'line1',
           lineId: 'line1',
-          productionWarehouseId: 'wh-missing',
+          productionWarehouseId: 'wh-line1',
           productionLocationId: 'wh-missing',
         },
       ],
@@ -540,6 +540,7 @@ describe('PHASE P1A production material handoff', () => {
     }).store
     const rows = computeLineMaterialBalances(store, {
       productionOrderId: order.id,
+      productionWarehouseId: 'wh-line1',
       productionLocationId: 'wh-line1',
       lineId: 'line1',
     })
@@ -548,6 +549,202 @@ describe('PHASE P1A production material handoff', () => {
     expect(rows[0]?.transferredQty).toBe(4)
     expect(rows[0]?.remainingQty).toBe(4)
     expect(rows[0]?.returnedQty).toBe(0)
+  })
+
+  it('18a: distinct warehouse/location tuple is preserved and enforced end to end', () => {
+    const prep = prepareReserved()
+    const order = prep.order
+    let store: WarehouseStore = {
+      ...prep.store,
+      locations: [
+        ...prep.store.locations.filter((location) => location.id !== 'wh-line1'),
+        { id: 'wh-production', name: 'Production warehouse', sortOrder: 2, kind: 'wip' },
+        { id: 'line-location-1', name: 'Physical line 1', sortOrder: 3, kind: 'wip' },
+      ],
+      productionLineBindings: [
+        {
+          id: 'line1',
+          lineId: 'line1',
+          productionWarehouseId: 'wh-production',
+          productionLocationId: 'line-location-1',
+        },
+      ],
+    }
+    // The physical location deliberately has no accounting row; accounting belongs to the warehouse.
+    store = withActiveWarehouses(store, ['wh-production'])
+
+    const transferred = transferProductionMaterials(store, {
+      productionOrder: order,
+      rawWarehouseId: 'wh-raw',
+      lines: [{ itemId: 'item-rm', quantity: 4 }],
+      actor: keeper,
+      idempotencyKey: 'distinct-line-tuple',
+    })
+    expect(transferred.result.ok).toBe(true)
+    store = transferred.store
+
+    const receipt = store.documents.find(
+      (document) =>
+        document.productionOrderId === order.id &&
+        document.purpose === 'production_material_transfer' &&
+        document.type === 'receipt',
+    )
+    expect(receipt?.warehouseId).toBe('wh-production')
+    const receiptMovement = store.movements.find(
+      (movement) => movement.documentId === receipt?.id,
+    )
+    expect(receiptMovement).toMatchObject({
+      warehouseId: 'wh-production',
+      locationId: 'line-location-1',
+    })
+
+    // Same order/item at another physical location must not leak into line availability.
+    store = {
+      ...store,
+      movements: [
+        ...store.movements,
+        {
+          ...receiptMovement!,
+          id: 'foreign-location-receipt',
+          documentId: receipt!.id,
+          quantity: 99,
+          locationId: 'line-location-2',
+        },
+      ],
+    }
+    const balances = computeLineMaterialBalances(store, {
+      productionOrderId: order.id,
+      productionWarehouseId: 'wh-production',
+      productionLocationId: 'line-location-1',
+      lineId: 'line1',
+    })
+    expect(balances).toHaveLength(1)
+    expect(balances[0]).toMatchObject({
+      productionWarehouseId: 'wh-production',
+      productionLocationId: 'line-location-1',
+      transferredQty: 4,
+      remainingQty: 4,
+    })
+
+    const returned = returnProductionMaterials(store, {
+      productionOrder: order,
+      rawWarehouseId: 'wh-raw',
+      lines: [{ itemId: 'item-rm', quantity: 1 }],
+      actor: keeper,
+      returnReason: 'unused',
+      idempotencyKey: 'distinct-line-return',
+    })
+    expect(returned.result.ok).toBe(true)
+    const returnIssue = returned.store.documents.find(
+      (document) =>
+        document.productionOrderId === order.id &&
+        document.purpose === 'production_material_return' &&
+        document.type === 'issue',
+    )
+    expect(returnIssue?.warehouseId).toBe('wh-production')
+    expect(
+      returned.store.movements.find((movement) => movement.documentId === returnIssue?.id),
+    ).toMatchObject({ warehouseId: 'wh-production', locationId: 'line-location-1' })
+  })
+
+  it('18b: canonical G3 transfer and return document roles drive line balance', () => {
+    const base = emptyWarehouse()
+    const documents: WarehouseStore['documents'] = [
+      {
+        id: 'g3-transfer-receipt',
+        type: 'receipt',
+        purpose: 'production_receipt',
+        docRole: 'transfer_receipt',
+        number: 'G3-TR',
+        date: '2026-09-10',
+        warehouseId: 'wh-line1',
+        productionOrderId: 'po-g3',
+        lines: [{ itemId: 'item-rm', quantity: 5 }],
+        status: 'posted',
+        createdAt: '2026-09-10T08:00:00.000Z',
+      },
+      {
+        id: 'g3-consumption',
+        type: 'issue',
+        purpose: 'production_issue',
+        docRole: 'production_consumption',
+        number: 'G3-CONS',
+        date: '2026-09-10',
+        warehouseId: 'wh-line1',
+        productionOrderId: 'po-g3',
+        lines: [{ itemId: 'item-rm', quantity: 2 }],
+        status: 'posted',
+        createdAt: '2026-09-10T08:01:00.000Z',
+      },
+      {
+        id: 'g3-return',
+        type: 'issue',
+        purpose: 'return',
+        docRole: 'transfer_issue',
+        number: 'G3-RET',
+        date: '2026-09-10',
+        warehouseId: 'wh-line1',
+        productionOrderId: 'po-g3',
+        lines: [{ itemId: 'item-rm', quantity: 1 }],
+        status: 'posted',
+        createdAt: '2026-09-10T08:02:00.000Z',
+      },
+    ]
+    const store: WarehouseStore = {
+      ...base,
+      documents,
+      movements: [
+        {
+          id: 'g3-transfer-movement',
+          documentId: 'g3-transfer-receipt',
+          itemId: 'item-rm',
+          warehouseId: 'wh-line1',
+          locationId: 'wh-line1',
+          type: 'receipt',
+          quantity: 5,
+          date: '2026-09-10',
+          productionOrderId: 'po-g3',
+          createdAt: '2026-09-10T08:00:00.000Z',
+        },
+        {
+          id: 'g3-consumption-movement',
+          documentId: 'g3-consumption',
+          itemId: 'item-rm',
+          warehouseId: 'wh-line1',
+          locationId: 'wh-line1',
+          type: 'issue',
+          quantity: 2,
+          date: '2026-09-10',
+          productionOrderId: 'po-g3',
+          createdAt: '2026-09-10T08:01:00.000Z',
+        },
+        {
+          id: 'g3-return-movement',
+          documentId: 'g3-return',
+          itemId: 'item-rm',
+          warehouseId: 'wh-line1',
+          locationId: 'wh-line1',
+          type: 'issue',
+          quantity: 1,
+          date: '2026-09-10',
+          productionOrderId: 'po-g3',
+          createdAt: '2026-09-10T08:02:00.000Z',
+        },
+      ],
+    }
+    const rows = computeLineMaterialBalances(store, {
+      productionOrderId: 'po-g3',
+      productionWarehouseId: 'wh-line1',
+      productionLocationId: 'wh-line1',
+      lineId: 'line1',
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      transferredQty: 5,
+      consumedQty: 2,
+      returnedQty: 1,
+      remainingQty: 2,
+    })
   })
 
   it('19-24: return decreases line, increases raw, keeps batch, requires reason, caps remaining, idempotent', () => {
@@ -610,6 +807,7 @@ describe('PHASE P1A production material handoff', () => {
 
     const rows = computeLineMaterialBalances(store, {
       productionOrderId: order.id,
+      productionWarehouseId: 'wh-line1',
       productionLocationId: 'wh-line1',
     })
     expect(rows[0]?.returnedQty).toBe(2)

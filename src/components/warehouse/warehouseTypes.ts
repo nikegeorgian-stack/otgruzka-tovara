@@ -36,6 +36,17 @@ export type WarehousePageProps = {
   ) =>
     | { ok: boolean; messageKey?: string }
     | Promise<{ ok: boolean; messageKey?: string }>
+  /** Canonical reservation and raw-material handoff workspace for the web keeper. */
+  plannerOrders?: import('@/lib/planner/types').ProductionOrder[]
+  onReserveProductionOrderMaterials?: (
+    orderId: string,
+  ) => import('@/lib/planner/materialReserve').MaterialReserveResult
+  onUnreserveProductionOrderMaterials?: (orderId: string) => boolean
+  onTransferProductionOrderMaterials?: (
+    input: import('@/lib/warehouse/productionMaterialHandoff').ProductionMaterialTransferInput,
+  ) =>
+    | import('@/lib/warehouse/productionMaterialHandoff').HandoffResult
+    | Promise<import('@/lib/warehouse/productionMaterialHandoff').HandoffResult>
   /** Встроенный режим в «Справочники» — только номенклатура */
   embedded?: 'nomenclature'
   /** Облачный кабинет кладовщика — упрощённые вкладки */
@@ -51,7 +62,7 @@ export type WarehousePageProps = {
     signatures?: PrintSignatures
     locale: Locale
   }
-  onUpsertItem: (item: WarehouseItem) => void
+  onUpsertItem: (item: WarehouseItem) => void | Promise<void>
   onArchiveItem: (id: string, archived: boolean) => void
   onRemoveItem: (id: string) => boolean
   onUpsertCategory: (cat: WarehouseCategory) => void
@@ -255,6 +266,7 @@ export type WarehousePageProps = {
 export type WarehouseTab =
   | 'balances'
   | 'requests'
+  | 'materials'
   | 'nomenclature'
   | 'movements'
   | 'documents'
@@ -283,6 +295,7 @@ export const WAREHOUSE_TABS: WarehouseTab[] = [
 export const WAREHOUSE_WEB_TABS: WarehouseTab[] = [
   'balances',
   'requests',
+  'materials',
   'nomenclature',
   'workwear',
   'documents',

@@ -1161,6 +1161,7 @@ export default function App() {
               onGenerateRequest={app.generatePlannerProductionRequests}
               onReserveMaterials={app.reserveProductionOrderMaterials}
               onUnreserveMaterials={app.unreserveProductionOrderMaterials}
+              onTransferProductionOrderMaterials={app.transferProductionOrderMaterials}
               salesOrders={app.store.sales.orders}
               onOpenSalesOrder={() => app.setView('director')}
               focusOrderId={plannerFocusOrderId}
@@ -1267,6 +1268,10 @@ export default function App() {
               webUserName={webUserName}
               journalNav={journalNav?.view === 'warehouse' ? journalNav : null}
               onJournalNavConsumed={() => setJournalNav(null)}
+              plannerOrders={app.store.production.planner.orders}
+              onReserveProductionOrderMaterials={app.reserveProductionOrderMaterials}
+              onUnreserveProductionOrderMaterials={app.unreserveProductionOrderMaterials}
+              onTransferProductionOrderMaterials={app.transferProductionOrderMaterials}
               keeperId={app.currentUser?.id}
               keeperName={
                 app.currentUser?.displayName ??
@@ -1317,6 +1322,7 @@ export default function App() {
               wastewater={app.store.wastewater}
               warehouse={app.store.warehouse}
               plannerOrders={app.store.production.planner.orders}
+              authoritativeProductionOrders={app.store.production.g3Orders}
               brigades={app.store.brigades}
               operatorId={app.currentUser?.id}
               operatorName={
@@ -1362,6 +1368,13 @@ export default function App() {
               onRemoveIncomingControl={app.removeIncomingControl}
               onUpsertImpregnationQc={app.upsertImpregnationQc}
               onRemoveImpregnationQc={app.removeImpregnationQc}
+              onAuthorizeImpregnationQcDecision={app.authorizeImpregnationQcDecision}
+              authoritativeImpregnationQcDecisions={
+                app.store.production.impregnationQcDecisions
+              }
+              allowEduManualVisual={
+                import.meta.env.VITE_FIREBASE_PROJECT_ID === 'otgruzka-tovara-stg'
+              }
               onAddRoomClimateReading={app.addRoomClimateReading}
               onRemoveRoomClimateReading={app.removeRoomClimateReading}
               onUpsertShiftHandoff={app.upsertShiftHandoff}
@@ -1714,6 +1727,13 @@ export default function App() {
               }
               canReopenWarehousePeriod={
                 accessUser?.roleId === 'sysadmin' || accessUser?.roleId === 'operations_director'
+              }
+              allowStagingLineBindingConfiguration={
+                isFstWeb &&
+                import.meta.env.VITE_FIREBASE_PROJECT_ID === 'otgruzka-tovara-stg'
+              }
+              onUpsertProductionLineLocationBinding={
+                app.upsertProductionLineLocationBinding
               }
               onAddMonth={app.addMonth}
               onRemoveMonth={app.removeMonth}

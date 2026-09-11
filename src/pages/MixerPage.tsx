@@ -8,7 +8,11 @@ import { FormNotice } from '@/components/ui/FormNotice'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PageLayout } from '@/components/ui/PageLayout'
 import { useI18n } from '@/context/I18nContext'
-import type { PostBatchMixInput, PostBatchMixResult } from '@/lib/formulations/batch'
+import {
+  batchLineageFromMixTask,
+  type PostBatchMixInput,
+  type PostBatchMixResult,
+} from '@/lib/formulations/batch'
 import { formatMixDate } from '@/lib/formulations/cubeLabel'
 import type { MixTaskReserveResult } from '@/lib/formulations/mixTaskReserve'
 import { reservedQtyForMixTask } from '@/lib/formulations/mixTaskReserve'
@@ -218,6 +222,7 @@ export function MixerPage({
           initialVolumeL={selectedTask?.targetVolumeL}
           initialWarehouseId={selectedTask?.warehouseId ?? defaultWarehouseId}
           initialBrigade={selectedTask?.brigade}
+          {...batchLineageFromMixTask(selectedTask)}
           taskBadge={selectedTask?.taskNumber}
         />
       </div>

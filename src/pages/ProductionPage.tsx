@@ -37,8 +37,12 @@ import { useAsOfSnapshot } from '@/hooks/useAsOfSnapshot'
 import { listAvailableWipAtPackaging } from '@/lib/production/packagingReports'
 import type { ProductionPackagingReport } from '@/lib/production/packagingReports'
 import { buildPackagingReportPrintModel } from '@/lib/production/packagingReportPrint'
+import { mergeActivePackagingOrders } from '@/lib/production/packagingOrderSelection'
 import { resolveProductionLineLocation } from '@/lib/warehouse/productionLineLocationConfig'
-import { shortContentHash } from '@/lib/planner/g5PackagingBom'
+import {
+  computePackagingSnapshotRequirements,
+  shortContentHash,
+} from '@/lib/planner/g5PackagingBom'
 import {
   formatNum,
   summarizeProductionMonth,
@@ -275,10 +279,17 @@ export function ProductionPage({
   )
 
 
-  const activeOrders = useMemo(
-    () => orders.filter((o) => o.status === 'active' || o.status === 'paused'),
-    [orders],
-  )
+  const activeOrders = useMemo(() => {
+    const productionView = productionStore as ProductionStore & {
+      g3ProductionDomainActive?: boolean
+      g3Orders?: Array<Partial<ProductionOrder> & Pick<ProductionOrder, 'id'>>
+    }
+    return mergeActivePackagingOrders(
+      orders,
+      productionView.g3Orders ?? [],
+      productionView.g3ProductionDomainActive === true,
+    )
+  }, [orders, productionStore])
   const packLocationResolve = useMemo(
     () => resolveProductionLineLocation(warehouse, 'pack'),
     [warehouse],
@@ -287,14 +298,80 @@ export function ProductionPage({
     ? packLocationResolve.productionLocationId
     : warehouse.locations.find((loc) => loc.id === 'pack' || loc.kind === 'packaging')?.id ??
       'pack'
-  const packagingWip = useMemo(
-    () => listAvailableWipAtPackaging(productionStore, warehouse, packagingLocationId),
-    [productionStore, warehouse, packagingLocationId],
-  )
   const activePackagingOrder = useMemo(
-    () => activeOrders.find((o) => o.lineId === 'pack') ?? activeOrders[0] ?? null,
-    [activeOrders],
+    () => {
+      const explicitlySelected = activeOrders.find((order) => order.id === form.orderId) ?? null
+      if (explicitlySelected) return explicitlySelected
+      // Canonical orders must be selected explicitly. The fallback remains only for
+      // pre-contract records so existing legacy screens retain their old behavior.
+      if (activeOrders.some((order) => Number(order.wipContractVersion) >= 1)) return null
+      return activeOrders.find((order) => order.lineId === 'pack') ?? activeOrders[0] ?? null
+    },
+    [activeOrders, form.orderId],
   )
+  const packagingWip = useMemo(
+    () =>
+      activePackagingOrder
+        ? listAvailableWipAtPackaging(
+            productionStore,
+            warehouse,
+            packagingLocationId,
+            packLocationResolve.ok ? packLocationResolve.productionWarehouseId : undefined,
+            activePackagingOrder.id,
+          ).filter(
+            (line) =>
+              line.productionOrderId === activePackagingOrder.id &&
+              (Number(activePackagingOrder.wipContractVersion) < 1 ||
+                line.semiFinishedItemId === activePackagingOrder.semiFinishedItemId),
+          )
+        : [],
+    [
+      activePackagingOrder,
+      packLocationResolve,
+      packagingLocationId,
+      productionStore,
+      warehouse,
+    ],
+  )
+  const packagingOutputM2 = useMemo(
+    () => packagingWip.reduce((sum, line) => sum + (line.remainingQty ?? line.quantity), 0),
+    [packagingWip],
+  )
+  const packagingMaterialLines = useMemo(() => {
+    if (!activePackagingOrder?.packagingBomSnapshot || packagingOutputM2 <= 0) return []
+    return computePackagingSnapshotRequirements(
+      activePackagingOrder.packagingBomSnapshot,
+      packagingOutputM2,
+    ).map((requirement, index) => {
+      const item = warehouse.items.find((candidate) => candidate.id === requirement.itemId)
+      return {
+        lineId: `bom-${activePackagingOrder.id}-${requirement.itemId}-${index + 1}`,
+        itemId: requirement.itemId,
+        itemCodeSnapshot: item?.internalCode,
+        itemNameSnapshot: item?.name,
+        unitSnapshot: requirement.unit,
+        inputUnit: requirement.unit,
+        quantity: requirement.normQty,
+      }
+    })
+  }, [activePackagingOrder, packagingOutputM2, warehouse.items])
+  const canonicalPackagingReady = useMemo(() => {
+    if (!activePackagingOrder || Number(activePackagingOrder.wipContractVersion) < 1) return true
+    const packagingBomExempt = activePackagingOrder.packagingBomRequired === false
+    return (
+      form.orderId === activePackagingOrder.id &&
+      Boolean(activePackagingOrder.semiFinishedItemId) &&
+      packagingWip.length > 0 &&
+      packagingWip.every(
+        (line) =>
+          line.productionOrderId === activePackagingOrder.id &&
+          line.semiFinishedItemId === activePackagingOrder.semiFinishedItemId &&
+          Boolean(line.shiftReportId && line.receiptDocumentId && line.batchNo),
+      ) &&
+      (packagingBomExempt ||
+        (Boolean(activePackagingOrder.packagingBomSnapshot) && packagingMaterialLines.length > 0))
+    )
+  }, [activePackagingOrder, form.orderId, packagingMaterialLines.length, packagingWip])
   const latestPackagingReport = useMemo(() => {
     if (!activePackagingOrder) return null
     const report = [...(productionStore.packagingReports ?? [])]
@@ -369,6 +446,22 @@ export function ProductionPage({
 
   async function confirmPackagingReport() {
     if (!onConfirmPackagingReport || !activePackagingOrder) return
+    const canonical = Number(activePackagingOrder.wipContractVersion) >= 1
+    if (canonical && !canonicalPackagingReady) {
+      setNotice(t('production.pack.errWipMismatch'))
+      return
+    }
+    const sourceBatchKey = packagingWip
+      .map((line) => line.batchNo ?? line.lineId)
+      .sort()
+      .join(',')
+    const packagingIdempotencyKey = [
+      'pack',
+      activePackagingOrder.id,
+      form.date,
+      form.shift,
+      sourceBatchKey || 'legacy',
+    ].join('::')
     const report = {
       productionOrderId: activePackagingOrder.id,
       lineId: 'pack' as const,
@@ -381,19 +474,20 @@ export function ProductionPage({
       finishedProductId:
         activePackagingOrder.finishedProductId ||
         activePackagingOrder.warehouseItemId ||
-        activePackagingOrder.semiFinishedItemId ||
+        (canonical ? '' : activePackagingOrder.semiFinishedItemId) ||
         '',
       warehouseItemId:
         activePackagingOrder.warehouseItemId ||
         activePackagingOrder.finishedProductId ||
-        activePackagingOrder.semiFinishedItemId ||
+        (canonical ? '' : activePackagingOrder.semiFinishedItemId) ||
         '',
       semiFinishedItemId:
         activePackagingOrder.semiFinishedItemId ||
-        packagingWip[0]?.semiFinishedItemId ||
-        packagingWip[0]?.itemId ||
+        (canonical
+          ? ''
+          : packagingWip[0]?.semiFinishedItemId || packagingWip[0]?.itemId) ||
         '',
-      materialLines: [],
+      materialLines: canonical ? packagingMaterialLines : [],
       wipLines: packagingWip.map((line) => ({
         lineId: line.lineId,
         shiftReportId: line.shiftReportId,
@@ -407,7 +501,7 @@ export function ProductionPage({
         batchNo: line.batchNo,
         expiryDate: line.expiryDate,
       })),
-      outputM2: packagingWip.reduce((sum, line) => sum + (line.remainingQty ?? line.quantity), 0),
+      outputM2: packagingOutputM2,
       rollCount: form.packaging?.rolls.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0,
       palletCount: form.packaging?.pallets.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0,
       batchNo: activePackagingOrder.orderNumber,
@@ -415,13 +509,13 @@ export function ProductionPage({
       rollsPerPalletSnapshot: undefined,
       conversionTolerancePct: 5,
       conversionDeviationReason: undefined,
-      idempotencyKey: `pack::${activePackagingOrder.id}::${form.date}`,
+      idempotencyKey: packagingIdempotencyKey,
       id: undefined,
       number: undefined,
     }
     const result = await onConfirmPackagingReport({
       report,
-      idempotencyKey: `pack::${activePackagingOrder.id}::${form.date}`,
+      idempotencyKey: packagingIdempotencyKey,
       actor: {
         id: currentUser?.id,
         name: currentUser?.displayName,
@@ -1612,7 +1706,12 @@ export function ProductionPage({
                     <Button type="button" variant="secondary" size="sm" onClick={() => latestPackagingReport && setPackagingPrintModel(latestPackagingReport)} disabled={!latestPackagingReport}>
                       {t('print.preview')}
                     </Button>
-                    <Button type="button" size="sm" onClick={confirmPackagingReport}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={confirmPackagingReport}
+                      disabled={packagingWip.length === 0 || !canonicalPackagingReady}
+                    >
                       {t('production.pack.confirm')}
                     </Button>
                   </div>
@@ -1657,6 +1756,23 @@ export function ProductionPage({
                       <span>{t('production.pack.pallets')}</span>
                       <span>{formatNum(form.packaging?.pallets.reduce((sum, row) => sum + (row.factQty ?? 0), 0) ?? 0)}</span>
                     </div>
+                    {Number(activePackagingOrder.wipContractVersion) >= 1 && (
+                      <ul className="border-t border-grid pt-2">
+                        {packagingMaterialLines.map((line) => (
+                          <li
+                            key={line.lineId}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="truncate">
+                              {line.itemNameSnapshot ?? line.itemCodeSnapshot ?? line.itemId}
+                            </span>
+                            <span className="font-mono text-stone-500">
+                              {formatNum(line.quantity)} {line.unitSnapshot}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
               </div>

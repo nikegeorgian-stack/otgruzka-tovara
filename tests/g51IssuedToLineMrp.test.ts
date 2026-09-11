@@ -313,6 +313,21 @@ describe('G5.1 issued-to-line / netNeed / linked production', () => {
     const svc = await bootstrap()
     const h = await import('../server/fst/_g1CriticalHelpers.mjs')
 
+    const p = payload()
+    // The G5 authority accepts only an existing canonical WIP-v1 order link.
+    p.domains.production.orders = [
+      {
+        id: 'po-link',
+        status: 'released',
+        wipContractVersion: 1,
+        finishedProductId: FG_ID,
+        totalQtyMp: 40,
+        producedQtyMp: 0,
+        dueDate: DATE,
+      },
+    ]
+    dcState.critical!.payloadJson = h.serializeCriticalPayload(p)
+
     await cmd(
       svc,
       'sales.order.draft.save',
@@ -334,21 +349,9 @@ describe('G5.1 issued-to-line / netNeed / linked production', () => {
     )
     expect((await cmd(svc, 'sales.order.confirm', { id: 'so-link' }, 'so-lc')).ok).toBe(true)
 
-    const p = payload()
-    // Link covers all 40 → fgDemand 0 → no packaging BOM shortage from this SO
-    p.domains.production.orders = [
-      {
-        id: 'po-link',
-        status: 'released',
-        totalQtyMp: 40,
-        producedQtyMp: 0,
-        dueDate: DATE,
-      },
-    ]
-    // Ensure confirm kept linked ids
-    const so = p.domains.sales.orders.find((o: { id: string }) => o.id === 'so-link')
-    so.lines[0].linkedProductionOrderIds = ['po-link']
-    dcState.critical!.payloadJson = h.serializeCriticalPayload(p)
+    // Link covers all 40 → fgDemand 0 → no packaging BOM shortage from this SO.
+    const so = payload().domains.sales.orders.find((o: { id: string }) => o.id === 'so-link')
+    expect(so.lines[0].linkedProductionOrderIds).toEqual(['po-link'])
 
     const run = await cmd(svc, 'planning.mrp.run', {}, 'mrp-link')
     expect(run.ok).toBe(true)

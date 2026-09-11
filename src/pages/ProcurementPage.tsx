@@ -284,7 +284,7 @@ export function ProcurementPage(
     const today = now.slice(0, 10)
     setEditOrder({
       id: crypto.randomUUID(),
-      orderNumber,
+      orderNumber: webProcurementMode ? '' : orderNumber,
       counterpartyId: '',
       scope: 'international',
       category: 'raw_material',
@@ -311,8 +311,8 @@ export function ProcurementPage(
     setIsNew(true)
   }
 
-  function saveOrder(order: PurchaseOrder, statusNote?: string) {
-    onUpsertOrder(order, statusNote)
+  async function saveOrder(order: PurchaseOrder, statusNote?: string) {
+    await onUpsertOrder(order, statusNote)
     setEditOrder(null)
     setIsNew(false)
   }
@@ -395,6 +395,8 @@ export function ProcurementPage(
             <option value="active">{t('procurement.filter.active')}</option>
             <option value="all">{t('procurement.filter.all')}</option>
             <option value="draft">{t('procurement.status.draft')}</option>
+            <option value="submitted">{t('procurement.status.submitted')}</option>
+            <option value="approved">{t('procurement.status.approved')}</option>
             <option value="ordered">{t('procurement.status.ordered')}</option>
             <option value="production">{t('procurement.status.production')}</option>
             <option value="shipped">{t('procurement.status.shipped')}</option>
@@ -475,7 +477,7 @@ export function ProcurementPage(
             setEditOrder(o)
             setIsNew(false)
           }}
-          onRemove={onRemoveOrder}
+          onRemove={webProcurementMode ? undefined : onRemoveOrder}
           onReceive={onReceiveOrder}
         />
       ) : null}
@@ -539,6 +541,7 @@ export function ProcurementPage(
         <PurchaseOrderModal
           order={editOrder}
           isNew={isNew}
+          authoritativeMode={webProcurementMode}
           counterparties={counterparties}
           warehouse={warehouse}
           categories={procurement.categories}

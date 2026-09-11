@@ -109,6 +109,7 @@ const ALL_CAPS = {
   'production.read': true,
   'warehouse.read': true,
   'warehouse.document.post': true,
+  'warehouse.opening.activate': true,
   'warehouse.period.close': true,
   'warehouse.period.reopen': true,
   'warehouse.transfer.post': true,
@@ -230,12 +231,19 @@ describe('G3.1 domain activation', () => {
       actor,
       storeId: STORE,
       idempotencyKey: 'wh-seed',
-      commandType: 'warehouse.document.post',
+      commandType: 'warehouse.opening.post',
       command: {
         type: 'receipt',
         warehouseId: 'raw',
         date: '2026-09-04',
-        lines: [{ itemId: 'mat-1', quantity: 3 }],
+        lines: [
+          {
+            itemId: 'mat-1',
+            itemNameSnapshot: 'Material 1',
+            unitSnapshot: 'kg',
+            quantity: 3,
+          },
+        ],
       },
     })
     const denied = await g3.executeG3Command({
@@ -327,7 +335,7 @@ describe('G3.1 cross-domain preservation', () => {
 })
 
 describe('G3.1 CAS + embedded receipt fail-safe', () => {
-  it('CAS success + external receipt failure → retry same key does not double-write', async () => {
+  it('rejects a changed generic payload when only the CAS-embedded receipt survived', async () => {
     const g3 = await import('../server/fst/_g3ProductionService.mjs')
     await seedWhAndRecipe(g3)
     const receiptsBefore = dcState.receipts.size
@@ -372,11 +380,167 @@ describe('G3.1 CAS + embedded receipt fail-safe', () => {
         endDate: '2026-09-05',
       },
     })
-    expect(retry.ok).toBe(true)
-    expect(retry.idempotent).toBe(true)
-    expect(retry.recoveredFromEmbeddedReceipt).toBe(true)
+    expect(retry).toMatchObject({ ok: false, error: 'idempotency_conflict', status: 409 })
     expect(payload().domains.production.orders.length).toBe(ordersAfterFirst)
     expect(payload().domains.production.orders[0].totalQtyMp).toBe(2)
+  })
+
+  it('recovers an exact order-confirm receipt with the latest projection after downstream CAS', async () => {
+    const g3 = await import('../server/fst/_g3ProductionService.mjs')
+    await seedWhAndRecipe(g3)
+    const draft = await g3.executeG3Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-confirm-draft',
+      commandType: 'production.order.draft.save',
+      command: {
+        orderId: 'receipt-order',
+        finishedProductId: 'fp',
+        formulationRecipeId: 'rec-1',
+        lineId: 'line-a',
+        totalQtyMp: 2,
+        startDate: '2026-09-04',
+        endDate: '2026-09-05',
+      },
+    })
+    expect(draft.ok).toBe(true)
+
+    calls.insertReceipt.mockImplementation(async () => {
+      throw new Error('receipt_down')
+    })
+    const command = { orderId: 'receipt-order', rawWarehouseId: 'raw' }
+    const confirmed = await g3.executeG3Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-confirm',
+      commandType: 'production.order.confirm',
+      command,
+    })
+    expect(confirmed.ok).toBe(true)
+    expect(dcState.receipts.has('receipt-confirm')).toBe(false)
+    const confirmedRevision = Number(confirmed.criticalRevision)
+    expect(payload().commandReceipts['receipt-confirm']).toMatchObject({
+      storeId: STORE,
+      actorUid: actor.uid,
+      commandType: 'production.order.confirm',
+      commandFingerprint: expect.stringMatching(/^g3-command-receipt:v1:[a-f0-9]{64}$/),
+      result: {
+        receiptBinding: {
+          version: 'g3-command-receipt:v1',
+          storeId: STORE,
+          actorUid: actor.uid,
+          commandType: 'production.order.confirm',
+          commandFingerprint: expect.stringMatching(/^g3-command-receipt:v1:[a-f0-9]{64}$/),
+        },
+      },
+    })
+
+    calls.insertReceipt.mockImplementation(async (_dc: unknown, row: Record<string, unknown>) => {
+      dcState.receipts.set(String(row.id), row)
+    })
+    const downstream = await g3.executeG3Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-downstream-draft',
+      commandType: 'production.recipe.draft.save',
+      command: {
+        recipeId: 'rec-downstream',
+        versionId: 'rv-downstream',
+        components: [
+          { warehouseItemId: 'mat-1', unitSnapshot: 'kg', normQty: 1, tolerancePct: 0 },
+        ],
+      },
+    })
+    expect(downstream.ok).toBe(true)
+    expect(Number(downstream.criticalRevision)).toBeGreaterThan(confirmedRevision)
+    calls.updateCas.mockClear()
+
+    const replay = await g3.executeG3Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-confirm',
+      commandType: 'production.order.confirm',
+      command,
+    })
+    expect(replay).toMatchObject({
+      ok: true,
+      idempotent: true,
+      recoveredFromEmbeddedReceipt: true,
+      criticalRevision: downstream.criticalRevision,
+      touchesWarehouse: false,
+    })
+    expect(replay.production.recipeVersions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'rv-downstream' })]),
+    )
+    expect(calls.updateCas).not.toHaveBeenCalled()
+    expect(dcState.receipts.get('receipt-confirm')).toMatchObject({
+      storeId: STORE,
+      actorUid: actor.uid,
+      commandType: 'production.order.confirm',
+      criticalRevisionAfter: downstream.criticalRevision,
+    })
+
+    for (const collision of [
+      {
+        actor,
+        commandType: 'production.order.confirm',
+        command: { ...command, rawWarehouseId: 'other-raw' },
+      },
+      {
+        actor,
+        commandType: 'production.order.cancel',
+        command: { orderId: 'receipt-order', reason: 'collision', rawWarehouseId: 'raw' },
+      },
+    ]) {
+      const rejected = await g3.executeG3Command({
+        actor: collision.actor,
+        storeId: STORE,
+        idempotencyKey: 'receipt-confirm',
+        commandType: collision.commandType,
+        command: collision.command,
+      })
+      expect(rejected).toMatchObject({ ok: false, error: 'idempotency_conflict', status: 409 })
+      expect(calls.updateCas).not.toHaveBeenCalled()
+    }
+
+    const otherActor = { uid: 'u2', email: 'u2@x', claims: {} }
+    grant(otherActor.uid, STORE, ALL_CAPS)
+    const actorCollision = await g3.executeG3Command({
+      actor: otherActor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-confirm',
+      commandType: 'production.order.confirm',
+      command,
+    })
+    expect(actorCollision).toMatchObject({
+      ok: false,
+      error: 'idempotency_conflict',
+      status: 409,
+    })
+    expect(calls.updateCas).not.toHaveBeenCalled()
+
+    const corrupted = payload()
+    const reservationDocumentId = corrupted.domains.production.orders.find(
+      (row: Record<string, unknown>) => row.id === 'receipt-order',
+    ).reservationDocumentId
+    const reservationMovement = corrupted.domains.warehouse.movements.find(
+      (row: Record<string, unknown>) => row.documentId === reservationDocumentId,
+    )
+    reservationMovement.quantity += 1
+    dcState.critical!.payloadJson = JSON.stringify(corrupted)
+    const corruptReplay = await g3.executeG3Command({
+      actor,
+      storeId: STORE,
+      idempotencyKey: 'receipt-confirm',
+      commandType: 'production.order.confirm',
+      command,
+    })
+    expect(corruptReplay).toMatchObject({
+      ok: false,
+      error: 'receipt_replay_state_conflict',
+      status: 409,
+    })
+    expect(calls.updateCas).not.toHaveBeenCalled()
   })
 })
 

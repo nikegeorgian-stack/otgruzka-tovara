@@ -51,6 +51,27 @@ describe('R2.9K productionSlice packaging fail-closed (web, G4 off)', () => {
     vi.restoreAllMocks()
   })
 
+  it('activateProductionOrder refuses local fallback when G3 is inactive on web', async () => {
+    const { createProductionSlice } = await import('../src/store/slices/productionSlice')
+    const slice = createProductionSlice({
+      getStore: () => storeRef.current as never,
+      setStore: (updater: (s: never) => unknown) => {
+        storeRef.current = updater(storeRef.current as never) as Record<string, unknown>
+      },
+      getActor: () => ({ uid: 'u1', name: 'T' }),
+    } as never)
+
+    const before = JSON.stringify(storeRef.current)
+    const result = await slice.activateProductionOrder('po-missing')
+
+    expect(result).toEqual({
+      ok: false,
+      error: G3_PRODUCTION_INACTIVE,
+      messageKey: G3_PRODUCTION_INACTIVE,
+    })
+    expect(JSON.stringify(storeRef.current)).toBe(before)
+  })
+
   it('confirmPackagingReport refuses soft warehouse write when G4 inactive on web', async () => {
     const { createProductionSlice } = await import('../src/store/slices/productionSlice')
     const slice = createProductionSlice({
@@ -82,6 +103,39 @@ describe('R2.9K productionSlice packaging fail-closed (web, G4 off)', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toBe(G4_PACKAGING_INACTIVE)
     expect((storeRef.current.warehouse as { documents: unknown[] }).documents.length).toBe(beforeDocs)
+  })
+
+  it('missing local G4 activation does not fall back to a soft packaging confirm', async () => {
+    delete (storeRef.current.production as Record<string, unknown>).g4PackagingQcActive
+    const { createProductionSlice } = await import('../src/store/slices/productionSlice')
+    const slice = createProductionSlice({
+      getStore: () => storeRef.current as never,
+      setStore: (updater: (s: never) => unknown) => {
+        storeRef.current = updater(storeRef.current as never) as Record<string, unknown>
+      },
+      getActor: () => ({ uid: 'u1', name: 'T' }),
+    } as never)
+
+    const before = JSON.stringify(storeRef.current)
+    const result = await slice.confirmPackagingReport({
+      idempotencyKey: 'r31c-pack-missing-local-activation',
+      report: {
+        id: 'pr-missing-activation',
+        productionOrderId: 'po-1',
+        finishedProductId: 'fp-1',
+        warehouseItemId: 'fg-1',
+        packagingLocationId: 'loc-1',
+        shiftDate: '2026-09-10',
+        shift: 'day',
+        outputM2: 100,
+        rollCount: 2,
+        wipLines: [],
+        materialLines: [],
+      },
+    } as never)
+
+    expect(result).toMatchObject({ ok: false, error: 'not_configured' })
+    expect(JSON.stringify(storeRef.current)).toBe(before)
   })
 
   it('releaseFinishedGoodsLot refuses soft release when G4 inactive on web', async () => {
@@ -161,7 +215,7 @@ describe('R2.9K warehouseSlice shipment fail-closed (web, G4/G5 off)', () => {
     const { createWarehouseSlice } = await import('../src/store/slices/warehouseSlice')
     const slice = createWarehouseSlice({
       getStore: () => storeRef.current as never,
-      setStore: (updater: (s: never) => unknown, _meta?: unknown) => {
+      setStore: (updater: (s: never) => unknown) => {
         storeRef.current = updater(storeRef.current as never) as Record<string, unknown>
       },
       getActor: () => ({ uid: 'u1', name: 'T' }),

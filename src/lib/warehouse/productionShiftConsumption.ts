@@ -6,6 +6,15 @@ import { isWarehouseAccountingActive, WAREHOUSE_NOT_INITIALIZED } from './accoun
 import { appendWarehouseAudit } from './audit'
 import { postWarehouseDocument, postWarehouseTransfer } from './documents'
 import type { ProductionShiftReport } from '@/lib/production/shiftReports'
+import {
+  LINE_READINESS_EPSILON,
+  SCRAP_ACCOUNTING_DUPLICATE,
+  SCRAP_ACCOUNTING_INACTIVE,
+  SCRAP_ACCOUNTING_MISSING,
+  SCRAP_WASTE_QUANTITY_INVALID,
+  resolveScrapReadiness,
+} from '@/lib/production/lineReadinessCore.mjs'
+import { resolveProductionLineLocation } from './productionLineLocationConfig'
 import type { WarehouseDocument, WarehouseDocumentLine, WarehouseStore } from './types'
 
 export type ShiftConfirmWarehouseResult = {
@@ -21,6 +30,68 @@ export type PostShiftEffectsInput = {
   report: ProductionShiftReport
   actor?: { id?: string; name?: string }
   transactionGroupId: string
+}
+
+export const SHIFT_WASTE_QUANTITY_INVALID = 'production.shift.errWasteExceeds' as const
+export const SHIFT_SCRAP_LOCATION_INVALID = 'production.shift.errSetup' as const
+export const SHIFT_WASTE_EPSILON = LINE_READINESS_EPSILON
+
+export type ShiftWasteRoutingResult<T extends { quantity: number }> =
+  | {
+      ok: true
+      wasteLines: T[]
+      scrapLocationId?: string
+    }
+  | {
+      ok: false
+      error:
+        | typeof SHIFT_WASTE_QUANTITY_INVALID
+        | typeof SHIFT_SCRAP_LOCATION_INVALID
+        | typeof WAREHOUSE_NOT_INITIALIZED
+    }
+
+/**
+ * Shared local readiness rule for routing production waste.
+ * A scrap location is an invariant only when at least one strictly positive
+ * waste row remains after zero rows are removed.
+ */
+export function resolveShiftWasteRouting<T extends { quantity: number }>(
+  store: Pick<WarehouseStore, 'locations' | 'accountingByWarehouse' | 'scrapLocationId'>,
+  wasteLines: readonly T[] | null | undefined,
+  requestedScrapLocationId?: string,
+  route?: { productionWarehouseId?: string; productionLocationId?: string },
+): ShiftWasteRoutingResult<T> {
+  const resolved = resolveScrapReadiness({
+    scrapLocationId: requestedScrapLocationId?.trim() || store.scrapLocationId?.trim(),
+    locations: store.locations,
+    accountingByWarehouse: store.accountingByWarehouse,
+    productionWarehouseId: route?.productionWarehouseId,
+    productionLocationId: route?.productionLocationId,
+    wasteLines,
+  })
+  if (!resolved.ok) {
+    if (resolved.error === SCRAP_WASTE_QUANTITY_INVALID) {
+      return { ok: false, error: SHIFT_WASTE_QUANTITY_INVALID }
+    }
+    if (
+      resolved.error === SCRAP_ACCOUNTING_INACTIVE ||
+      resolved.error === SCRAP_ACCOUNTING_DUPLICATE ||
+      resolved.error === SCRAP_ACCOUNTING_MISSING
+    ) {
+      return { ok: false, error: WAREHOUSE_NOT_INITIALIZED }
+    }
+    return { ok: false, error: SHIFT_SCRAP_LOCATION_INVALID }
+  }
+
+  if (
+    resolved.scrapLocationId &&
+    !isWarehouseAccountingActive(store, resolved.scrapLocationId)
+  ) {
+    // Every positive-scrap stock write requires active destination accounting.
+    return { ok: false, error: WAREHOUSE_NOT_INITIALIZED }
+  }
+
+  return resolved
 }
 
 /**
@@ -42,8 +113,21 @@ export function postShiftReportWarehouseEffects(
   if (!isWarehouseAccountingActive(store, report.packagingLocationId)) {
     return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
   }
-  if (!isWarehouseAccountingActive(store, report.scrapLocationId)) {
-    return { store, result: { ok: false, error: WAREHOUSE_NOT_INITIALIZED } }
+  const lineRoute = resolveProductionLineLocation(store, report.lineId)
+  if (!lineRoute.ok) {
+    return { store, result: { ok: false, error: lineRoute.error } }
+  }
+  if (lineRoute.productionLocationId !== report.productionLocationId) {
+    return { store, result: { ok: false, error: SHIFT_SCRAP_LOCATION_INVALID } }
+  }
+  const wasteRouting = resolveShiftWasteRouting(
+    store,
+    report.wasteLines,
+    report.scrapLocationId,
+    lineRoute,
+  )
+  if (!wasteRouting.ok) {
+    return { store, result: { ok: false, error: wasteRouting.error } }
   }
 
   const semiItem = store.items.find((i) => i.id === report.semiFinishedItemId)
@@ -95,7 +179,9 @@ export function postShiftReportWarehouseEffects(
       itemNameSnapshot: l.itemNameSnapshot,
       unitSnapshot: l.unitSnapshot,
       batchNo: l.batchNo,
+      batchRunId: l.batchRunId,
       expiryDate: l.expiryDate,
+      locationId: report.productionLocationId,
       batchOverrideReason: l.batchOverrideReason,
       comment: [
         `Вход ${l.actualInputQty}`,
@@ -115,7 +201,7 @@ export function postShiftReportWarehouseEffects(
       number: `РС-${report.number}`,
       date,
       documentDateTime: now,
-      warehouseId: report.productionLocationId,
+      warehouseId: report.productionWarehouseId ?? report.productionLocationId,
       purpose: 'production_consumption',
       docRole: 'production_consumption',
       productionOrderId: report.productionOrderId,
@@ -161,8 +247,7 @@ export function postShiftReportWarehouseEffects(
   // Waste transfer pairs (per distinct batches aggregated)
   let wasteTransferPairId: string | undefined
   const wasteByKey = new Map<string, { itemId: string; qty: number; batchNo?: string; expiryDate?: string; unit: string; reason: string }>()
-  for (const w of report.wasteLines) {
-    if (w.quantity <= 0) continue
+  for (const w of wasteRouting.wasteLines) {
     const key = `${w.itemId}::${w.batchNo ?? ''}::${w.expiryDate ?? ''}`
     const cur = wasteByKey.get(key)
     if (cur) cur.qty += w.quantity
@@ -179,6 +264,10 @@ export function postShiftReportWarehouseEffects(
   }
 
   if (wasteByKey.size) {
+    const scrapLocationId = wasteRouting.scrapLocationId
+    if (!scrapLocationId) {
+      return { store, result: { ok: false, error: SHIFT_SCRAP_LOCATION_INVALID } }
+    }
     const wasteLines: WarehouseDocumentLine[] = [...wasteByKey.values()].map((w) => {
       const item = working.items.find((i) => i.id === w.itemId)
       return {
@@ -192,7 +281,7 @@ export function postShiftReportWarehouseEffects(
         expiryDate: w.expiryDate,
         comment: w.reason,
         sourceLocationId: report.productionLocationId,
-        destinationLocationId: report.scrapLocationId,
+        destinationLocationId: scrapLocationId,
       }
     })
     const xfer = postWarehouseTransfer(working, {
@@ -200,9 +289,9 @@ export function postShiftReportWarehouseEffects(
       date,
       documentDateTime: now,
       warehouseId: report.productionLocationId,
-      targetWarehouseId: report.scrapLocationId,
+      targetWarehouseId: scrapLocationId,
       sourceWarehouseId: report.productionLocationId,
-      destinationWarehouseId: report.scrapLocationId,
+      destinationWarehouseId: scrapLocationId,
       purpose: 'production_waste_transfer',
       docRole: 'production_waste_issue',
       productionOrderId: report.productionOrderId,
@@ -271,7 +360,7 @@ export function postShiftReportWarehouseEffects(
     number: `ПФ-${report.number}`,
     date,
     documentDateTime: now,
-    warehouseId: report.packagingLocationId,
+    warehouseId: report.packagingWarehouseId ?? report.packagingLocationId,
     purpose: 'production_wip_receipt',
     docRole: 'production_wip_receipt',
     productionOrderId: report.productionOrderId,
@@ -289,6 +378,7 @@ export function postShiftReportWarehouseEffects(
         itemCodeSnapshot: semiItem.internalCode,
         itemNameSnapshot: semiItem.name,
         unitSnapshot: semiItem.unit || 'm2',
+        locationId: report.packagingLocationId,
         comment: `rolls=${report.rollCount};m2PerRoll=${report.m2PerRollSnapshot ?? ''}`,
       },
     ],
@@ -371,6 +461,11 @@ export function postShiftReportCorrectionReversals(
   const now = new Date().toISOString()
   let working = store
   const documentIds: string[] = []
+  const originalScrapLocationId = original.scrapLocationId?.trim()
+
+  if (original.wasteTransferPairId && !originalScrapLocationId) {
+    return { store, result: { ok: false, error: SHIFT_SCRAP_LOCATION_INVALID } }
+  }
 
   if (original.consumptionDocumentId) {
     const cons = working.documents.find((d) => d.id === original.consumptionDocumentId)
@@ -429,6 +524,7 @@ export function postShiftReportCorrectionReversals(
   }
 
   if (original.wasteTransferPairId) {
+    const scrapLocationId = originalScrapLocationId as string
     const pairDocs = working.documents.filter(
       (d) => d.transferPairId === original.wasteTransferPairId && d.status === 'posted',
     )
@@ -440,9 +536,9 @@ export function postShiftReportCorrectionReversals(
         number: `СТ-ОТ-${original.number}`,
         date,
         documentDateTime: now,
-        warehouseId: original.scrapLocationId,
+        warehouseId: scrapLocationId,
         targetWarehouseId: original.productionLocationId,
-        sourceWarehouseId: original.scrapLocationId,
+        sourceWarehouseId: scrapLocationId,
         destinationWarehouseId: original.productionLocationId,
         purpose: 'production_waste_transfer',
         docRole: 'production_waste_issue',
@@ -457,7 +553,7 @@ export function postShiftReportCorrectionReversals(
         lines: issue.lines.map((l) => ({
           ...l,
           lineId: crypto.randomUUID(),
-          sourceLocationId: original.scrapLocationId,
+          sourceLocationId: scrapLocationId,
           destinationLocationId: original.productionLocationId,
         })),
         transactionGroupId: groupId,
