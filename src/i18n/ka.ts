@@ -1,6 +1,15 @@
 import type { Dict } from './types'
 
 export const ka: Dict = {
+  "month.draftReview.confirmationVoided": "დადასტურება გაუქმებულია",
+  "month.draftReview.confirmFact": "ფაქტი დადასტურებულია",
+  "month.draftReview.closeBlocked": "ჯერ შეინახეთ ან გააუქმეთ ტაბელის მონახაზი. თვე არ დახურულა.",
+  "month.draftReview.recovered": "ამ მოწყობილობაზე შენახულია ტაბელის კოდების მონახაზი. გაგზავნამდე გადაამოწმეთ.",
+  "month.draftReview.storageError": "მოწყობილობაზე მონახაზის შენახვა ვერ მოხერხდა. დოკუმენტის შენახვამდე არ დახუროთ გვერდი.",
+  "month.draftReview.separateActions": "მონახაზი და მისი გაუქმება ეხება დღის კოდებს. საათები, დანიშვნები და გადაყვანები ცალკე ინახება. გეგმასთან დამთხვევის დასადასტურებლად იგივე კოდი აირჩიეთ ფაქტის ფენაში.",
+  "month.closeNotReady": "თვე არ დახურულა. დაადასტურეთ ფაქტი, გაასწორეთ გადაფარვები, შეინახეთ მონახაზები და ხელახლა გადაამოწმეთ ბრიგადები.",
+  "month.closeReadiness": "თვე არ დახურულა. დაუდასტურებელი დღეები: {unconfirmed}. გადასამოწმებელი ბრიგადები: {brigades}. თანამშრომლის/პერიოდის შეცდომები: {conflicts}. მონახაზები/ცვლილებები: {drafts}.",
+  "fin.payslip.mixedRates": "რამდენიმე განაკვეთი: თანხები შეჯამებულია სამუშაო პერიოდების მიხედვით.",
   'app.title': 'ცხრილი',
   'app.subtitle': 'გეგმა / ფაქტი · ლოკალური',
   'app.importError': 'JSON ფაილის წაკითხვა ვერ მოხერხდა.',
@@ -738,6 +747,7 @@ export const ka: Dict = {
   'fin.payslip.employee': 'თანამშრომელი',
   'fin.payslip.signature': 'ხელმოწერა',
   'fin.payslip.hoursDetail': 'საათები',
+  'fin.payslip.legacyDetailsUnavailable': 'თანხა შენახულია ძველ უწყისში; დეტალური გაანგარიშება მაშინ არ ინახებოდა.',
   'fin.payslip.planFactHours': 'გეგმა / ფაქტი',
   'fin.payslip.hoursDelta': 'Δ (ფაქტი − გეგმა)',
   'fin.payslip.baseHours': 'ბაზის საათები',

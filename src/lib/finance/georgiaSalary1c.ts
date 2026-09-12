@@ -3,7 +3,7 @@
  *
  * В Excel формулы сами считают Gross / пенсию / WHT.
  * Из программы заполняем только входы: личный номер, валюта, дата курса,
- * питание (O), Net (Q = получил + получит), банк + справочник INFO.
+ * питание (O), Net за месяц (Q, включая ранее выданный аванс), банк + справочник INFO.
  *
  * O = только пособие `mealAllowanceGel` (налог / шаблон 1С).
  * Заказы обедов после принятия дня уменьшают net → Q, в O их не кладём
@@ -22,7 +22,7 @@ export type Salary1cInputRow = {
   currency: string
   rateDate: string
   mealEmployee: number
-  /** Получил + получит (paid + remaining), ₾ — колонка Net Salary in GEL. */
+  /** Net за месяц, включая аванс: advance + paid + remaining. */
   netSalaryGel: number
   bankAccount: string
 }
@@ -94,6 +94,7 @@ type EmpAgg = {
   paid: number
   remaining: number
   net: number
+  advance: number
 }
 
 export function aggregatePayoutByEmployee(rows: StatementRow[]): Map<string, EmpAgg> {
@@ -106,12 +107,14 @@ export function aggregatePayoutByEmployee(rows: StatementRow[]): Map<string, Emp
         paid: r.paid,
         remaining: r.remaining,
         net: r.net,
+        advance: r.advance,
       })
       continue
     }
     prev.paid += r.paid
     prev.remaining += r.remaining
     prev.net += r.net
+    prev.advance += r.advance
   }
   return map
 }
@@ -151,9 +154,9 @@ export function buildSalary1cRows(
   )
 
   let no = 0
-  for (const { emp, paid, remaining, net } of sorted) {
-    const payoutGel = round2(Math.max(0, paid + remaining))
-    const payoutExact = round2(Math.max(0, Math.abs(net - payoutGel) < 0.02 ? net : payoutGel))
+  for (const { emp, net, advance } of sorted) {
+    // An advance is already-paid salary, not a reduction of monthly income.
+    const payoutExact = round2(Math.max(0, net + advance))
     if (payoutExact < 0.005) continue
 
     const personalId = emp.personalId?.trim() || emp.tabNumber?.trim() || ''

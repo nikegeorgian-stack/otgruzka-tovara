@@ -23,6 +23,7 @@ export function createDefaultFinanceStore(): FinanceStore {
     sickConfirmations: [],
     vacationConfirmations: [],
     snapshots: {},
+    snapshotHistory: {},
   }
 }
 
@@ -58,5 +59,7 @@ export function normalizeFinanceStore(raw: unknown): FinanceStore {
       r.snapshots && typeof r.snapshots === 'object'
         ? (r.snapshots as Record<string, PayrollSnapshot>)
         : {},
+    snapshotHistory:
+      r.snapshotHistory && typeof r.snapshotHistory === 'object' ? r.snapshotHistory : {},
   }
 }

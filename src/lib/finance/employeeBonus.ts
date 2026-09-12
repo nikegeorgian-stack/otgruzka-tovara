@@ -1,5 +1,6 @@
 import type { FinanceAdjustment } from './types'
 import { sumProductivityBonus } from './adjustmentReasons'
+import { roundMoney } from './money'
 import type { Employee } from '@/lib/types'
 
 export const SALARY_BONUS_PERCENT = 10
@@ -35,19 +36,19 @@ function sumManualBonuses(
 export function individualMonthlyBonus(emp: Employee): number {
   if (!emp.individualBonus) return 0
   const v = emp.monthlyBonus ?? 0
-  return Number.isFinite(v) && v > 0 ? Math.round(v) : 0
+  return Number.isFinite(v) && v > 0 ? roundMoney(v) : 0
 }
 
 /** Единоразовая премия за конкретный месяц (₾). */
 export function oneTimeMonthPremium(emp: Employee, month: string): number {
   const v = emp.monthPremiums?.[month]
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? roundMoney(v) : 0
 }
 
 /** 10% от начисленного по табелю (gross accrued), если включена галочка. */
 export function salaryPercentBonus(emp: Employee, accruedGross: number): number {
   if (!emp.bonusPercentFromSalary || accruedGross <= 0) return 0
-  return Math.round((accruedGross * SALARY_BONUS_PERCENT) / 100)
+  return roundMoney((accruedGross * SALARY_BONUS_PERCENT) / 100)
 }
 
 /**

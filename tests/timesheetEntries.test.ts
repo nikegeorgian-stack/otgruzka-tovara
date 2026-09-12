@@ -18,8 +18,7 @@ function sheetWithCell(opts: {
 }): MonthSheet {
   const { rowId, brigade, employeeId, dateKey } = opts
   return {
-    year: 2026,
-    month: 8,
+    month: '2026-08',
     rows: [{ id: rowId, brigade, employeeId }],
     plan: { [rowId]: { [dateKey]: (opts.plan ?? '') as never } },
     fact: { [rowId]: { [dateKey]: (opts.fact ?? '') as never } },

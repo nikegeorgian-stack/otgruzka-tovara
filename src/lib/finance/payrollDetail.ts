@@ -7,6 +7,10 @@ import { hoursForCode } from '@/lib/codes'
 import { dayDateKey, daysInMonth } from '@/lib/dates'
 import { factWorkedHours, isWorkCode } from '@/lib/factExtra'
 import { resolveRowHourlyRate } from '@/lib/payroll'
+import { payrollWorkHours } from './payrollWorkHours'
+import { employeeForTimesheetRow } from '@/lib/rowSchedule'
+import { roundMoney } from './money'
+import { isTransferredOut } from '@/lib/dayTransfer'
 import { effectiveShiftHours } from '@/lib/schedules'
 import { getFactMark, rowStats } from '@/lib/stats'
 import type { AppStore, DayCode, Employee, MonthSheet } from '@/lib/types'
@@ -25,13 +29,17 @@ export type BrigadierPayDetail = {
 }
 
 export type PayrollHourDetail = {
+  /** Legacy snapshots did not store their historical explanation. */
+  unavailable?: boolean
+  /** Aggregated employee has more than one rate/schedule. */
+  mixedRates?: boolean
   planHours: number
   factHours: number
   /** Рабочие часы (без В/ОТ/Б/ПР). */
   workFactHours: number
   baseHours: number
   overtimeHours: number
-  /** Сверхурочные по Δ месяца (рабочий факт − норма работы после ОТ/Б/ПР), 110%. */
+  /** Сверхурочные по Δ месяца (рабочий факт − норма работы после ОТ/Б/ПР), дневные и ночные. */
   monthDeltaOtHours: number
   otDayHours: number
   otNightHours: number
@@ -167,7 +175,7 @@ export function computeBrigadierPay(
 
   const days = daysInMonth(year, month)
   // Доплата ₾/ч от полной месячной нормы (не срезаем asOf) — иначе ставка «прыгает» в течение месяца.
-  const planHours = rowStats(sheet, rowId, days, year, month, emp).planHours
+  const planHours = sheet.rows.filter((r) => r.employeeId === emp.id).reduce((sum, r) => sum + rowStats(sheet, r.id, days, year, month, employeeForTimesheetRow(emp, sheet, r.id)).planHours, 0)
   if (planHours <= 0) return null
 
   const fullMonthlyAmount = brigadierBonusAmountFromStore(store)
@@ -209,7 +217,7 @@ export function computeBrigadierPay(
     factBrigHours,
     overtimeBrigHours,
     hourlySupplement,
-    amount: Math.round(factBrigHours * hourlySupplement),
+    amount: roundMoney(factBrigHours * hourlySupplement),
     designatedBrigadier,
   }
 }
@@ -229,65 +237,19 @@ export function computePayrollHourDetail(
     opts?.sickConfirmed !== undefined || opts?.vacationConfirmed !== undefined
       ? { sickConfirmed: opts?.sickConfirmed, vacationConfirmed: opts?.vacationConfirmed }
       : undefined
-  const hours = getRowHoursSnapshot(sheet, rowId, emp, year, month, confirm, asOfDate)
-  const { planHours, factHours, workFactHours, monthDeltaOtHours } = hours
+  const hours = getRowHoursSnapshot(sheet, rowId, employeeForTimesheetRow(emp, sheet, rowId), year, month, confirm, asOfDate)
+  const { planHours, factHours, workFactHours } = hours
 
-  let baseHours = 0
-  let otDayHours = 0
-  let otNightHours = 0
-  let nightShiftHours = 0
+  const allocation = payrollWorkHours(sheet, rowId, emp, year, month, confirm, asOfDate)
+  const { baseHours, otDayHours, otNightHours, nightShiftHours } = allocation
   let idleHours = 0
-
-  if (monthDeltaOtHours > 0) {
-    // База = норма работы (план − ОТ/Б/ПР), не полный план.
-    baseHours = Math.max(0, workFactHours - monthDeltaOtHours)
-    otDayHours = monthDeltaOtHours
-  } else {
-    for (let d = 1; d <= days; d++) {
-      const dateKey = dayDateKey(year, month, d)
-      if (asOfDate && dateKey > asOfDate) continue
-      const code = getFactMark(sheet, rowId, dateKey)
-      if (!isWorkCode(code)) continue
-
-      const worked = factWorkedHours(sheet, rowId, dateKey, code)
-      if (worked <= 0) continue
-
-      if (code === 'Н') {
-        const shiftH = emp.shiftHours ?? hoursForCode(code)
-        nightShiftHours += Math.min(worked, shiftH)
-        const extraH = Math.max(0, worked - shiftH)
-        if (extraH > 0) otNightHours += extraH
-      } else {
-        const normH = hoursForCode(code)
-        baseHours += Math.min(worked, normH)
-        const extraH = Math.max(0, worked - normH)
-        if (extraH > 0) otDayHours += extraH
-      }
-    }
-  }
-
-  // Ночные смены учитываем отдельно даже при месячном Δ
-  if (monthDeltaOtHours > 0) {
-    for (let d = 1; d <= days; d++) {
-      const dateKey = dayDateKey(year, month, d)
-      if (asOfDate && dateKey > asOfDate) continue
-      const code = getFactMark(sheet, rowId, dateKey)
-      if (code !== 'Н') continue
-      const worked = factWorkedHours(sheet, rowId, dateKey, code)
-      if (worked <= 0) continue
-      const shiftH = emp.shiftHours ?? hoursForCode(code)
-      nightShiftHours += Math.min(worked, shiftH)
-      const extraH = Math.max(0, worked - shiftH)
-      if (extraH > 0) otNightHours += extraH
-    }
-  }
 
   for (let d = 1; d <= days; d++) {
     const dateKey = dayDateKey(year, month, d)
     if (asOfDate && dateKey > asOfDate) continue
-    if (getFactMark(sheet, rowId, dateKey) !== 'ПР') continue
+    if (isTransferredOut(sheet, rowId, dateKey) || getFactMark(sheet, rowId, dateKey) !== 'ПР') continue
     const planMark = sheet.plan[rowId]?.[dateKey] ?? ''
-    idleHours += isWorkCode(planMark) ? hoursForCode(planMark) : effectiveShiftHours(emp)
+    idleHours += isWorkCode(planMark) ? hoursForCode(planMark) : effectiveShiftHours(employeeForTimesheetRow(emp, sheet, rowId))
   }
 
   const accrual = resolvePayrollAccrualRules(store.settings)
@@ -308,12 +270,12 @@ export function computePayrollHourDetail(
     workFactHours,
     baseHours,
     overtimeHours: otDayHours + otNightHours,
-    monthDeltaOtHours,
+    monthDeltaOtHours: allocation.monthDeltaOtHours,
     otDayHours,
     otNightHours,
     nightShiftHours,
     idleHours,
-    hourlyRate: resolveRowHourlyRate(emp, year, month),
+    hourlyRate: resolveRowHourlyRate(employeeForTimesheetRow(emp, sheet, rowId), year, month),
     nightMultiplier: accrual.nightMultiplier,
     idleMultiplier: accrual.idleMultiplier,
     otDayMultiplier: accrual.otDayMultiplier,

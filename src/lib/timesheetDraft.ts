@@ -1,14 +1,10 @@
+import { applyPlanDayMark } from '@/lib/monthSheet'
+import { isWorkCode } from '@/lib/factExtra'
 import { getFactMark } from '@/lib/stats'
 import type { DayCode, MonthSheet } from '@/lib/types'
+import type { TimesheetEntryChange } from '@/lib/timesheetEntries/types'
 
-export type TimesheetDraftChange = {
-  rowId: string
-  dateKey: string
-  mode: 'plan' | 'fact'
-  /** Значение в сторе до начала сессии правки. */
-  before: DayCode
-  after: DayCode
-}
+export type TimesheetDraftChange = TimesheetEntryChange
 
 export function draftCellKey(mode: 'plan' | 'fact', rowId: string, dateKey: string): string {
   return `${mode}|${rowId}|${dateKey}`
@@ -31,19 +27,26 @@ export function mergeTimesheetDraft(
 ): MonthSheet {
   if (changes.length === 0) return sheet
 
-  const plan = { ...sheet.plan }
-  const fact = { ...sheet.fact }
-  const factOverrides = [...sheet.factOverrides]
-
+  let next = sheet
   for (const ch of changes) {
     if (ch.mode === 'plan') {
-      plan[ch.rowId] = { ...(plan[ch.rowId] ?? {}), [ch.dateKey]: ch.after }
+      next = applyPlanDayMark(next, ch.rowId, ch.dateKey, ch.after)
       continue
     }
-    fact[ch.rowId] = { ...(fact[ch.rowId] ?? {}), [ch.dateKey]: ch.after }
-    const oKey = `${ch.rowId}|${ch.dateKey}`
-    if (!factOverrides.includes(oKey)) factOverrides.push(oKey)
+    const key = `${ch.rowId}|${ch.dateKey}`
+    const extra = { ...next.factExtraHours },
+      exact = { ...next.factHoursOverride }
+    if (!isWorkCode(ch.after)) {
+      delete extra[key]
+      delete exact[key]
+    }
+    next = {
+      ...next,
+      fact: { ...next.fact, [ch.rowId]: { ...next.fact[ch.rowId], [ch.dateKey]: ch.after } },
+      factOverrides: [...new Set([...next.factOverrides, key])],
+      factExtraHours: extra,
+      factHoursOverride: exact,
+    }
   }
-
-  return { ...sheet, plan, fact, factOverrides }
+  return next
 }

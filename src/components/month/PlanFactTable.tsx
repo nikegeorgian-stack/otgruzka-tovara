@@ -1,3 +1,4 @@
+import { isBrigadeTimesheetVerified } from '@/lib/brigadeSignoff'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { BilingualText } from '@/components/employee/BilingualText'
@@ -1026,7 +1027,7 @@ export function PlanFactTable({
                       {canSignoff && onSetBrigadeSignoff ? (
                         <label
                           className={`inline-flex cursor-pointer items-center gap-1 rounded-sm border px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal ${
-                            sheet.brigadeSignoffs?.[brigade]?.verified
+                            isBrigadeTimesheetVerified(sheet, brigade, store)
                               ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
                               : 'border-amber-200 bg-amber-50 text-amber-950'
                           }`}
@@ -1035,12 +1036,12 @@ export function PlanFactTable({
                           <input
                             type="checkbox"
                             className="rounded-sm"
-                            checked={sheet.brigadeSignoffs?.[brigade]?.verified === true}
+                            checked={isBrigadeTimesheetVerified(sheet, brigade, store)}
                             onChange={(e) => onSetBrigadeSignoff(brigade, e.target.checked)}
                           />
                           {t('month.signoff.label')}
                         </label>
-                      ) : sheet.brigadeSignoffs?.[brigade]?.verified ? (
+                      ) : isBrigadeTimesheetVerified(sheet, brigade, store) ? (
                         <span className="rounded-sm border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-emerald-800">
                           ✓ {t('month.signoff.done')}
                         </span>

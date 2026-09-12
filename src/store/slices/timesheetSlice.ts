@@ -1,3 +1,4 @@
+import { brigadeTimesheetFingerprint } from '@/lib/brigadeSignoff'
 import { startTransition } from 'react'
 import { auditCellChange, auditFactChange, appendAudit } from '@/lib/audit'
 import { canMutateTimesheet, resolveTimesheetActorUser } from '@/lib/access/timesheetGuard'
@@ -465,13 +466,7 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
      */
     commitTimesheetDraft(
       month: string,
-      changes: Array<{
-        rowId: string
-        dateKey: string
-        mode: 'plan' | 'fact'
-        before: DayCode
-        after: DayCode
-      }>,
+      changes: TimesheetEntryChange[],
     ): CommitTimesheetDraftResult {
       const empty: CommitTimesheetDraftResult = {
         applied: 0,
@@ -523,6 +518,7 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
             dateKey: mark.dateKey,
             employeeId: row?.employeeId ?? mark.employeeId,
             brigade: row?.brigade ?? mark.brigade,
+            factConfirmed: mark.mode === 'fact' ? mark.afterState?.override : undefined,
             oldCode: mark.before,
             newCode: mark.after,
             ...cellAuditFields(s, row?.brigade ?? mark.brigade, month),
@@ -624,6 +620,9 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
             : d,
         )
         next = { ...next, timesheetEntries: { documents } }
+        for (const mark of [...doc.applied].reverse()) {
+          next = auditCellChange(next, { action: mark.mode === 'fact' ? 'fact_change' : 'plan_change', month: doc.month, rowId: mark.rowId, dateKey: mark.dateKey, employeeId: mark.employeeId, brigade: mark.brigade, oldCode: mark.after, newCode: mark.before, timesheetEntryId: doc.id, factConfirmed: mark.mode === 'fact' ? mark.beforeState?.override : undefined, ...af })
+        }
         next = appendAudit(next, {
           action: 'timesheet_entry_void',
           month: doc.month,
@@ -1945,18 +1944,19 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
           const actor = actorFields()
           brigadeSignoffs[brigade] = {
             verified: true,
+            fingerprint: brigadeTimesheetFingerprint(sheet, brigade, base),
             at: new Date().toISOString(),
             by: actor.by,
             byName: actor.byName,
           }
         }
-        return {
+        return appendAudit({
           ...base,
           months: {
             ...base.months,
             [month]: { ...sheet, brigadeSignoffs },
           },
-        }
+        }, { action: 'timesheet_signoff', month, brigade, ...actorFields(), oldValue: sheet.brigadeSignoffs?.[brigade]?.fingerprint ?? '', newValue: brigadeSignoffs[brigade]?.fingerprint ?? '', detail: `${brigade} · ${month} · ${verified ? 'сверен / შემოწმებულია' : 'сверка снята / შემოწმება გაუქმებულია'}` })
       })
     },
   }

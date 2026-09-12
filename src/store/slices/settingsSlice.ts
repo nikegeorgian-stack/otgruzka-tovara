@@ -1,3 +1,5 @@
+import { payrollReadiness, payrollReady } from '@/lib/finance/payrollReadiness'
+import { t as translate } from '@/i18n'
 import {
   applyAppStoreSeeds,
   createDefaultStore,
@@ -194,17 +196,21 @@ export function createSettingsSlice(
       actor?: { id?: string; name?: string },
     ) {
       applyStoreUpdate(setStore, (s) => {
+        if (closed && !isMonthClosed(s, month) && !payrollReady(payrollReadiness(s, month, actor?.id))) throw new Error(translate(s.settings.locale, 'month.closeNotReady'))
         let next = setMonthClosed(s, month, closed, actor)
         if (next === s) return s
         if (closed) {
           // Фиксируем снимок расчёта ЗП — поздние правки ставок не меняют прошлое.
-          const snapshot = buildPayrollSnapshot(next, month, actor)
+          const snapshot = buildPayrollSnapshot(s, month, actor)
           const fin = getFinance(next)
           next = {
             ...next,
             finance: {
               ...fin,
               snapshots: { ...fin.snapshots, [month]: snapshot },
+              snapshotHistory: fin.snapshots[month]
+                ? { ...fin.snapshotHistory, [`${month}|${crypto.randomUUID()}`]: fin.snapshots[month] }
+                : fin.snapshotHistory,
             },
           }
           next = appendAudit(next, {

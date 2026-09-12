@@ -346,6 +346,7 @@ export type DaySubstitution = {
 
 /** Сверка табеля бригады за месяц («посчитано верно»). */
 export type BrigadeTimesheetSignoff = {
+  fingerprint?: string
   verified: true
   at: string
   by?: string
@@ -391,6 +392,7 @@ export type AuditEntry = {
     | 'fact_change'
     | 'plan_change'
     | 'plan_save'
+    | 'timesheet_signoff'
     | 'comment'
     | 'substitution'
     | 'employee_remove'
@@ -508,6 +510,8 @@ export type AuditEntry = {
   /** Бригада строки (для области ACL / журнала). */
   brigade?: string
   detail: string
+  timesheetEntryId?: string
+  factConfirmed?: boolean
   oldValue?: string
   newValue?: string
   /** Кто выполнил действие (учётка). Аддитивно — старые записи без поля. */

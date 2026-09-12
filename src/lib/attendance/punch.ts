@@ -1,12 +1,19 @@
 import type { AttendancePunch, AttendancePunchKind, AttendanceStore } from './types'
 
-/** Локальная дата устройства YYYY-MM-DD. */
+export const ATTENDANCE_TIME_ZONE = 'Asia/Tbilisi'
+
+/** Дата завода YYYY-MM-DD, независимо от часового пояса устройства. */
 export function localDateKey(iso = new Date().toISOString()): string {
   const d = new Date(iso)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  if (!Number.isFinite(d.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ATTENDANCE_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d)
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 export function punchesForEmployeeDay(
@@ -18,16 +25,20 @@ export function punchesForEmployeeDay(
   return list.filter((p) => p.employeeId === employeeId && localDateKey(p.at) === dateKey)
 }
 
-/** Следующий тип прохода: первый за день = in, иначе чередование. */
+/** Close the latest open entrance across midnight; old unmatched days remain for review. */
 export function nextPunchKind(
   store: AttendanceStore | undefined,
   employeeId: string,
   atIso = new Date().toISOString(),
 ): AttendancePunchKind {
-  const day = localDateKey(atIso)
-  const dayPunches = punchesForEmployeeDay(store, employeeId, day)
-  if (dayPunches.length === 0) return 'in'
-  const last = dayPunches[dayPunches.length - 1]!
+  const at = new Date(atIso).getTime()
+  const last = (store?.punches ?? [])
+    .filter(
+      (p) =>
+        p.employeeId === employeeId && Number.isFinite(Date.parse(p.at)) && Date.parse(p.at) <= at,
+    )
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0]
+  if (!last || at - Date.parse(last.at) > 24 * 60 * 60 * 1000) return 'in'
   return last.kind === 'in' ? 'out' : 'in'
 }
 
@@ -71,6 +82,7 @@ export function summarizeDayAttendance(
 export function formatPunchTime(iso: string, locale = 'ru-GE'): string {
   try {
     return new Date(iso).toLocaleTimeString(locale, {
+      timeZone: ATTENDANCE_TIME_ZONE,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',

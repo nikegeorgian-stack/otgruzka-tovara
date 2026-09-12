@@ -34,13 +34,15 @@ export function auditCellChange(
     dateKey: string
     employeeId?: string
     brigade?: string
+    timesheetEntryId?: string
+    factConfirmed?: boolean
     oldCode: DayCode
     newCode: DayCode
     /** Правка чужой бригады по временной подмене мастера. */
     viaCoverage?: boolean
   } & AuditActorFields,
 ): AppStore {
-  if (args.oldCode === args.newCode) return store
+  if (args.oldCode === args.newCode && args.factConfirmed === undefined) return store
   const who = employeeLabel(store, args.employeeId)
   const brigadePart = args.brigade ? `${args.brigade} · ` : ''
   const actorPart = args.byName ? ` · ${args.byName}` : ''
@@ -54,6 +56,8 @@ export function auditCellChange(
     brigade: args.brigade,
     by: args.by,
     byName: args.byName,
+    factConfirmed: args.factConfirmed,
+    timesheetEntryId: args.timesheetEntryId,
     oldValue: args.oldCode || '·',
     newValue: args.newCode || '·',
     detail: `${brigadePart}${who} · ${args.dateKey}: ${args.oldCode || '·'} → ${args.newCode || '·'}${actorPart}${coveragePart}`,

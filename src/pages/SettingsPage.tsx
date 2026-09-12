@@ -802,7 +802,7 @@ export function SettingsPage({
                           type="checkbox"
                           checked={closed}
                           disabled={lockToggleDisabled}
-                          onChange={(e) => onSetMonthClosed(month, e.target.checked)}
+                          onChange={(e) => { try { onSetMonthClosed(month, e.target.checked) } catch (error) { showNotice('error', error instanceof Error ? error.message : t('month.closeNotReady')) } }}
                         />
                         {t('settings.closeMonth')}
                       </label>

@@ -1,3 +1,5 @@
+import type { StatementRow } from './calc'
+
 /** Финансовый отдел: авансы, премии/штрафы, выплаты, подтверждение больничных, снимок начислений. */
 
 export type FinancePaymentMethod = 'cash' | 'card' | 'bank'
@@ -222,10 +224,13 @@ export type PayrollSnapshotRow = {
   /** К выплате = accrued + bonus + бригадирская − penalty − advance. */
   net: number
   factHours: number
+  /** V2: complete accrual explanation and employee identity, without live payments. */
+  statement?: Omit<StatementRow, 'paid' | 'remaining' | 'frozen'>
 }
 
 /** Снимок расчёта при закрытии месяца — иммутабельная история. */
 export type PayrollSnapshot = {
+  version?: 2
   month: string
   at: string
   byId?: string
@@ -247,4 +252,6 @@ export type FinanceStore = {
   vacationConfirmations: VacationConfirmation[]
   /** Снимки начислений по месяцам (ключ — YYYY-MM). */
   snapshots: Record<string, PayrollSnapshot>
+  /** Previous approved versions; never replaced by a recalculation. */
+  snapshotHistory?: Record<string, PayrollSnapshot>
 }

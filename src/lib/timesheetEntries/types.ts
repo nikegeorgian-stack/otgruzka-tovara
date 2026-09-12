@@ -4,6 +4,14 @@ export type TimesheetEntryStatus = 'draft' | 'posted' | 'void'
 
 export type TimesheetEntrySource = 'edit_batch'
 
+export type TimesheetEntryCellState = {
+  plan?: DayCode
+  fact?: DayCode
+  override: boolean
+  extraHours?: number
+  hoursOverride?: number
+}
+
 export type TimesheetEntryChange = {
   rowId: string
   employeeId?: string
@@ -12,6 +20,11 @@ export type TimesheetEntryChange = {
   mode: 'plan' | 'fact'
   before: DayCode
   after: DayCode
+  /** Same-code operation that explicitly confirms a planned shift. */
+  confirmFact?: boolean
+  expectedEmployeeId?: string | null
+  beforeState?: TimesheetEntryCellState
+  afterState?: TimesheetEntryCellState
 }
 
 /** Снимок реально записанной ячейки (для void). */

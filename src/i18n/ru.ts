@@ -1,6 +1,15 @@
 import type { Dict } from './types'
 
 export const ru: Dict = {
+  "month.draftReview.confirmationVoided": "Подтверждение отменено",
+  "month.draftReview.confirmFact": "Факт подтверждён",
+  "month.draftReview.closeBlocked": "Сначала сохраните или отмените черновик табеля. Месяц не закрыт.",
+  "month.draftReview.recovered": "Есть черновик кодов табеля, сохранённый на этом устройстве. Проверьте его перед отправкой.",
+  "month.draftReview.storageError": "Не удалось сохранить черновик на устройстве. Не закрывайте страницу до сохранения документа.",
+  "month.draftReview.separateActions": "Черновик и его отмена относятся к кодам дней. Часы, назначения и переносы сохраняются отдельными действиями. Чтобы подтвердить факт, совпадающий с планом, выберите тот же код в слое «Факт».",
+  "month.closeNotReady": "Месяц не закрыт. В табеле подтвердите факт, устраните пересечения строк, сохраните черновики и повторите сверку бригад.",
+  "month.closeReadiness": "Месяц не закрыт. Неподтверждённых дней: {unconfirmed}. Бригады без актуальной сверки: {brigades}. Ошибок сотрудников/периодов: {conflicts}. Черновиков/правок: {drafts}.",
+  "fin.payslip.mixedRates": "Несколько ставок: суммы сложены по периодам работы.",
   'app.title': 'Табель',
   'app.subtitle': 'план / факт · локально',
   'app.importError': 'Не удалось прочитать JSON.',
@@ -739,6 +748,7 @@ export const ru: Dict = {
   'fin.payslip.employee': 'Сотрудник',
   'fin.payslip.signature': 'Подпись',
   'fin.payslip.hoursDetail': 'Часы',
+  'fin.payslip.legacyDetailsUnavailable': 'Сумма сохранена в старой ведомости; подробный расчёт тогда не сохранялся.',
   'fin.payslip.planFactHours': 'План / факт',
   'fin.payslip.hoursDelta': 'Δ (факт − план)',
   'fin.payslip.baseHours': 'Базовые часы',

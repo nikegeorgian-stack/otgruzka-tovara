@@ -16,6 +16,9 @@ import {
 import { documentNumberForAdvance } from './advanceDocuments'
 import { documentNumberForPayout } from './payoutDocuments'
 import { employeeAcceptedMealDeduction } from '../meals/calc'
+import { roundMoney } from './money'
+import { frozenStatementRow, payrollEmployeeSnapshot } from './frozenPayroll'
+import { aggregateEmployeeStatementRows, financeOwnerRows } from './statementAggregate'
 import type {
   FinanceAdjustment,
   FinanceAdvance,
@@ -216,18 +219,21 @@ export type StatementRow = {
  * аванс берём из снимка (иммутабельно); выплаты всегда живые.
  */
 export function monthStatement(store: AppStore, month: string, asOfDate?: string): StatementRow[] {
-  const sheet = store.months[month]
-  if (!sheet) return []
   const fin = getFinance(store)
-  const { year, month: mo } = parseMonthKey(month)
   const closed = isMonthClosed(store, month)
   const snapshot = fin.snapshots[month]
-  const snapByRowId = new Map(
-    (snapshot?.rows ?? [])
-      .filter((r) => r.rowId)
-      .map((r) => [r.rowId!, r]),
-  )
-  const snapByEmp = new Map((snapshot?.rows ?? []).map((r) => [r.employeeId, r]))
+  if (closed && snapshot) {
+    const frozen = snapshot.rows.map((row) => frozenStatementRow(row, store.employees.find((emp) => emp.id === row.employeeId)))
+    const owners = financeOwnerRows(frozen.map((row) => ({ id: row.rowId, employeeId: row.employeeId })))
+    return frozen.map((row) => {
+      const paid = owners.get(row.employeeId) === row.rowId ? roundMoney(sumPayouts(fin.payouts, row.employeeId, month, asOfDate)) : 0
+      return { ...row, paid, remaining: roundMoney(row.net - paid) }
+    })
+  }
+  const sheet = store.months[month]
+  if (!sheet) return []
+  const { year, month: mo } = parseMonthKey(month)
+  const financeOwners = financeOwnerRows(sheet.rows)
   const empRowCount = new Map<string, number>()
   for (const r of sheet.rows) {
     if (!r.employeeId) continue
@@ -253,9 +259,9 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
     const sick = sickDays(store, month, row.id)
     const vacation = vacationDays(store, month, row.id)
 
-    // Аванс/премии/выплаты — один раз на сотрудника (домашняя бригада после перевода).
+    // Аванс/премии/выплаты — один раз на сотрудника (стабильная строка-владелец).
     const splitCount = empRowCount.get(emp.id) ?? 0
-    const isFinanceHome = splitCount <= 1 || row.brigade === emp.brigade
+    const isFinanceHome = financeOwners.get(emp.id) === row.id
     const paid = isFinanceHome ? sumPayouts(fin.payouts, emp.id, month, asOfDate) : 0
 
     const liveManualBonus = isFinanceHome
@@ -287,35 +293,29 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
       asOfDate,
     })
 
-    const snap =
-      closed
-        ? snapByRowId.get(row.id) ??
-          (splitCount <= 1 ? snapByEmp.get(emp.id) : undefined)
-        : undefined
-    const accrued = snap ? snap.accrued : pay.amount
-    const bonus = snap ? snap.bonus : liveBonus
-    const bonusParts = employeeBonusBreakdown(
+    const accrued = pay.amount
+    const bonus = liveBonus
+    const bonusParts = isFinanceHome ? employeeBonusBreakdown(
       emp,
       isFinanceHome ? (splitCount > 1 ? autoBase : accrued) : accrued,
       fin.adjustments,
       emp.id,
       month,
       asOfDate,
-      snap ? snap.bonus : undefined,
-    )
-    const brigadierBonus = snap ? (snap.brigadierBonus ?? 0) : liveBrigadierBonus
-    const penalty = snap ? snap.penalty : livePenalty
-    const advance = snap ? snap.advance : liveAdvance
+    ) : { auto: 0, productivity: 0, otherManual: 0 }
+    const brigadierBonus = liveBrigadierBonus
+    const penalty = livePenalty
+    const advance = liveAdvance
     const mealDeduction = liveMealDeduction
-    const factHours = snap ? snap.factHours : hourDetail.factHours
-    const net = accrued + bonus + brigadierBonus - penalty - advance - mealDeduction
+    const factHours = hourDetail.factHours
+    const net = roundMoney(accrued + bonus + brigadierBonus - penalty - advance - mealDeduction)
 
     rows.push({
       rowId: row.id,
       employeeId: emp.id,
       emp,
       brigade: row.brigade,
-      schedule: emp.schedule,
+      schedule: sheet.rowBounds?.[row.id]?.schedule ?? emp.schedule,
       factHours,
       rateLabel: pay.rateLabel,
       breakdown: pay.breakdown,
@@ -330,8 +330,8 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
       mealDeduction,
       net,
       paid,
-      remaining: net - paid,
-      frozen: !!snap,
+      remaining: roundMoney(net - paid),
+      frozen: false,
       sickDates: sick,
       sickConfirmed,
       vacationDates: vacation,
@@ -349,7 +349,7 @@ export function statementRowForEmployee(
   employeeId: string,
   asOfDate?: string,
 ): StatementRow | undefined {
-  return monthStatement(store, month, asOfDate).find((r) => r.employeeId === employeeId)
+  return aggregateEmployeeStatementRows(monthStatement(store, month, asOfDate).filter((r) => r.employeeId === employeeId))
 }
 
 export type StatementTotals = {
@@ -366,14 +366,14 @@ export type StatementTotals = {
 export function statementTotals(rows: StatementRow[]): StatementTotals {
   return rows.reduce<StatementTotals>(
     (acc, r) => ({
-      accrued: acc.accrued + r.accrued,
-      bonus: acc.bonus + r.bonus,
-      brigadierBonus: acc.brigadierBonus + r.brigadierBonus,
-      penalty: acc.penalty + r.penalty,
-      advance: acc.advance + r.advance,
-      net: acc.net + r.net,
-      paid: acc.paid + r.paid,
-      remaining: acc.remaining + r.remaining,
+      accrued: roundMoney(acc.accrued + r.accrued),
+      bonus: roundMoney(acc.bonus + r.bonus),
+      brigadierBonus: roundMoney(acc.brigadierBonus + r.brigadierBonus),
+      penalty: roundMoney(acc.penalty + r.penalty),
+      advance: roundMoney(acc.advance + r.advance),
+      net: roundMoney(acc.net + r.net),
+      paid: roundMoney(acc.paid + r.paid),
+      remaining: roundMoney(acc.remaining + r.remaining),
     }),
     { accrued: 0, bonus: 0, brigadierBonus: 0, penalty: 0, advance: 0, net: 0, paid: 0, remaining: 0 },
   )
@@ -385,7 +385,8 @@ export function buildPayrollSnapshot(
   month: string,
   actor?: { id?: string; name?: string },
 ): PayrollSnapshot {
-  const rows = monthStatement(store, month)
+  // Deliberately bypass every old snapshot, even if the caller has already closed the month.
+  const rows = monthStatement({ ...store, closedMonths: (store.closedMonths ?? []).filter((m) => m !== month) }, month)
   const snapRows: PayrollSnapshotRow[] = rows.map((r) => ({
     employeeId: r.employeeId,
     rowId: r.rowId,
@@ -396,8 +397,14 @@ export function buildPayrollSnapshot(
     advance: r.advance,
     net: r.net,
     factHours: r.factHours,
+    statement: (() => {
+      const { paid: _paid, remaining: _remaining, frozen: _frozen, ...statement } = r
+      void [_paid, _remaining, _frozen]
+      return structuredClone({ ...statement, emp: payrollEmployeeSnapshot(r.emp) })
+    })(),
   }))
   return {
+    version: 2,
     month,
     at: new Date().toISOString(),
     byId: actor?.id,

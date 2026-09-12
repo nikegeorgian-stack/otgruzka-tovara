@@ -1,6 +1,15 @@
 import type { Dict } from './types'
 
 export const en: Dict = {
+  "month.draftReview.confirmationVoided": "Confirmation cancelled",
+  "month.draftReview.confirmFact": "Fact confirmed",
+  "month.draftReview.closeBlocked": "Save or discard the timesheet draft first. The month remains open.",
+  "month.draftReview.recovered": "A draft of timesheet codes is saved on this device. Review it before submitting.",
+  "month.draftReview.storageError": "Could not save the draft on this device. Keep this page open until you save the document.",
+  "month.draftReview.separateActions": "This draft and its cancellation cover day codes. Hours, assignments and transfers save separately. To confirm a fact matching the plan, select the same code in the Fact layer.",
+  "month.closeNotReady": "Month remains open. Confirm facts, resolve overlapping rows, save drafts and review the brigades.",
+  "month.closeReadiness": "Month remains open. Unconfirmed days: {unconfirmed}. Brigades needing review: {brigades}. Employee/period conflicts: {conflicts}. Drafts/changes: {drafts}.",
+  "fin.payslip.mixedRates": "Multiple rates: amounts are summed across employment periods.",
   'app.title': 'Timesheet',
   'app.subtitle': 'plan / actual · local',
   'app.importError': 'Could not read JSON.',
@@ -706,6 +715,7 @@ export const en: Dict = {
   'fin.payslip.employee': 'Employee',
   'fin.payslip.signature': 'Signature',
   'fin.payslip.hoursDetail': 'Hours',
+  'fin.payslip.legacyDetailsUnavailable': 'The amount was saved in a legacy statement; detailed calculations were not stored.',
   'fin.payslip.planFactHours': 'Plan / actual',
   'fin.payslip.hoursDelta': 'Δ (actual − plan)',
   'fin.payslip.baseHours': 'Base hours',

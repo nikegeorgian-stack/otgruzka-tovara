@@ -1,3 +1,5 @@
+import { payrollReadiness, payrollReady } from '@/lib/finance/payrollReadiness'
+import { timesheetDraftStorageKey } from '@/lib/timesheetDraftStorage'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HotkeysHelp } from '@/components/help/HotkeysHelp'
 import { Button } from '@/components/ui/Button'
@@ -705,7 +707,7 @@ export function MonthPage({
   }, [allUnitKeys, month, selectedBrigades, selectedUnits, store, store.brigades.length, timesheetScoped])
 
   const sheet = store.months[month]
-  const draftSession = useTimesheetDraftSession(sheet)
+  const draftSession = useTimesheetDraftSession(sheet, timesheetDraftStorageKey(import.meta.env.VITE_FIREBASE_PROJECT_ID || 'desktop', currentUserId || 'local', month), month)
 
   useEffect(() => {
     if (!store.months[month] && onEnsureMonthReady) {
@@ -776,8 +778,7 @@ export function MonthPage({
 
   useEffect(() => {
     clearEditHistory()
-    draftSession.clear()
-  }, [month, clearEditHistory, draftSession.clear])
+  }, [month, clearEditHistory])
 
   const commitDraftToStore = useCallback((): boolean => {
     if (!draftSession.hasChanges) return true
@@ -832,7 +833,7 @@ export function MonthPage({
 
   async function handleMonthChangeGuarded(next: string) {
     if (next === month) return
-    if (effectiveEditing && draftSession.hasChanges) {
+    if (draftSession.hasChanges) {
       const choice = await confirmUnsaved({
         title: t('month.draftReview.title'),
         message: t('month.draftReview.unsavedNavigate'),
@@ -852,10 +853,10 @@ export function MonthPage({
   const handleSetCode = useCallback(
     (rowId: string, dateKey: string, code: DayCode, mode: 'plan' | 'fact') => {
       const before = readCellCode(rowId, dateKey, mode)
-      if (before === code) return
+      if (before === code && !(effectiveEditing && mode === 'fact' && code)) return
       recordEdit({ rowId, dateKey, mode, before, after: code })
       if (effectiveEditing) {
-        draftSession.record(rowId, dateKey, mode, code)
+        draftSession.record(rowId, dateKey, mode, code, mode === 'fact')
         return
       }
       onSetCode(rowId, dateKey, code, mode)
@@ -873,9 +874,9 @@ export function MonthPage({
       if (effectiveEditing) {
         for (const c of cells) {
           const before = readCellCode(c.rowId, c.dateKey, mode)
-          if (before === code) continue
+          if (before === code && !(mode === 'fact' && code)) continue
           recordEdit({ rowId: c.rowId, dateKey: c.dateKey, mode, before, after: code })
-          draftSession.record(c.rowId, c.dateKey, mode, code)
+          draftSession.record(c.rowId, c.dateKey, mode, code, mode === 'fact')
         }
         return
       }
@@ -1072,9 +1073,12 @@ export function MonthPage({
 
   async function handleCloseMonth() {
     if (!onCloseMonth) return
+    if (draftSession.hasChanges) { setNotice(t('month.draftReview.closeBlocked')); setDraftReviewOpen(true); return }
+    const readiness = payrollReadiness(store, month, currentUserId)
+    if (!payrollReady(readiness)) { setNotice(tf('month.closeReadiness', { unconfirmed: readiness.unconfirmed, brigades: readiness.unsignedBrigades.join(', ') || '—', conflicts: readiness.overlaps + readiness.missingEmployees, drafts: readiness.drafts })); return }
     if (!(await confirm({ message: t('month.confirmClose'), danger: true }))) return
     setEditing(false)
-    onCloseMonth()
+    try { onCloseMonth() } catch (error) { setNotice(error instanceof Error ? error.message : t('month.closeNotReady')) }
   }
 
   async function handleReopenMonth() {
@@ -1272,8 +1276,8 @@ export function MonthPage({
       onAddEmployee: onAddEmployeeFromTable,
       onRemoteCellConflict: handleRemoteCellConflict,
       onSetFactHours,
-      canSignoff: allowTimesheetEdit,
-      onSetBrigadeSignoff,
+      canSignoff: allowTimesheetEdit && !draftSession.hasChanges,
+      onSetBrigadeSignoff: draftSession.hasChanges ? undefined : onSetBrigadeSignoff,
       onReorderRow: (brigade: string, rowId: string, beforeRowId: string | null) => {
         onReorderBrigadeRow?.(brigade, rowId, beforeRowId)
       },
@@ -1282,6 +1286,7 @@ export function MonthPage({
     },
     [
       timesheetStore,
+      draftSession.hasChanges,
       activeSheet,
       search,
       selectedBrigades,
@@ -1620,17 +1625,24 @@ export function MonthPage({
         </p>
       ) : null}
 
-      {shell === 'classic' ? (
-        <div className="month-search-bar print:hidden">
+      <div className="month-search-bar print:hidden">
           <input
             className="month-search-bar__input"
             type="search"
             placeholder={t('month.searchEmployee')}
+            aria-label={t('month.searchEmployee')}
+            data-coach="month:employeeSearch"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-      ) : null}
+      {draftSession.hasChanges && (
+        <div className="rounded-sm border border-amber-300 bg-amber-50 p-3 text-sm print:hidden">
+          <p>{t(draftSession.storageError ? 'month.draftReview.storageError' : 'month.draftReview.recovered')}</p>
+          <p className="mt-1 text-xs">{t('month.draftReview.separateActions')}</p>
+          <button type="button" className="mt-2 font-semibold underline" data-coach="month:reviewDraft" onClick={() => { setEditing(true); setDraftReviewOpen(true) }}>{t('month.draftReview.title')}</button>
+        </div>
+      )}
 
       {shell === 'classic' ? (
       <MonthWorkspaceAccordion
@@ -1785,7 +1797,7 @@ export function MonthPage({
           rowSort={rowSort}
           onRowSortChange={handleRowSortChange}
           canSignoff={allowTimesheetEdit}
-          onSetBrigadeSignoff={onSetBrigadeSignoff}
+          onSetBrigadeSignoff={draftSession.hasChanges ? undefined : onSetBrigadeSignoff}
           historyControls={
             <TimesheetHistoryControls
               canUndo={canUndo}

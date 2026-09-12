@@ -97,7 +97,7 @@ export function TimesheetEntryDocModal({
                     <td className="px-2 py-1.5">{r.mode === 'plan' ? 'П' : 'Ф'}</td>
                     <td className="px-2 py-1.5">{r.brigade ?? '—'}</td>
                     <td className="px-2 py-1.5 font-mono">{r.before || '·'}</td>
-                    <td className="px-2 py-1.5 font-mono">{r.after || '·'}</td>
+                    <td className="px-2 py-1.5 font-mono">{r.after || '·'}{r.confirmFact && r.before === r.after && <span className="ml-2 text-xs font-sans">{t(doc.status === 'void' ? 'month.draftReview.confirmationVoided' : 'month.draftReview.confirmFact')}</span>}</td>
                   </tr>
                 ))
               )}

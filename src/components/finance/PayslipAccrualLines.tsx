@@ -69,6 +69,7 @@ export function PayslipAccrualLines({
   compact,
 }: Props) {
   const { t, tf } = useI18n()
+  if (hourDetail.unavailable) return <Line label={t('fin.payslip.legacyDetailsUnavailable')} value={formatGel(grossAccrued)} strong compact={compact} />
   const h = hourDetail
   const rate = h.hourlyRate
   const hoursShort = t('stats.hoursShort')

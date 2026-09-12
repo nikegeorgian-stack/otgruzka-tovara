@@ -236,6 +236,7 @@ function propsEqual(prev: Props, next: Props): boolean {
     prev.planCode === next.planCode &&
     prev.mismatch === next.mismatch &&
     prev.dimmed === next.dimmed &&
+    prev.selected === next.selected &&
     prev.hasComment === next.hasComment &&
     prev.hasSubstitution === next.hasSubstitution &&
     prev.isBrigadier === next.isBrigadier &&

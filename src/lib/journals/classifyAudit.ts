@@ -148,6 +148,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   fact_change: 'Изменение факта',
   plan_change: 'Изменение плана',
   plan_save: 'Сохранение плана',
+  timesheet_signoff: 'Сверка табеля / ტაბელის შემოწმება',
   comment: 'Комментарий',
   substitution: 'Подмена',
   employee_remove: 'Удаление сотрудника',

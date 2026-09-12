@@ -1,3 +1,4 @@
+import { isBrigadeTimesheetVerified } from '@/lib/brigadeSignoff'
 import { useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/context/I18nContext'
 import { employeeName } from '@/i18n'
@@ -71,7 +72,7 @@ export function BrigadeContextBar({
   const canRemoveEmpty = brigadeRowCount > 1 && emptyRowCount > 0
   const assignedCount = rows.filter((r) => r.employeeId).length
   const signoff = sheet.brigadeSignoffs?.[brigade]
-  const verified = signoff?.verified === true
+  const verified = isBrigadeTimesheetVerified(sheet, brigade, store)
 
   const brigadierId = store.brigadiers?.[brigade] ?? ''
   const allowsBrigadier = brigadeAllowsBrigadier(store, brigade)

@@ -86,7 +86,7 @@ export function TimesheetDraftReviewModal({
                       : t('month.deck.layerFact')}
                   </td>
                   <td className="font-mono text-xs">
-                    {(ch.before || '·') + ' → ' + (ch.after || '·')}
+                    {ch.confirmFact && ch.before === ch.after ? `${ch.after} · ${t('month.draftReview.confirmFact')}` : (ch.before || '·') + ' → ' + (ch.after || '·')}
                   </td>
                 </tr>
               ))}

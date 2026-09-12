@@ -4,6 +4,7 @@ import type { PayrollHourDetail } from '@/lib/finance/payrollDetail'
 import { formatGel, formatHourlyRate } from '@/lib/payroll'
 
 function Line({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: string }) {
+
   return (
     <div className="flex items-center justify-between border-b border-dashed border-stone-200 py-1.5 text-[13px]">
       <span className={strong ? 'font-semibold text-ink' : 'text-stone-600'}>{label}</span>
@@ -21,9 +22,12 @@ type Props = {
 export function PayslipHourDetailSection({ hourDetail, brigadierBonus, className }: Props) {
   const { t } = useI18n()
   const b = hourDetail.brigadier
+  const tier = (hours: number, multiplier: number) => hourDetail.mixedRates ? `${hours} ${t('stats.hoursShort')}` : `${hours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * multiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(multiplier)}%)`
+  if (hourDetail.unavailable) return <p className="text-sm text-amber-800">{t('fin.payslip.legacyDetailsUnavailable')}</p>
 
   return (
     <div className={className}>
+      {hourDetail.mixedRates && <p className="text-sm text-amber-800">{t('fin.payslip.mixedRates')}</p>}
       <h3 className="mb-1 text-sm font-bold text-stone-800">{t('fin.payslip.hoursDetail')}</h3>
       <div className="mb-4 rounded-sm border border-stone-200 bg-stone-50/80 p-3">
         <Line
@@ -51,22 +55,23 @@ export function PayslipHourDetailSection({ hourDetail, brigadierBonus, className
         {hourDetail.nightShiftHours > 0 && (
           <Line
             label={t('fin.payslip.nightShiftHours')}
-            value={`${hourDetail.nightShiftHours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * hourDetail.nightMultiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(hourDetail.nightMultiplier)}%)`}
+            value={tier(hourDetail.nightShiftHours, hourDetail.nightMultiplier)}
           />
         )}
         {hourDetail.idleHours > 0 && (
           <Line
             label={t('fin.payslip.idleHours')}
-            value={`${hourDetail.idleHours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * hourDetail.idleMultiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(hourDetail.idleMultiplier)}%)`}
+            value={tier(hourDetail.idleHours, hourDetail.idleMultiplier)}
           />
         )}
-        {hourDetail.monthDeltaOtHours > 0 ? (
+        {hourDetail.monthDeltaOtHours > 0 && (
           <Line
             label={t('fin.payslip.monthDeltaOt')}
-            value={`${hourDetail.monthDeltaOtHours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * hourDetail.otDayMultiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(hourDetail.otDayMultiplier)}%)`}
+            value={`${hourDetail.monthDeltaOtHours} ${t('stats.hoursShort')}`}
             tone="text-amber-800"
           />
-        ) : hourDetail.overtimeHours > 0 ? (
+        )}
+        {hourDetail.overtimeHours > 0 ? (
           <>
             <Line
               label={t('fin.payslip.overtimeHours')}
@@ -76,13 +81,13 @@ export function PayslipHourDetailSection({ hourDetail, brigadierBonus, className
             {hourDetail.otDayHours > 0 && (
               <Line
                 label={t('fin.payslip.otDayHours')}
-                value={`${hourDetail.otDayHours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * hourDetail.otDayMultiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(hourDetail.otDayMultiplier)}%)`}
+                value={tier(hourDetail.otDayHours, hourDetail.otDayMultiplier)}
               />
             )}
             {hourDetail.otNightHours > 0 && (
               <Line
                 label={t('fin.payslip.otNightHours')}
-                value={`${hourDetail.otNightHours} ${t('stats.hoursShort')} · ${formatHourlyRate(hourDetail.hourlyRate * hourDetail.otNightMultiplier)} ₾/${t('stats.hoursShort')} (${multiplierToPercent(hourDetail.otNightMultiplier)}%)`}
+                value={tier(hourDetail.otNightHours, hourDetail.otNightMultiplier)}
               />
             )}
           </>

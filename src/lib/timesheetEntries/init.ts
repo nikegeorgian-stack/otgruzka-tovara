@@ -5,11 +5,9 @@ import type {
   TimesheetEntrySource,
   TimesheetEntryStatus,
   TimesheetEntryStore,
+  TimesheetEntryCellState,
 } from './types'
-import {
-  TIMESHEET_ENTRY_MAX_DOCS,
-  TIMESHEET_ENTRY_VOID_TRIM_MONTHS,
-} from './types'
+import { TIMESHEET_ENTRY_MAX_DOCS, TIMESHEET_ENTRY_VOID_TRIM_MONTHS } from './types'
 import type { DayCode } from '@/lib/types'
 
 const MONTH_RE = /^\d{4}-\d{2}$/
@@ -22,10 +20,7 @@ export function createDefaultTimesheetEntryStore(): TimesheetEntryStore {
   return { documents: [] }
 }
 
-export function nextTimesheetEntryNumber(
-  list: TimesheetEntryDocument[],
-  now = new Date(),
-): string {
+export function nextTimesheetEntryNumber(list: TimesheetEntryDocument[], now = new Date()): string {
   const year = now.getFullYear()
   const prefix = `ВТ-${year}-`
   let max = 0
@@ -42,6 +37,25 @@ function asDayCode(v: unknown): DayCode {
   return (typeof v === 'string' ? v : '') as DayCode
 }
 
+function normalizeCellState(raw: unknown): TimesheetEntryCellState | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const state = raw as Record<string, unknown>
+  if (typeof state.override !== 'boolean') return undefined
+  return {
+    plan: typeof state.plan === 'string' ? asDayCode(state.plan) : undefined,
+    fact: typeof state.fact === 'string' ? asDayCode(state.fact) : undefined,
+    override: state.override,
+    extraHours:
+      typeof state.extraHours === 'number' && Number.isFinite(state.extraHours)
+        ? state.extraHours
+        : undefined,
+    hoursOverride:
+      typeof state.hoursOverride === 'number' && Number.isFinite(state.hoursOverride)
+        ? state.hoursOverride
+        : undefined,
+  }
+}
+
 function normalizeChange(raw: unknown): TimesheetEntryChange | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -55,12 +69,18 @@ function normalizeChange(raw: unknown): TimesheetEntryChange | null {
     mode,
     before: asDayCode(o.before),
     after: asDayCode(o.after),
+    confirmFact: o.confirmFact === true ? true : undefined,
+    expectedEmployeeId:
+      o.expectedEmployeeId === null
+        ? null
+        : typeof o.expectedEmployeeId === 'string'
+          ? o.expectedEmployeeId
+          : undefined,
+    beforeState: normalizeCellState(o.beforeState),
+    afterState: normalizeCellState(o.afterState),
     employeeId:
-      typeof o.employeeId === 'string' && o.employeeId.trim()
-        ? o.employeeId.trim()
-        : undefined,
-    brigade:
-      typeof o.brigade === 'string' && o.brigade.trim() ? o.brigade.trim() : undefined,
+      typeof o.employeeId === 'string' && o.employeeId.trim() ? o.employeeId.trim() : undefined,
+    brigade: typeof o.brigade === 'string' && o.brigade.trim() ? o.brigade.trim() : undefined,
   }
 }
 
@@ -74,9 +94,7 @@ function normalizeApplied(raw: unknown): TimesheetEntryAppliedMark[] | undefined
   return out.length ? out : undefined
 }
 
-export function normalizeTimesheetEntryDocument(
-  raw: unknown,
-): TimesheetEntryDocument | null {
+export function normalizeTimesheetEntryDocument(raw: unknown): TimesheetEntryDocument | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const id = typeof o.id === 'string' && o.id.trim() ? o.id.trim() : null
@@ -114,9 +132,7 @@ export function normalizeTimesheetEntryDocument(
     applied: normalizeApplied(o.applied),
     skipped: typeof o.skipped === 'number' && o.skipped > 0 ? o.skipped : undefined,
     voidDetail:
-      typeof o.voidDetail === 'string' && o.voidDetail.trim()
-        ? o.voidDetail.trim()
-        : undefined,
+      typeof o.voidDetail === 'string' && o.voidDetail.trim() ? o.voidDetail.trim() : undefined,
     createdAt,
     createdBy: typeof o.createdBy === 'string' ? o.createdBy : undefined,
     createdByName: typeof o.createdByName === 'string' ? o.createdByName : undefined,
@@ -144,6 +160,7 @@ export function trimTimesheetEntryDocuments(
   const voidOld = docs.filter(
     (d) =>
       d.status === 'void' &&
+      !d.applied?.some((m) => m.beforeState && m.afterState) &&
       monthAgeMonths(d.month, now) > TIMESHEET_ENTRY_VOID_TRIM_MONTHS,
   )
   const voidOldIds = new Set(voidOld.map((d) => d.id))
@@ -151,7 +168,7 @@ export function trimTimesheetEntryDocuments(
   if (next.length <= TIMESHEET_ENTRY_MAX_DOCS) return next
 
   const voidRest = next
-    .filter((d) => d.status === 'void')
+    .filter((d) => d.status === 'void' && !d.applied?.some((m) => m.beforeState && m.afterState))
     .sort((a, b) => (a.voidedAt ?? a.createdAt).localeCompare(b.voidedAt ?? b.createdAt))
   const drop = next.length - TIMESHEET_ENTRY_MAX_DOCS
   const dropIds = new Set(voidRest.slice(0, Math.max(0, drop)).map((d) => d.id))

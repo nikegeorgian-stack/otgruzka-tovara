@@ -1,3 +1,4 @@
+import { preserveTimesheetEntryVoids } from '@/lib/timesheetEntries/mergeVoids'
 import type { AppStore, AuditEntry, DayCode, Employee, MonthSheet, TimesheetRow } from '@/lib/types'
 import type { AppUser } from '@/lib/access/types'
 import { MAX_AUDIT_ENTRIES } from '@/lib/types'
@@ -777,6 +778,7 @@ function mergeFinanceStore(
       onConflict,
     ),
     snapshots: mergeRecords(b.snapshots, r.snapshots, l.snapshots, onConflict),
+    snapshotHistory: mergeRecords(b.snapshotHistory ?? {}, r.snapshotHistory ?? {}, l.snapshotHistory ?? {}, onConflict),
   }
 }
 
@@ -1479,5 +1481,6 @@ export function mergeCloudStores(
     version: 6,
   }
 
+  preserveTimesheetEntryVoids(store, remote, local)
   return { store, conflictCount }
 }
