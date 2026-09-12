@@ -119,9 +119,40 @@ describe('assertBrigadesNotWiped', () => {
     expect(() => assertBrigadesNotWiped(remote, {} as AppStore)).toThrow(/cloud_refuse_brigades_wipe/)
   })
 
-  it('allows explicit empty array (intentional delete of last brigade)', () => {
+  it('refuses missing→[] without delete audits (incomplete load normalized to empty)', () => {
     expect(() =>
-      assertBrigadesNotWiped({ brigades: ['A'] } as AppStore, { brigades: [] } as AppStore),
+      assertBrigadesNotWiped(
+        { brigades: ['A', 'B'] } as AppStore,
+        { brigades: [], auditLog: [] } as AppStore,
+      ),
+    ).toThrow(/cloud_refuse_brigades_wipe/)
+  })
+
+  it('allows intentional shrink when directory_change delete audits cover removed names', () => {
+    expect(() =>
+      assertBrigadesNotWiped(
+        { brigades: ['A', 'B'] } as AppStore,
+        {
+          brigades: ['A'],
+          auditLog: [
+            { id: '1', at: 't', action: 'directory_change', detail: 'Бригада удалена: B' },
+          ],
+        } as AppStore,
+      ),
+    ).not.toThrow()
+  })
+
+  it('allows empty only with delete audits for every remote brigade', () => {
+    expect(() =>
+      assertBrigadesNotWiped(
+        { brigades: ['A'] } as AppStore,
+        {
+          brigades: [],
+          auditLog: [
+            { id: '1', at: 't', action: 'directory_change', detail: 'Бригада удалена: A' },
+          ],
+        } as AppStore,
+      ),
     ).not.toThrow()
   })
 

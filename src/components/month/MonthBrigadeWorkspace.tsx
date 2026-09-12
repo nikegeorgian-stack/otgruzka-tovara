@@ -589,6 +589,34 @@ export function MonthBrigadeWorkspace({
               workspaceView === 'kanban' && boardExpanded ? ' bw-table-area--board-focus' : ''
             }`}
           >
+            {workspaceView === 'kanban' && boardExpanded ? (
+              <div className="bw-chrome print:hidden border-b border-grid px-2 py-1">
+                <BrigadeContextBar
+                  store={store}
+                  sheet={sheet}
+                  brigade={boardExpanded}
+                  mismatchCount={brigadeMismatchCount(store, sheet, boardExpanded)}
+                  readOnly={readOnly}
+                  readOnlyHint={readOnlyHint}
+                  shiftTemplates={shiftTemplates}
+                  onSetBrigadier={tableCore.onSetBrigadier!}
+                  onFillBrigade={tableCore.onFillBrigade!}
+                  onAddRow={tableCore.onAddRow!}
+                  onRemoveEmptyRow={tableCore.onRemoveEmptyRow!}
+                  onBulkHolidayV={onBulkHolidayV}
+                  onBulkCopyPlanToFact={onBulkCopyPlanToFact}
+                  onBulkCopyPlanToFactEmpty={onBulkCopyPlanToFactEmpty}
+                  onApplyShiftTemplate={onApplyShiftTemplate}
+                  onManageBrigades={onManageBrigades}
+                  onOpenPlanEditor={onOpenPlanEditor}
+                  onFillDay={() => onFillDay([boardExpanded])}
+                  hideManageBrigades={workshopMasterMode || lockBrigadeScope}
+                  compact
+                  canSignoff={canSignoff}
+                  onSetBrigadeSignoff={onSetBrigadeSignoff}
+                />
+              </div>
+            ) : null}
             {workspaceView === 'kanban' ? (
               <MonthBrigadeBoard
                 store={store}

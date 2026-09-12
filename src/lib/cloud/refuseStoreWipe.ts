@@ -205,14 +205,23 @@ export function assertNoMassStoreWipe(
   assertBrigadesNotWiped(remote, merged)
 }
 
+/** Audit detail from `removeBrigade` / `directory_change`. */
+export function isBrigadeDeletedAudit(
+  detail: string | undefined,
+  brigadeName: string,
+): boolean {
+  return typeof detail === 'string' && detail.includes(`Бригада удалена: ${brigadeName}`)
+}
+
 /**
  * Нельзя сохранить отсутствующий/незагруженный список бригад поверх непустого remote.
- * - `brigades` missing/null/undefined → неполная загрузка → refuse (UI getBrigades()→[] must not become a wipe).
- * - `brigades: []` → явное удаление последней бригады → разрешено.
+ * - `brigades` missing/null/undefined → неполная загрузка → refuse.
+ * - `getBrigades()`/`?? []` → `[]` без аудита удаления → refuse (incomplete load must not wipe).
+ * - Сокращение / `[]` разрешено только если для каждой исчезнувшей бригады есть
+ *   `directory_change` с `Бригада удалена: {name}` (механизм `removeBrigade`).
  *
- * Защищённые пути: `assertNoMassStoreWipe` (SQL Connect / Firestore cloud save) и
- * `saveToLocalDb(store, previous)` (локальный SQLite). localStorage-персистенция
- * этим assert'ом не покрыта — там нужна отдельная проверка при сохранении.
+ * Защищённые пути: `assertNoMassStoreWipe` (SQL Connect / Firestore) и
+ * `saveToLocalDb(store, previous)` (локальный SQLite); также `saveStore` (localStorage).
  */
 export function assertBrigadesNotWiped(
   remote: AppStore | null | undefined,
@@ -225,7 +234,21 @@ export function assertBrigadesNotWiped(
       `cloud_refuse_brigades_wipe:remote=${remoteBrigades.length}:merged=missing`,
     )
   }
-  // Explicit empty array is intentional deletion of the last brigade(s).
+  const kept = new Set(merged.brigades)
+  const removed = remoteBrigades.filter((name) => !kept.has(name))
+  if (removed.length === 0) return
+  const audits = merged.auditLog ?? []
+  const intentional = removed.every((name) =>
+    audits.some(
+      (a) =>
+        a.action === 'directory_change' && isBrigadeDeletedAudit(a.detail, name),
+    ),
+  )
+  if (!intentional) {
+    throw new Error(
+      `cloud_refuse_brigades_wipe:remote=${remoteBrigades.length}:merged=${merged.brigades.length}`,
+    )
+  }
 }
 
 const WIPE_HINTS: Array<{ code: string; sql: string; firestore: string }> = [
