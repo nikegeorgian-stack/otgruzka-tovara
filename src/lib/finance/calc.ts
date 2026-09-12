@@ -18,7 +18,7 @@ import { documentNumberForPayout } from './payoutDocuments'
 import { employeeAcceptedMealDeduction } from '../meals/calc'
 import { roundMoney } from './money'
 import { frozenStatementRow, payrollEmployeeSnapshot } from './frozenPayroll'
-import { aggregateEmployeeStatementRows, financeOwnerRows } from './statementAggregate'
+import { aggregateEmployeeStatementRows, financeOwnerRows, reconcileMultiRowEmployeeTetri } from './statementAggregate'
 import type {
   FinanceAdjustment,
   FinanceAdvance,
@@ -183,6 +183,13 @@ export type StatementRow = {
   factHours: number
   rateLabel: string
   breakdown: PayBreakdown
+  /**
+   * Pre-tetri accrued (row). Used only for live multi-row employee aggregation;
+   * frozen snapshots omit this and keep historical tetri rows as stored.
+   */
+  accruedExact?: number
+  /** Pre-tetri breakdown for aggregation. */
+  breakdownExact?: PayBreakdown
   /** Начислено (gross). */
   accrued: number
   bonus: number
@@ -319,7 +326,9 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
       factHours,
       rateLabel: pay.rateLabel,
       breakdown: pay.breakdown,
+      breakdownExact: pay.breakdownExact,
       accrued,
+      accruedExact: pay.amountExact,
       bonus,
       autoBonus: bonusParts.auto,
       productivityBonus: bonusParts.productivity,
@@ -339,7 +348,7 @@ export function monthStatement(store: AppStore, month: string, asOfDate?: string
       hourDetail,
     })
   }
-  return rows
+  return reconcileMultiRowEmployeeTetri(rows)
 }
 
 /** Строка ведомости для одного сотрудника (предварительный или зафиксированный расчёт). */

@@ -202,6 +202,30 @@ export function assertNoMassStoreWipe(
     5,
     'cloud_refuse_timesheet_entries_wipe',
   )
+  assertBrigadesNotWiped(remote, merged)
+}
+
+/**
+ * Нельзя сохранить отсутствующий/незагруженный список бригад поверх непустого remote.
+ * - `brigades` missing/null/undefined → неполная загрузка → refuse (UI getBrigades()→[] must not become a wipe).
+ * - `brigades: []` → явное удаление последней бригады → разрешено.
+ *
+ * Защищённые пути: `assertNoMassStoreWipe` (SQL Connect / Firestore cloud save) и
+ * `saveToLocalDb(store, previous)` (локальный SQLite). localStorage-персистенция
+ * этим assert'ом не покрыта — там нужна отдельная проверка при сохранении.
+ */
+export function assertBrigadesNotWiped(
+  remote: AppStore | null | undefined,
+  merged: AppStore,
+): void {
+  const remoteBrigades = Array.isArray(remote?.brigades) ? remote!.brigades : null
+  if (!remoteBrigades || remoteBrigades.length === 0) return
+  if (!Array.isArray(merged.brigades)) {
+    throw new Error(
+      `cloud_refuse_brigades_wipe:remote=${remoteBrigades.length}:merged=missing`,
+    )
+  }
+  // Explicit empty array is intentional deletion of the last brigade(s).
 }
 
 const WIPE_HINTS: Array<{ code: string; sql: string; firestore: string }> = [
@@ -270,6 +294,12 @@ const WIPE_HINTS: Array<{ code: string; sql: string; firestore: string }> = [
     sql: 'Сохранение отклонено: в браузере пропали настройки разделов ролей относительно SQL. Обновите страницу (Ctrl+F5).',
     firestore:
       'Сохранение отклонено: в браузере пропали настройки разделов ролей относительно облака. Обновите страницу (Ctrl+F5).',
+  },
+  {
+    code: 'cloud_refuse_brigades_wipe',
+    sql: 'Сохранение отклонено: пустой список бригад поверх непустого SQL (защита от wipe). Обновите страницу (Ctrl+F5).',
+    firestore:
+      'Сохранение отклонено: пустой список бригад поверх непустого облака (защита от wipe). Обновите страницу (Ctrl+F5).',
   },
 ]
 

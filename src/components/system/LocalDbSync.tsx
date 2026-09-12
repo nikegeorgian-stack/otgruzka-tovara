@@ -10,6 +10,7 @@ import {
   seedStoreForLocalDb,
 } from '@/lib/localDb/client'
 import { postStoreSaved, subscribeStoreSaved } from '@/lib/persistence/broadcast'
+import { needsAdminSetup } from '@/lib/access/init'
 import type { AppStore } from '@/lib/types'
 import type { SaveStoreResult } from '@/lib/storage'
 
@@ -54,11 +55,14 @@ export function LocalDbSync({ store, replaceStore, onSaveError }: Props) {
     setReloadKey((k) => k + 1)
   }, [])
 
+  const lastSavedStore = useRef<AppStore | null>(null)
+
   const persistStore = useCallback(async () => {
     if (skipSave.current || saving.current) return
     saving.current = true
     try {
-      const updatedAt = await saveToLocalDb(storeRef.current)
+      const updatedAt = await saveToLocalDb(storeRef.current, lastSavedStore.current)
+      lastSavedStore.current = storeRef.current
       lastSavedAt.current = updatedAt
       lastRemoteAt.current = updatedAt
       dirty.current = false
@@ -68,10 +72,14 @@ export function LocalDbSync({ store, replaceStore, onSaveError }: Props) {
       onSaveError(null)
     } catch (err) {
       console.error('Local DB save failed', err)
+      const wipeMsg =
+        err instanceof Error && err.message.includes('cloud_refuse_brigades_wipe')
+          ? 'Сохранение отклонено: пустой список бригад поверх уже сохранённых (защита от wipe).'
+          : localDbErrorMessage(err, 'Ошибка сохранения в SQLite.')
       onSaveError({
         ok: false,
         error: 'unknown',
-        message: localDbErrorMessage(err, 'Ошибка сохранения в SQLite.'),
+        message: wipeMsg,
       })
     } finally {
       saving.current = false
@@ -89,13 +97,22 @@ export function LocalDbSync({ store, replaceStore, onSaveError }: Props) {
 
         if (loaded) {
           replaceStore(loaded.store)
+          lastSavedStore.current = loaded.store
           lastRemoteAt.current = loaded.updatedAt
           lastSavedAt.current = loaded.updatedAt
           setLastSavedLabel(formatSavedAt(loaded.updatedAt))
         } else {
+          // Empty SQLite: do not clobber an in-progress or completed admin setup
+          // that already happened while the first load was in flight.
+          const current = storeRef.current
           const seed = seedStoreForLocalDb()
-          replaceStore(seed)
-          const updatedAt = await saveToLocalDb(seed)
+          const initial =
+            !needsAdminSetup(current.access) && current.access?.users?.length
+              ? current
+              : seed
+          if (initial === seed) replaceStore(seed)
+          const updatedAt = await saveToLocalDb(initial, null)
+          lastSavedStore.current = initial
           lastRemoteAt.current = updatedAt
           lastSavedAt.current = updatedAt
           setLastSavedLabel(formatSavedAt(updatedAt))

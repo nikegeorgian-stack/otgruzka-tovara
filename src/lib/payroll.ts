@@ -53,10 +53,17 @@ export type PayRowResult = {
   factHours: number
   planHours: number
   amount: number
+  /**
+   * Unrounded sum of pay components (before tetri rounding).
+   * Used when aggregating multi-row employees so 8h+8h matches one 16h row.
+   */
+  amountExact: number
   rateLabel: string
   /** Почасовая ставка месяца (оклад ÷ норма графика). */
   hourlyRate: number
   breakdown: PayBreakdown
+  /** Component amounts before tetri rounding. */
+  breakdownExact: PayBreakdown
 }
 
 export type PayCalcOptions = {
@@ -232,6 +239,14 @@ export function calculateRowPay(
   bd.nightLineBonus = nightLine.amount
 
   const rounded = roundBreakdown(bd)
+  const amountExact =
+    bd.base +
+    bd.night +
+    bd.overtime +
+    bd.idle +
+    bd.vacation +
+    bd.sick +
+    bd.nightLineBonus
   const amount =
     rounded.base +
     rounded.night +
@@ -245,9 +260,11 @@ export function calculateRowPay(
     factHours: rs.factHours,
     planHours: rs.planHours,
     amount: roundMoney(amount),
+    amountExact,
     rateLabel,
     hourlyRate: rate,
     breakdown: rounded,
+    breakdownExact: { ...bd },
   }
 }
 

@@ -715,6 +715,20 @@ function mergeTimesheetEntryDocuments(
   type Doc = NonNullable<AppStore['timesheetEntries']>['documents'][number]
   const stamp = (d: Doc) =>
     safeIso(d.voidedAt) || safeIso(d.postedAt) || safeIso(d.createdAt)
+  const prefer = (prev: Doc, next: Doc): Doc => {
+    if (eq(prev, next)) return prev
+    onConflict()
+    // Same posted generation: a void must beat a stale still-posted replica even if
+    // voidedAt was clock-skewed earlier than postedAt (Date mocks / client skew).
+    if (prev.status !== next.status) {
+      const voided = prev.status === 'void' ? prev : next.status === 'void' ? next : null
+      const posted = prev.status === 'posted' ? prev : next.status === 'posted' ? next : null
+      if (voided && posted && safeIso(voided.postedAt) === safeIso(posted.postedAt)) {
+        return voided
+      }
+    }
+    return stamp(next) >= stamp(prev) ? next : prev
+  }
   const byId = new Map<string, Doc>()
   for (const list of [base, remote, local]) {
     for (const d of list) {
@@ -724,9 +738,7 @@ function mergeTimesheetEntryDocuments(
         byId.set(d.id, d)
         continue
       }
-      if (eq(prev, d)) continue
-      onConflict()
-      byId.set(d.id, stamp(d) >= stamp(prev) ? d : prev)
+      byId.set(d.id, prefer(prev, d))
     }
   }
   return [...byId.values()].sort((a, b) => stamp(b).localeCompare(stamp(a)))

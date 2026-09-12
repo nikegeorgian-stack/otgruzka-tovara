@@ -509,6 +509,9 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
           months: { ...base.months, [month]: sheet },
         }
 
+        // Allocate doc id before cell audits so merge void-restore can ignore this
+        // document's own confirm audits even if clocks skew vs a later voidedAt.
+        const docId = crypto.randomUUID()
         for (const mark of batch.applied) {
           const row = sheet.rows.find((r) => r.id === mark.rowId)
           next = auditCellChange(next, {
@@ -521,6 +524,7 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
             factConfirmed: mark.mode === 'fact' ? mark.afterState?.override : undefined,
             oldCode: mark.before,
             newCode: mark.after,
+            timesheetEntryId: docId,
             ...cellAuditFields(s, row?.brigade ?? mark.brigade, month),
           })
           if (mark.mode === 'fact') {
@@ -543,7 +547,6 @@ export function createTimesheetSlice({ setStore, getStore, getActor }: StoreSlic
         )
         const af = actorFields()
         const now = new Date().toISOString()
-        const docId = crypto.randomUUID()
         const number = nextTimesheetEntryNumber(te.documents)
         const doc = {
           id: docId,

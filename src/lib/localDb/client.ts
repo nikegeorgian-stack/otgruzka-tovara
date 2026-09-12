@@ -1,6 +1,7 @@
 import { LOCAL_DB_API } from './config'
 import { createDefaultStore, parseStorePayload } from '@/lib/storage'
 import { purgeExpiredTrash } from '@/lib/trash'
+import { assertBrigadesNotWiped } from '@/lib/cloud/refuseStoreWipe'
 import type { AppStore } from '@/lib/types'
 
 function localDbHeaders(extra?: HeadersInit): HeadersInit {
@@ -41,7 +42,10 @@ export async function loadFromLocalDb(): Promise<LocalDbLoadResult | null> {
   }
 }
 
-export async function saveToLocalDb(store: AppStore): Promise<string> {
+export async function saveToLocalDb(store: AppStore, previous?: AppStore | null): Promise<string> {
+  if (previous) {
+    assertBrigadesNotWiped(previous, store)
+  }
   const res = await fetch(`${LOCAL_DB_API}/store`, {
     method: 'PUT',
     headers: localDbHeaders({ 'Content-Type': 'application/json' }),

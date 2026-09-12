@@ -374,7 +374,9 @@ describe('S6 dual-row advance/bonus/payout once (isolated)', () => {
     expect(row!.paid).toBe(FIXTURE.ops.payout)
     const dual = monthStatement(store, month).filter((r) => r.employeeId === b.id)
     expect(dual.length).toBe(2)
+    // Display rows reconcile to the same once-rounded employee total.
     expect(roundMoney(dual.reduce((s, r) => s + r.accrued, 0))).toBe(row!.accrued)
+    expect(row!.accrued).toBe(167.27)
   })
 })
 

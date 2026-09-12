@@ -83,6 +83,7 @@ import { normalizeCandidate } from './hr/candidates'
 import type { AppStore, Candidate, Employee, HrPosition, HrStructuralUnit, MonthSheet } from './types'
 import { ensureOrgStructureSeed } from './hr/orgStructure'
 import { STORAGE_KEY } from './types'
+import { assertBrigadesNotWiped } from './cloud/refuseStoreWipe'
 
 function normalizeCandidates(raw: unknown): Candidate[] {
   if (!Array.isArray(raw)) return []
@@ -701,9 +702,27 @@ export function saveStore(store: AppStore): SaveStoreResult {
     return { ok: true }
   }
   try {
+    // Guard incomplete brigades load on the localStorage path (not covered by saveToLocalDb).
+    try {
+      const prevRaw = localStorage.getItem(STORAGE_KEY)
+      if (prevRaw) {
+        const prev = JSON.parse(prevRaw) as AppStore
+        assertBrigadesNotWiped(prev, store)
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('cloud_refuse_brigades_wipe')) throw e
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
     return { ok: true }
   } catch (e) {
+    if (e instanceof Error && e.message.startsWith('cloud_refuse_brigades_wipe')) {
+      return {
+        ok: false,
+        error: 'unknown',
+        message:
+          'Сохранение отклонено: список бригад не загружен (защита от затирания). Обновите страницу.',
+      }
+    }
     const isQuota =
       e instanceof DOMException &&
       (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)

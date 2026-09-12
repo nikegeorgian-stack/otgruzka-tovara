@@ -210,6 +210,8 @@ describe('cloud merge of intentional voids', () => {
       f.store.auditLog.find((a) => a.action === 'fact_change')!.at >
         f.store.timesheetEntries!.documents[0].voidedAt!,
     ).toBe(true)
+    const restored = timesheetCellState(f.store.months[month], 'r', date)
+    expect(restored.override).toBe(false)
     for (const [remote, local] of [
       [posted, f.store],
       [f.store, posted],
@@ -217,6 +219,7 @@ describe('cloud merge of intentional voids', () => {
       const merged = mergeCloudStores(posted, remote, local).store
       expect(merged.months[month].factOverrides).not.toContain(key)
       expect(merged.timesheetEntries!.documents[0].status).toBe('void')
+      expect(timesheetCellState(merged.months[month], 'r', date)).toEqual(restored)
     }
   })
   it('retains ordinary anti-wipe and later edits', () => {

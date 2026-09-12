@@ -37,14 +37,22 @@ export function preserveTimesheetEntryVoids(
           other.month === doc.month &&
           other.applied?.some((m) => m.rowId === first.rowId && m.dateKey === first.dateKey),
       )
-      const laterAudit = merged.auditLog.some(
-        (a) =>
-          a.month === doc.month &&
-          a.rowId === first.rowId &&
-          a.dateKey === first.dateKey &&
-          a.at > doc.voidedAt! &&
-          a.timesheetEntryId !== doc.id,
-      )
+      const laterAudit = merged.auditLog.some((a) => {
+        if (a.month !== doc.month || a.rowId !== first.rowId || a.dateKey !== first.dateKey) {
+          return false
+        }
+        if (!(a.at > doc.voidedAt!)) return false
+        if (a.timesheetEntryId === doc.id) return false
+        // Other tagged document → real later edit.
+        if (a.timesheetEntryId != null) return true
+        // Legacy / clock-skew: ignore confirm↔void mirrors of this same applied cell.
+        const mirrorsThisCell =
+          (a.oldValue === last.after && a.newValue === last.before) ||
+          (a.oldValue === first.before && a.newValue === last.after) ||
+          (a.oldValue === (last.after || '·') && a.newValue === (last.before || '·')) ||
+          (a.oldValue === (first.before || '·') && a.newValue === (last.after || '·'))
+        return !mirrorsThisCell
+      })
       if (laterDocument || laterAudit) continue
       const matchesIdentity = (s: MonthSheet) =>
         s.rows.some((row) => row.id === first.rowId && row.employeeId === first.expectedEmployeeId)
