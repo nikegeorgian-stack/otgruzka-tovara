@@ -23,6 +23,8 @@ export default {
       'tests/holidaySchedules.test.ts',
       'tests/nightShiftDocument.test.ts',
       'tests/cloudMerge.employeeTrash.test.ts',
+      'tests/brigadesUndefinedGuard.test.ts',
+      'tests/s1s8IsolatedFixture.test.ts',
     ],
   },
 }

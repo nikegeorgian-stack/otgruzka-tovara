@@ -53,12 +53,13 @@ export function mergeBrigadeIntoSheet(
 
 /** Убедиться, что у каждого месяца есть строки для всех бригад из справочника. */
 export function syncAllBrigadesIntoMonths(store: AppStore): AppStore {
-  if (!store.brigades.length) return store
+  const brigades = Array.isArray(store.brigades) ? store.brigades : []
+  if (!brigades.length) return store
   let changed = false
   const months: AppStore['months'] = { ...store.months }
   for (const [key, sheet] of Object.entries(store.months)) {
     let next = sheet
-    for (const brigade of store.brigades) {
+    for (const brigade of brigades) {
       const merged = mergeBrigadeIntoSheet(next, brigade, store.employees)
       if (merged !== next) {
         next = merged
@@ -125,10 +126,11 @@ export function renameBrigadeInStore(
 }
 
 export function removeBrigadeFromStore(store: AppStore, name: string): AppStore {
-  if (!store.brigades.includes(name)) throw new Error('missing')
-  if (store.brigades.length <= 1) throw new Error('last')
+  const current = Array.isArray(store.brigades) ? store.brigades : []
+  if (!current.includes(name)) throw new Error('missing')
+  if (current.length <= 1) throw new Error('last')
 
-  const brigades = store.brigades.filter((b) => b !== name)
+  const brigades = current.filter((b) => b !== name)
   const employees = store.employees.map((e) =>
     e.brigade === name ? { ...e, brigade: '' } : e,
   )

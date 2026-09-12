@@ -697,14 +697,15 @@ export function MonthPage({
     const filter: MonthStatsFilter = {
       confirmForEmployee: (employeeId) => absenceConfirmForEmployee(store, employeeId, month),
     }
-    if (timesheetScoped || selectedBrigades.size < store.brigades.length) {
+    const brigadeCount = Array.isArray(store.brigades) ? store.brigades.length : 0
+    if (timesheetScoped || selectedBrigades.size < brigadeCount) {
       filter.brigades = [...selectedBrigades]
     }
     if (structuralUnitFilterActive(selectedUnits, allUnitKeys)) {
       filter.structuralUnitIds = [...selectedUnits]
     }
     return filter
-  }, [allUnitKeys, month, selectedBrigades, selectedUnits, store, store.brigades.length, timesheetScoped])
+  }, [allUnitKeys, month, selectedBrigades, selectedUnits, store, timesheetScoped])
 
   const sheet = store.months[month]
   const draftSession = useTimesheetDraftSession(sheet, timesheetDraftStorageKey(import.meta.env.VITE_FIREBASE_PROJECT_ID || 'desktop', currentUserId || 'local', month), month)

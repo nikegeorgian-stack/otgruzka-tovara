@@ -1,0 +1,41 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`S7 day/night OT tetri (isolated) > recalculates expected amounts for this fixture set 1`] = `
+{
+  "coeffs": {
+    "dayOtFlat": 1.1,
+    "nightOtFlat": 1.35,
+    "nightPremium": 1.25,
+    "otTier1": 1.1,
+    "otTier2": 1.15,
+    "otTier3": 1.2,
+  },
+  "dayOt": {
+    "base": 83.64,
+    "ot110": 23,
+    "ot115": 0,
+    "overtime": 23,
+    "total": 106.64,
+  },
+  "night": {
+    "night": 143.75,
+    "ot120": 14.11,
+    "overtime": 14.11,
+    "total": 157.86,
+  },
+  "norm": 176,
+  "ops": {
+    "advance": 100,
+    "bonus": 50,
+    "payout": 30,
+  },
+  "rateExact": 10.454545454545455,
+  "rateRounded": 10.45,
+  "threeDays8": {
+    "base": 250.91,
+    "night": 0,
+    "overtime": 0,
+    "total": 250.91,
+  },
+}
+`;

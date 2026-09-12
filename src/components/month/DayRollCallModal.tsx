@@ -236,7 +236,7 @@ export function DayRollCallModal({
   }, [groups])
 
   const dateLabel = `${String(day).padStart(2, '0')}.${String(mo).padStart(2, '0')}.${year}`
-  const allBrigadesOn = visibleBrigades.size >= store.brigades.length
+  const allBrigadesOn = visibleBrigades.size >= (Array.isArray(store.brigades) ? store.brigades.length : 0)
   const primaryOnlyOn =
     primarySet.size > 0 &&
     visibleBrigades.size === primarySet.size &&

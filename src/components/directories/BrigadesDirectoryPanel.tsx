@@ -178,7 +178,7 @@ export function BrigadesDirectoryPanel({
             </select>
           ) : null}
           <span className="text-xs text-stone-400">
-            {visibleBrigades.length}/{store.brigades.length}
+            {visibleBrigades.length}/{Array.isArray(store.brigades) ? store.brigades.length : 0}
           </span>
         </div>
         <ul className="space-y-2">
@@ -289,7 +289,7 @@ export function BrigadesDirectoryPanel({
                     type="button"
                     className="rounded-sm border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                     onClick={() => handleRemoveBrigade(name)}
-                    disabled={store.brigades.length <= 1}
+                    disabled={(Array.isArray(store.brigades) ? store.brigades.length : 0) <= 1}
                   >
                     {t('common.delete')}
                   </button>

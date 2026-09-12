@@ -47,7 +47,9 @@ export function BrigadeTransferModal({
     return Math.min(15, maxDay)
   })()
   const [employeeId, setEmployeeId] = useState<string | null>(null)
-  const [toBrigade, setToBrigade] = useState(store.brigades[0] ?? '')
+  const [toBrigade, setToBrigade] = useState(
+    (Array.isArray(store.brigades) ? store.brigades[0] : undefined) ?? '',
+  )
   const [day, setDay] = useState(defaultDay)
   const [schedule, setSchedule] = useState<ScheduleType>('5/2 8ч')
   const [shiftHours, setShiftHours] = useState<number | ''>('')

@@ -260,7 +260,8 @@ export function MonthBrigadeWorkspace({
     const filter: MonthStatsFilter = {
       confirmForEmployee: (employeeId) => absenceConfirmForEmployee(store, employeeId, sheet.month),
     }
-    if (lockBrigadeScope || selectedBrigades.size < store.brigades.length) {
+    const brigadeCount = Array.isArray(store.brigades) ? store.brigades.length : 0
+    if (lockBrigadeScope || selectedBrigades.size < brigadeCount) {
       filter.brigades = [...selectedBrigades]
     }
     return filter
